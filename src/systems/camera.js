@@ -568,11 +568,14 @@ export function create(ctx) {
       if (inp.pressed.has('KeyQ')) turn(+STEP);
       if (inp.pressed.has('KeyE') && !busyE) turn(-STEP);
       if (inp.wheel) { p.distance = clamp(p.distance + inp.wheel * 0.035, p.minDist, p.maxDist); }
-      if (inp.pointer.down && inp.pointer.dragDX) {
+      // Drag orbits while ANY button is held: left sets pointer.down, right/middle
+      // set pointer.orbit (input contract v3, CAMERA_SPEC §6.2); touch writes either.
+      const orbiting = inp.pointer.down || inp.pointer.orbit;
+      if (orbiting && inp.pointer.dragDX) {
         if (mode === 2) { followOff = clamp(followOff - inp.pointer.dragDX * 0.006, -Math.PI, Math.PI); followOffT = 0; }
         else { p.azimuth -= inp.pointer.dragDX * 0.006; azFrom = azTo = p.azimuth; azT = 1; }
       }
-      if (inp.pointer.down && inp.pointer.dragDY) p.elevation = clamp(p.elevation - inp.pointer.dragDY * 0.004, p.minElev, p.maxElev);
+      if (orbiting && inp.pointer.dragDY) p.elevation = clamp(p.elevation - inp.pointer.dragDY * 0.004, p.minElev, p.maxElev);
 
       const sp = ctx.state.playerSpeed || 0;
       // town core? (eases the pitch down and the aim point up — see ZONES)

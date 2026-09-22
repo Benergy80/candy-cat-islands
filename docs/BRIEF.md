@@ -46,11 +46,11 @@ you leaving.
   - `ctx.systems.story.set(flag, v)`, `.get(flag)`, `.once(flag, fn)`
   - `ctx.systems.particles.burst({x,y,z,count,color|[colors],speed,life,size,gravity,spread})`, `.emitter({...,rate,follow?})` → `{stop()}`
   - `ctx.systems.player.position` (Vector3), `.velocity`, `.facing`, `.teleport(x,z)`, `.locked` (set true to freeze input), `.onFerry`
-  - `ctx.systems.camera.params` ({azimuth, elevation, distance, fov}), `.basis()`, `.snap()`, `.setFree(v|null)`
+  - `ctx.systems.camera.params` ({azimuth, elevation, distance, fov}), `.basis()`, `.snap()`, `.setFree(v|null)`, `.setMode(n)`, `.looking`, `.recentre()`, `.controlAzimuth` (see docs/CAMERA_SPEC.md)
 - Debug API in the browser: `window.game` (`setTime(h)`, `teleport(x,z)`, `step(n)`, `walk({x,y},n)`, `press('KeyE')`, `stats()`, `state()`).
 
 ## Art direction rules (everyone)
-1. **Silhouette first.** Every object must read at the game camera distance (~46 units, FOV 30). Big simple masses, exaggerated proportions, rounded/chunky. No thin sticks that alias.
+1. **Silhouette first.** Every object must read at the game camera distance (31 units, FOV 30; follow mode 22 u, FOV 42). Big simple masses, exaggerated proportions, rounded/chunky. No thin sticks that alias.
 2. **Colour hierarchy.** Ground = quiet mid-tones; props = saturated; landmarks = the most saturated + biggest; paths clearly darker/lighter than ground. Use `palette.js`. Max ~5 hues per scene cluster; repeat them.
 3. **Materials:** `MeshStandardMaterial` via `util.mat()` (roughness .55–.9, metalness 0). `flatShading:true` welcome on organic shapes. Vertex colours welcome. Procedural `CanvasTexture` allowed (small, e.g. 128–512px, `NearestFilter` for pixel-crisp stripes). Emissive for glowing bits. No `MeshBasicMaterial` on lit geometry.
 4. **Shadows:** `castShadow`/`receiveShadow` on props (use `util.shadows`). InstancedMesh casts too.
@@ -68,11 +68,11 @@ you leaving.
 - Don't stall: if a shared API is missing, work around it locally and note it in the report.
 
 ## WAVE 2 — new features (added 2026-09-12 by Ben; these are requirements, not suggestions)
-**Input contract v2 (everyone honours this; supersedes anything else):** WASD move · Shift run · Q/E turn iso camera · wheel zoom ·
+**Input contract v3 (everyone honours this; supersedes anything else; camera details in docs/CAMERA_SPEC.md):** WASD move · Shift run · Q/E turn camera · wheel zoom · **right/middle-drag = orbit (never uses the item; no context menu)** · **V (hold) = look around: the visitor stands still, WASD pans, mouse orbits, release returns · V (tap) = recentre behind the visitor** ·
 **E / Enter = interact / open doors** · **Space = jump; Space again in the air = double jump with a flip** · **C (hold) = duck; C while running = slide;
 C while airborne = STOMP (slam down, AOE knockback + dust)** · **R = dodge roll in the movement direction (i-frames, 0.6 s)** ·
 **Left-click or X = use held item (attack / spray / fire / place salt / paddle / flap)** · **F = cycle held item** · **1 / 2 / 3 = camera mode**
-(1 iso with Q/E turns, 2 FOLLOW: azimuth tracks the player's facing, 3 overhead) · M map · H help. Nobody else binds these keys.
+(1 iso — you turn it, 2 FOLLOW = a tether that stays behind your travel, 3 top) · L (hold) look up · M map · H help. Nobody else binds these keys.
 **Collision contract:** the player must never walk through walls, props, trunks, big bushes or rocks. `ctx.colliders` accepts circles `{x,z,r,h?}` AND
 oriented boxes `{x,z,w,d,rot,h?,box:true}`; every builder registers accurate colliders for walls (as boxes, leaving a gap at doors), props, trunks, large
 bushes/rocks. `ctx.walkables` for decks/floors/stairs. Buildings are ENTERABLE: doors are interactables (E opens/closes with a swing), interiors are real
@@ -115,7 +115,7 @@ vendor/three/ (import map in index.html); never import from node_modules or a CD
 is a symlink to `renders.noindex/` and both are git-ignored, as are critique images.
 
 ### Ownership (one builder per line — NEVER edit a file you do not own; call other systems only through the contracts below)
-- **camera**: src/systems/camera.js, src/core/input.js, src/systems/ui/hotbar.js (mode chip). Spec: docs/CAMERA_SPEC.md. Does NOT edit ui.js.
+- **camera**: src/systems/camera.js, src/systems/camera/*.js (new), src/core/input.js, src/systems/ui/hotbar.js (mode chip), tools/camvis.mjs, tools/views/camera.json. Spec: docs/CAMERA_SPEC.md. Does NOT edit ui.js.
 - **map history**: src/systems/ui/minimap.js, src/systems/ui.js, src/systems/ui/style.js, src/systems/ui/glyphs.js.
 - **touch / mobile**: src/systems/touch.js (new), index.html. No edits to input.js / ui.js / style.js / camera.js / main.js — it writes into
   ctx.input at runtime and injects its own <style> element.

@@ -6,3 +6,4 @@ critiques/**/*.jpg
 critiques/**/*.jpeg
 *.log
 .DS_Store
+renders
