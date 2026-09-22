@@ -1,0 +1,121 @@
+{
+  "candy_veg_lakeshore": {
+    "pos": [
+      -190,
+      38
+    ],
+    "time": 15,
+    "frames": 60
+  },
+  "candy_veg_peakring": {
+    "pos": [
+      -180,
+      -56
+    ],
+    "time": 16.5,
+    "frames": 60
+  },
+  "candy_veg_canebeds": {
+    "pos": [
+      -132,
+      10
+    ],
+    "time": 11,
+    "frames": 60
+  },
+  "candy_veg_forestfloor": {
+    "pos": [
+      -208,
+      -30
+    ],
+    "time": 13,
+    "az": 2.2,
+    "el": 0.42,
+    "dist": 34,
+    "frames": 60
+  },
+  "candy_veg_meadowwide": {
+    "free": [
+      -110,
+      -45
+    ],
+    "az": 0.8,
+    "el": 0.45,
+    "dist": 110,
+    "time": 12,
+    "frames": 30
+  },
+  "candy_veg_forestwide": {
+    "free": [
+      -200,
+      -20
+    ],
+    "az": 0.8,
+    "el": 0.45,
+    "dist": 120,
+    "time": 14,
+    "frames": 30
+  },
+  "candy_veg_crystals": {
+    "pos": [
+      -172,
+      -48
+    ],
+    "time": 22.5,
+    "frames": 60
+  },
+  "candy_veg_villageedge": {
+    "pos": [
+      -126,
+      30
+    ],
+    "time": 10,
+    "frames": 60
+  },
+  "candy_veg_picnic": {
+    "pos": [
+      -207,
+      -8
+    ],
+    "time": 12,
+    "frames": 60
+  },
+  "candy_veg_sugarring": {
+    "pos": [
+      -219,
+      -24
+    ],
+    "time": 12,
+    "frames": 60
+  },
+  "candy_veg_clearings": {
+    "free": [
+      -212,
+      -16
+    ],
+    "az": 0.78,
+    "el": 0.55,
+    "dist": 62,
+    "time": 12,
+    "frames": 30
+  },
+  "candy_veg_bitten_pop": {
+    "free": [
+      -122,
+      -22
+    ],
+    "az": 0.78,
+    "el": 0.42,
+    "dist": 40,
+    "time": 12,
+    "frames": 60
+  },
+  "candy_veg_pop_night": {
+    "pos": [
+      -120,
+      -20
+    ],
+    "time": 23,
+    "frames": 60
+  }
+}

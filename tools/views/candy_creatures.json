@@ -1,0 +1,150 @@
+{
+  "candy_sheep": {
+    "pos": [
+      -113,
+      -36
+    ],
+    "time": 12,
+    "frames": 70
+  },
+  "candy_butterflies": {
+    "pos": [
+      -112,
+      -37
+    ],
+    "time": 12,
+    "el": 0.45,
+    "dist": 20,
+    "frames": 70
+  },
+  "candy_beetles": {
+    "pos": [
+      -198,
+      -18
+    ],
+    "time": 14,
+    "dist": 32,
+    "frames": 70
+  },
+  "candy_ants": {
+    "pos": [
+      -136,
+      44
+    ],
+    "time": 11,
+    "az": 1.85,
+    "el": 0.5,
+    "dist": 24,
+    "frames": 70
+  },
+  "candy_fish": {
+    "pos": [
+      -124,
+      28
+    ],
+    "time": 13,
+    "dist": 34,
+    "frames": 70
+  },
+  "candy_jellyfish": {
+    "free": [
+      -38,
+      38
+    ],
+    "az": 0.8,
+    "el": 0.42,
+    "dist": 40,
+    "y": 5,
+    "time": 19.6,
+    "frames": 70
+  },
+  "candy_pier_dusk": {
+    "pos": [
+      -50,
+      26
+    ],
+    "time": 19.5,
+    "frames": 70
+  },
+  "candy_nerds": {
+    "pos": [
+      -205,
+      -28
+    ],
+    "time": 22.5,
+    "frames": 80
+  },
+  "candy_hollow": {
+    "pos": [
+      -158,
+      22
+    ],
+    "time": 22.5,
+    "frames": 80
+  },
+  "candy_birds": {
+    "pos": [
+      -98,
+      66
+    ],
+    "time": 10,
+    "el": 0.52,
+    "dist": 44,
+    "frames": 70
+  },
+  "candy_flock": {
+    "free": [
+      -113,
+      -36
+    ],
+    "az": 0.78,
+    "el": 0.52,
+    "dist": 24,
+    "time": 12,
+    "frames": 70
+  },
+  "candy_riverfish": {
+    "free": [
+      -121,
+      31
+    ],
+    "az": 1.9,
+    "el": 0.45,
+    "dist": 26,
+    "time": 13,
+    "frames": 90
+  },
+  "candy_antline": {
+    "free": [
+      -134,
+      44
+    ],
+    "az": 1.85,
+    "el": 0.5,
+    "dist": 18,
+    "time": 11,
+    "frames": 70
+  },
+  "candy_glide": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 12,
+    "call": {
+      "candyCreatures.flypast": 0.42
+    },
+    "frames": 70
+  },
+  "candy_glide_meadow": {
+    "pos": [
+      -112,
+      -40
+    ],
+    "time": 12,
+    "call": {
+      "candyCreatures.flypast": 0.42
+    },
+    "frames": 70
+  }
+}

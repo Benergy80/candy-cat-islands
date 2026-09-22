@@ -1,0 +1,235 @@
+{
+  "sky_dawn": {
+    "pos": [
+      -130,
+      20
+    ],
+    "az": -1.35,
+    "el": 0.16,
+    "dist": 70,
+    "fov": 48,
+    "time": 6.5,
+    "frames": 45
+  },
+  "sky_morning": {
+    "pos": [
+      -140,
+      40
+    ],
+    "az": -0.9,
+    "el": 0.18,
+    "dist": 70,
+    "fov": 48,
+    "time": 9.5,
+    "frames": 45
+  },
+  "sky_noon": {
+    "pos": [
+      -150,
+      0
+    ],
+    "az": 0.78,
+    "el": 0.2,
+    "dist": 70,
+    "fov": 48,
+    "time": 13.0,
+    "frames": 45
+  },
+  "sky_golden": {
+    "free": [
+      -120,
+      30
+    ],
+    "y": 26,
+    "az": 1.775,
+    "el": -0.1,
+    "dist": 90,
+    "fov": 62,
+    "time": 17.5,
+    "frames": 30
+  },
+  "sky_sunset": {
+    "pos": [
+      -60,
+      24
+    ],
+    "az": 1.45,
+    "el": 0.13,
+    "dist": 80,
+    "fov": 52,
+    "time": 19.2,
+    "frames": 45
+  },
+  "sky_dusk": {
+    "pos": [
+      118,
+      0
+    ],
+    "az": 1.4,
+    "el": 0.15,
+    "dist": 75,
+    "fov": 50,
+    "time": 19.9,
+    "frames": 45
+  },
+  "sky_moon": {
+    "free": [
+      -140,
+      40
+    ],
+    "y": 48,
+    "az": -2.524,
+    "el": -0.46,
+    "dist": 70,
+    "fov": 66,
+    "time": 22.5,
+    "frames": 40
+  },
+  "sky_midnight": {
+    "pos": [
+      -110,
+      -45
+    ],
+    "az": 0.4,
+    "el": 0.22,
+    "dist": 72,
+    "fov": 48,
+    "time": 0.0,
+    "frames": 60
+  },
+  "sky_night_cat": {
+    "pos": [
+      152,
+      6
+    ],
+    "az": 0.78,
+    "el": 0.55,
+    "dist": 50,
+    "fov": 32,
+    "time": 21.0,
+    "frames": 60
+  },
+  "sky_night_candy": {
+    "pos": [
+      -140,
+      40
+    ],
+    "az": 0.78,
+    "el": 0.55,
+    "dist": 46,
+    "fov": 30,
+    "time": 22.5,
+    "frames": 60
+  },
+  "sky_crossing": {
+    "free": [
+      0,
+      22
+    ],
+    "az": 0.5,
+    "el": 0.14,
+    "dist": 130,
+    "fov": 46,
+    "time": 17.5,
+    "frames": 30
+  },
+  "sky_clouds": {
+    "free": [
+      -150,
+      0
+    ],
+    "az": 0.78,
+    "el": 0.3,
+    "dist": 200,
+    "fov": 45,
+    "time": 11.0,
+    "frames": 30
+  },
+  "sky_shadows": {
+    "pos": [
+      -140,
+      40
+    ],
+    "az": 0.78,
+    "el": 0.55,
+    "dist": 46,
+    "fov": 30,
+    "time": 9.5,
+    "frames": 45
+  },
+  "sky_shadows_low": {
+    "pos": [
+      152,
+      6
+    ],
+    "az": 0.78,
+    "el": 0.55,
+    "dist": 50,
+    "fov": 32,
+    "time": 17.6,
+    "frames": 45
+  },
+  "sky_night_sky": {
+    "free": [
+      -98,
+      78
+    ],
+    "y": 58,
+    "az": -2.524,
+    "el": -0.5,
+    "dist": 80,
+    "fov": 74,
+    "time": 22.5,
+    "frames": 60
+  },
+  "sky_dawn_harbor": {
+    "pos": [
+      100,
+      58
+    ],
+    "az": -1.92,
+    "el": 0.13,
+    "dist": 46,
+    "fov": 52,
+    "time": 5.9,
+    "frames": 45
+  },
+  "sky_dawn_east": {
+    "pos": [
+      -42,
+      22
+    ],
+    "az": -1.571,
+    "el": 0.2,
+    "dist": 60,
+    "fov": 50,
+    "time": 5.75,
+    "frames": 45
+  },
+  "sky_dawn_mist": {
+    "free": [
+      60,
+      64
+    ],
+    "y": 9,
+    "az": 2.36,
+    "el": 0.08,
+    "dist": 96,
+    "fov": 48,
+    "time": 5.6,
+    "frames": 40
+  },
+  "sky_moonrise": {
+    "free": [
+      178,
+      70
+    ],
+    "y": 18,
+    "az": -2.055,
+    "el": -0.3,
+    "dist": 70,
+    "fov": 60,
+    "time": 20.6,
+    "frames": 40
+  }
+}

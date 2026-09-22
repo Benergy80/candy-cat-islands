@@ -1,0 +1,697 @@
+{
+  "title": "Candyland & Cat Island",
+  "updated": "2026-09-13 10:57",
+  "wave": "PAUSED (weekly limit; resumes after Sep 16) \u2014 build committed working; 5 round-3 fixers to redo + terrain far-view bug open",
+  "systems": [
+    {
+      "id": "terrain",
+      "name": "Terrain & water",
+      "status": "critique",
+      "round": 4,
+      "render": "renders/tour3/sea_crossing.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 7, readability 5, density 6, polish 4 (aerial beats FarmVille; water loses)",
+      "gap": "The sea is still a flat matte gradient at the distances the game shows it (measured high-frequency detail 1.1\u20131.5 vs 26 on the frosting ground): wave normals/crests must survive to 30\u2013120 u, with a sun-glint path, sky reflection, a shallow band at every shore and ripple rings at pilings/hulls.",
+      "improvement": "Round 3: LOD ripple stack + crest lines + albedo chop so the sea keeps detail at any distance (HF detail 0.85\u21922.4), sky-gradient reflection, glint road to the horizon, scalloped surf + shoal band, piling/ferry ripple rings, one sea palette; river gets a sugar-crust lip mesh, darker syrup, along-channel streaks, waterfall lip/spray/basin; glossy lake with caramel rim and darkened decks; village plaza pavers with sprinkle grout + kerb; pink zone desaturated; paw prints crisp; 13 meshes / 149k tris.",
+      "weaknesses": [
+        "Syrup river reads as a flat decal; streaks run across the flow",
+        "Chocolate lake fully matte, no rim; boardwalk same value as the lake",
+        "Frosting in the pink zone as saturated as the props; icing plateau brightest surface",
+        "Gumdrop Village square is a bare pink slab (no cobbles/wear/kerb)",
+        "Hard black shadows + no contact AO (sky/terrain)"
+      ]
+    },
+    {
+      "id": "sky",
+      "name": "Sky, lighting, day/night",
+      "status": "critique",
+      "round": 4,
+      "render": "renders/tour3/candy_dusk.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 8, density 8, lighting 5, polish 4 (night cat street \u22488, dawn harbour 3)",
+      "gap": "Night and dusk read as a global brightness multiply, not a change of light: unlit surfaces keep daytime saturation; needs a cool blue-violet moon key + cool ambient so unlit surfaces desaturate toward blue and warm lamps are the only saturated colour.",
+      "improvement": "Round 4: night is now a light change \u2014 a darkness-weighted sky wash (global shader patch) desaturates unlit surfaces toward blue, a real blue-violet moon key (3.0) with lower exposure, two-sided key/fill rig, noon key:fill 26:1 \u2192 5.5:1 with warm bounce, fountain shadow bands gone (texel-based normalBias), dawn harbour re-aimed at the sun; value curve noon 116 > dusk 66 > night 46.",
+      "weaknesses": [
+        "Noon cast shadows are hard near-black stencils with no fill/AO",
+        "Dawn 05:53 harbour: no visible sun disc/horizon glow, no shadows",
+        "Three of five gameplay frames show no sky (camera pitch)",
+        "Stair-step tearing bands on the pink fountain tiers (shadow acne?)"
+      ]
+    },
+    {
+      "id": "player",
+      "name": "Player character, movement, camera",
+      "status": "critique",
+      "round": 4,
+      "render": "renders/tour3/cat_plaza.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 7, readability 5, polish 4, gamefeel 4",
+      "gap": "The avatar is entirely absent from two of five frames (behind palm fronds at the plaza; behind the cupcake plinth) \u2014 occlusion fade must handle instanced fronds and terrain/plinth masses, plus a through-geometry silhouette pass.",
+      "improvement": "Round 4: through-geometry amber silhouette pass (player always readable), instanced-blocker sweep + plinth rule, ferry never ghosts, zone pitch 0.50 in town cores, dolly floor restored (19 u), smaller tipped-back hat + real shoes + two-shape torso + night fill light moved out of the head + night contact pool, lake wading limit.",
+      "weaknesses": [
+        "Sunhat brim eclipses the face at default pitch",
+        "No shoes; zero contact shadow at night",
+        "Torso clutter (straps, buckles, camera) smears at 1x",
+        "No horizon in 4 of 5 frames"
+      ]
+    },
+    {
+      "id": "candy_vegetation",
+      "name": "Candyland vegetation",
+      "status": "critique",
+      "round": 4,
+      "render": "renders/tour3/candy_forest.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 7, readability 7, density 7, polish 5 (aerial beats FarmVille)",
+      "gap": "Gummy-bear canopies are opaque matte low-poly and read as felt teddy bears on sticks \u2014 need a translucent glossy rim-lit gummy material and smoother silhouettes.",
+      "improvement": "Round 3: candy finish shader (fake subsurface, self-coloured fresnel rim, one hard glint, spherical normals) per candy type incl. fuzzy cotton candy; meadow lollipop ring with heads in frame + peppermint drifts; palace apron cap; prevailing-wind lean + per-instance bear poses; three bear geometries; root flares/mats/mounds; picnic blanket; night self-glow now a 0.10 rim; 31 draw calls / 248k tris.",
+      "weaknesses": [
+        "Lollipop Meadow view shows no lollipop head, 40% bare",
+        "Cotton candy faceted; gumdrops plain balls (one matte finish)",
+        "No sway/lean anywhere",
+        "No root flare/grass ring at trunk bases; picnic floor bare",
+        "Clones: identical sheep/beetles; one bear silhouette per tier; canopies offset from trunks; logs float"
+      ]
+    },
+    {
+      "id": "candy_architecture",
+      "name": "Candyland architecture & landmarks",
+      "status": "critique",
+      "round": 5,
+      "render": "renders/tour3/candy_cupcake_bite.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 8, readability 6, density 7, polish 4 (Sourly's interior the most authored frame)",
+      "gap": "The 'bite' frame contains no bite: the north face sits in the cupcake's own shadow \u2014 the crater must dominate, lit, with tooth scallops, crumb strata, a jam seam and player-sized crumbs.",
+      "improvement": "Round 4: the bite re-aimed ESE and rebuilt as a lit three-storey crater with jam seams, tooth scallops, walk-in mouth and player-sized crumbs; fountain rebuilt clean (8 arcs, no coplanar faces, fadeable); boathouse is a real building with a jetty and moored swan boat; sign atlas bleed fixed (SUGAR PIER legible), plaques behind every sign; beach/summit/lake grounds furnished (sandcastle, warming hut, telescope); cherry on the tower; 64 draw calls / 194k tris.",
+      "weaknesses": [
+        "Sugar fountain self-intersects, z-fights, camera clips into it",
+        "Lake boathouse/boat not readable; wafer slab in mud",
+        "Signs illegible or covered by HUD",
+        "Bare grounds around landmarks",
+        "Cherry sits beside the tower, not on it"
+      ]
+    },
+    {
+      "id": "sourpatch",
+      "name": "Sour Patch Kids",
+      "status": "critique",
+      "round": 4,
+      "render": "renders/tour3/candy_night.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 6, readability 5, polish 3, lighting 3 (night faces praised)",
+      "gap": "The kids are opaque matte plastic with white splotch decals; they need a translucent gummy material with light through the limbs, a warm rim, and a crystalline specular sparkle layer that catches the sun as they move.",
+      "improvement": "Round 3: translucent gummy material (fresnel rim, baked thickness transmission, fine crystalline crust with sun-facing glints + 3\u20136 sprite twinkles per kid), true Sour-Patch silhouette (flat-topped head, neck, splayed nubs), brightest-pixel night eyes with halo, stronger contact blobs, dancers actually at the fountain + village sunbather + dusk freeze facing the player, continuous salt ridge with clustered crystals; 9\u201314 draw calls.",
+      "weaknesses": [
+        "Night eyes are the darkest pixels, not emissive at distance",
+        "No contact shadows on kids",
+        "Pose library reads as two poses; dusk stare beat not visible",
+        "Salt line reads as broken glass, not a ridge",
+        "Night only 26% darker than midday; dusk twice as dark as night (sky)"
+      ]
+    },
+    {
+      "id": "candy_creatures",
+      "name": "Candyland tiny creatures",
+      "status": "fixing",
+      "round": 4,
+      "render": "renders/tour3/candy_forest.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 7, readability 5, density 8, polish 4 (forest biome 'reads as alive')",
+      "gap": "Butterflies still sit motionless at ground level with unlit backs (read as dropped wrappers); they must hover 1\u20132 u in a bobbing path with both wing faces lit in a V-flap and a tracking shadow.",
+      "improvement": "Wave 2b done: dihedral double-sided butterflies with antennae + blob shadows (one shared shadow pool), beetles with faces walking in trains, gliders in real Vs aimed at the lens and climbing over buildings (toasts only when visible), sheep head fixed, fish splashes, village-edge fireflies; 12 draw calls / 34k tris.",
+      "weaknesses": [
+        "Beetle trains are identical clones at identical spacing",
+        "Sheep read as white boulders from the top-down camera",
+        "Gliders scatter at head height, never a V overhead",
+        "Fireflies are hard diamond quads",
+        "Fish floats above the river; bears skewered by poles; ants/jellyfish never seen"
+      ]
+    },
+    {
+      "id": "cat_architecture",
+      "name": "Cat Island architecture",
+      "status": "critique",
+      "round": 5,
+      "render": "renders/tour3/cat_main_street.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 8, readability 6, density 7, polish 4 (night Main Street beats FarmVille; writing 'the best thing in the build')",
+      "gap": "Camera pitch buries the shopfronts under 50\u201365% identical red roof tile; facades must own the frame (lower town pitch, flatter roofs, taller facades).",
+      "improvement": "Round 4: 20\u00b0 roofs in four materials with taller facades, cornices, balconies, dormers and two flat-roof shops; monument human as a pale limestone figure in a real paw (yaw bug fixed) with an uplit plaque; harbour boats rebuilt as painted hulls with five gags (easel painting, padlocked KEY); three tower designs; two lamp designs at irregular spacing; ceilings + far walls + fryers/shake machine/laid tables in Meow Donald's; roof billboards + raised bracket signs; milk fountain filled; catenary string lights without shadows; clock faces redrawn; 87 meshes / 229k tris.",
+      "weaknesses": [
+        "Monument's tiny human reads as a bollard",
+        "Harbour boats are interpenetrating untextured slabs; floating kayak slabs on the lawn",
+        "Repeated towers/roofs/lantern rows/cone trees",
+        "Restaurant interior has no ceiling/back wall, bare tables, no lights",
+        "Hero signs cropped/occluded; milk fountain has no milk surface"
+      ]
+    },
+    {
+      "id": "cat_citizens",
+      "name": "Cat citizens (NPCs)",
+      "status": "fixing",
+      "round": 4,
+      "render": "renders/tour3/cat_square.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 7, readability 5, density 6, polish 4, lighting 8 (tiger faces protected)",
+      "gap": "Purrliament Square holds three barely-visible cats where it needs 15\u201320 in staged clusters (a queue up the steps, arguers under the sign, a knot at the statue, nappers, a vendor pair).",
+      "improvement": "Wave 2 done: dedicated quadruped TIGER rig (barrel body, heavy head with hinged jaw + fangs, ring stripes, borrowed glowing eyes with billboard glow, prowl/stalk/spring/roar/carry), 20:00 transform with a puff + roar, scruff-carry home, hit() for all weapons incl. fire, Rusty's candy economy, noon Main Street crowd, evening bandstand crowd, nine loaf cats in lit Whisker Heights windows; 47 draw calls / 116k tris.",
+      "weaknesses": [
+        "Gym dumbbells float; five identical poses in a line",
+        "Top-down day camera hides faces/outfits",
+        "Loaf cats in windows are unlit lumps",
+        "Tigers have no contact shadows; bodies interpenetrate",
+        "One head mesh for all named cats; portrait doesn't match"
+      ]
+    },
+    {
+      "id": "containment",
+      "name": "Cat Island containment & story beats",
+      "status": "critique",
+      "round": 4,
+      "render": "renders/tour3/cat_square.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 7, density 7, lighting 7, polish 4 (idyllic-first escalation praised; jokes told in 6\u201310 px text)",
+      "gap": "The containment story is told in sentences too small to read; the hero prop (tiny human in the statue's paw) must land as a silhouette, and the EXIT-circle gag must be visible in one shot.",
+      "improvement": "Round 3: six highway-green EXIT signs with big arrows (four in one frame), HOME\u2192 arrow with a red X on the office board, a 4\u00d73 MISSING poster grid, striped boom gate with a paw STOP disc, sign-face keep-out registry, lifeguard tower grounded with pilings + chains, marker-stroke redaction, a Daily Nap kiosk + sleeping-tourist bronze + poster pillar in the empty quadrant; 19 draw calls.",
+      "weaknesses": [
+        "Posts planted in front of sign faces",
+        "Same CANCELLED board used 3 times; bollard rows",
+        "Lifeguard ladder floats; CLOSED signs hang on nothing; bunting through lampposts",
+        "Departures board redaction reads as unloaded text"
+      ]
+    },
+    {
+      "id": "cat_nature",
+      "name": "Cat Island nature & parks",
+      "status": "critique",
+      "round": 4,
+      "render": "renders/tour3/cat_park.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 8, readability 6, density 7, polish 5 (aerial beats FarmVille)",
+      "gap": "The Catnip Commons bed is a flat untextured teal 20 m slab with ~14 blades; it must be a dense waist-high silvery-sage herb mass on soil with a trampled path and flopped cats.",
+      "improvement": "Round 3: a real catnip bed (1,010 blades in 3 tiers, mulch plate, trampled hollow, nests, flop spots for cats), four ridge clusters incl. olive terraces with dry-stone walls, bumpy-capped hedges with flecks, 3-tier palms/olives/cypress with lean, strata rocks + scree skirts, real pigeons with shadows, lavender/agave rebuilt without cards; 40 draw calls / 210k tris. Note: the 'teal slab' in cat_park was the architecture's bandstand roof (view moved).",
+      "weaknesses": [
+        "Interior ridge is 25% bare lawn",
+        "One lawn-green ground value island-wide (terrain warmth)",
+        "Hedges/maze read as bevelled plywood slabs",
+        "Palm/olive monoculture on a grid at one scale",
+        "Boulders are flat khaki blobs with hard seams; gulls/pigeons lie flat like paper"
+      ]
+    },
+    {
+      "id": "ferry",
+      "name": "Ferry (Sugarfin Express)",
+      "status": "fixing",
+      "round": 4,
+      "render": "renders/tour3/ferry_crossing.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 7, readability 5, polish 4 (crossing frame praised; face, wake, gangway not)",
+      "gap": "The narwhal's face doesn't read: a black bead eye with a shattered specular and a 2-px mouth \u2014 needs a Pikmin-scale eye (sclera + pupil, lid, blush) and a mouth groove 3x longer/deeper.",
+      "improvement": "Round 2 done: whale sits at the waterline with boot-top, bow wave, wake, heel; friendly face (white eye, plum grin, tusk at the snout); level gangway with gate + mooring lines; 6 paired dolphins; Captain Brine at the wheel, bell, real lanterns with water reflections; mid-strait beats (stowaway cat, dolphin roll); self-check logs material errors. Root cause of Ben's 'does not render': a null bounding sphere from the rope mesh crashed camera.update every frame \u2014 fixed both sides.",
+      "weaknesses": [
+        "Wake is a blurred brown straight decal; static foam collar; no bow wave",
+        "Gangway is an unrailed same-colour plank with no mooring; boarding side unclear",
+        "Deck crushed to black under the canopy; lanterns unlit in day frames",
+        "Dolphins hover without splash/shadow; gumballs cover the SUGARFIN name; fluke reads detached"
+      ]
+    },
+    {
+      "id": "particles",
+      "name": "Particles & ambient effects",
+      "status": "fixing",
+      "round": 4,
+      "render": "renders/tour3/candy_night.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 7, density 7, lighting 7, polish 4 (cat street night praised)",
+      "gap": "Night glints render as solid low-poly polygons with aliased edges (sometimes an unlit core) inside their halos; they must be soft round additive sprites falling to zero alpha, emitted from bushes and lamp heads in three sizes.",
+      "improvement": "Wave 2b done: speck field cut ~65%, tinted per island, glows only at night, nothing within 6 u of the lens; night chimney smoke dim grey; burn embers, stomp ring, land puff; vehicle trails (catapult smoke, canoe foam, flyer feathers); interior sunbeam motes; still 2 draw calls.",
+      "weaknesses": [
+        "Midday street reuses the night mote palette",
+        "Halos don't scale with distance",
+        "Candy village has no visible volumetrics (smoke, steam, petals)",
+        "Square sprite quad edges visible on the night lawn; pools band into rings"
+      ]
+    },
+    {
+      "id": "ui",
+      "name": "UI, HUD, intro",
+      "status": "done",
+      "round": 4,
+      "render": "renders/tour3/cat_night.png",
+      "verdict": "Round 3: OURS conf 4 \u2014 charm 8, readability 6, polish 6, gamefeel 7, lighting 8 (first system to clear the bar)",
+      "gap": "Minimap is a flat field with unlabeled pips in a twenty-building town; needs building footprints, the street band and labeled POI glyphs (polish round running).",
+      "improvement": "Round 4 polish: town minimap with building footprints, street bands, treeline, labelled nearest POI, moonlit-blue night roads, an underground cave map; E prompt hides during dialogue + leader tail; dial orbs above the disc + remaining-daylight arc; fixed dialogue frame; tiger portrait bust; opaque toasts docked clear of the billboard.",
+      "weaknesses": [
+        "World E prompt stays up during dialogue",
+        "Dial moon drawn under the disc; no time-until-dark wedge",
+        "Dialogue box shrink-wraps so chips jump",
+        "Location name duplicated banner + footer; toast translucent"
+      ]
+    },
+    {
+      "id": "interaction",
+      "name": "Interaction & story flags",
+      "status": "done",
+      "round": 0,
+      "render": "",
+      "verdict": "base API in place (orchestrator)",
+      "gap": "",
+      "improvement": "",
+      "weaknesses": []
+    },
+    {
+      "id": "inventory_weapons",
+      "name": "Inventory, weapons & pickups (wave 2)",
+      "status": "fixing",
+      "round": 3,
+      "render": "renders/tour3/inv_caramelizer.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 7, readability 5, polish 4 (HUD kit praised; pickups not)",
+      "gap": "Weapon pickups read as environment-coloured props resting in scenery; lift them to chest height on a bob, rim-light, saturated non-environment hues, ~1.5x scale, glow shaft to a concentric ground disc.",
+      "improvement": "Built: 46 candy pickups + 7 weapons placed in the world (Salt Shaker, Salt Gun, Candy-Cane Bat, Gumball Slingshot, Lemon Spritzer, Spray Bottle, the Caramelizer + 2 fuel cans); click/X to use; salt patches merge into lines/rings; spray dissolves salt; burn() destruction contract; stomp knockback; 6\u201315 draw calls.",
+      "weaknesses": [
+        "Pickup ring vocabulary identical to signposts/NPCs",
+        "Salt gun clips into a gumdrop; ring offset from the object"
+      ]
+    },
+    {
+      "id": "escape_routes",
+      "name": "Ways back: palace + cave, catapult, canoe, flyer (wave 2)",
+      "status": "fixing",
+      "round": 3,
+      "render": "renders/tour3/cave_skylight.png",
+      "verdict": "Round 3: TOSS-UP conf 3 \u2014 charm 7, readability 4, polish 3 (palace wide is 'the one unambiguous win')",
+      "gap": "The undersea cave has no water in it \u2014 needs a translucent blue-green ceiling, godray shafts, caustics on the floor, rising bubbles, fish silhouettes, wet-dark walls.",
+      "improvement": "All four ways back live: Candy Palace (35 u wedding-cake keep, throne room + cellar, enterable) + 339-u undersea cave from the Yarn Hill hatch (helper_5 key) with skylight/chambers, verified end to end; catapult, canoe, flying machine (ceiling 170).",
+      "weaknesses": [
+        "Throne room: throne cropped, 40% bare floor, a floating magenta quad",
+        "Flying machine is the darkest object, no prop/pedals/seat read",
+        "Canoe reads as a seed pod, beached inland, no paddle/ring",
+        "Catapult lacks counterweight/sling/winch, aims inland, fronds in the lens",
+        "Cave minimap empty and banner mislabeled Sugar Pier"
+      ]
+    },
+    {
+      "id": "interiors",
+      "name": "Enterable buildings + solid walls (wave 2)",
+      "status": "done",
+      "round": 0,
+      "render": "",
+      "verdict": "",
+      "gap": "",
+      "improvement": "Both islands: 13 enterable buildings with real rooms, doors that swing, roofs that hide; 1,064 wall boxes.",
+      "weaknesses": []
+    },
+    {
+      "id": "audio",
+      "name": "Audio (procedural ambience)",
+      "status": "queued",
+      "round": 0,
+      "render": "",
+      "verdict": "",
+      "gap": "",
+      "improvement": "",
+      "weaknesses": []
+    },
+    {
+      "id": "art_direction",
+      "name": "Holistic art-director passes",
+      "status": "done",
+      "round": 1,
+      "render": "",
+      "verdict": "Pass #1 written (685 lines, critiques/art-director-1.md): camera occlusion is the worst system; dialogue/toast lifecycle; cupcake silhouette; welcome banner height; speck field; gummy monoculture; no dawn; cliffs; populate cats; grey blockout props; ferry crossing beat; licorice path grade; kid light discs; fish harbour; lollipop sticks at night.",
+      "gap": "Ranked TOP 15 \u2192 wave-2b briefs (camera, UI, particles, sky spawned; terrain/vegetation/architecture/citizens/nature/ferry/sour patch queued or in flight).",
+      "improvement": "",
+      "weaknesses": []
+    },
+    {
+      "id": "performance",
+      "name": "Performance",
+      "status": "queued",
+      "round": 0,
+      "render": "",
+      "verdict": "",
+      "gap": "",
+      "improvement": "",
+      "weaknesses": []
+    }
+  ],
+  "gallery": [
+    {
+      "path": "renders/tour3/sky_dawn_harbor.png",
+      "caption": "sky_dawn_harbor \u2014 round-3 tour (end of wave 2)"
+    },
+    {
+      "path": "renders/tour3/cam_moon_moment.png",
+      "caption": "cam_moon_moment \u2014 round-3 tour (end of wave 2)"
+    },
+    {
+      "path": "renders/tour3/ferry_crossing.png",
+      "caption": "ferry_crossing \u2014 round-3 tour (end of wave 2)"
+    },
+    {
+      "path": "renders/tour3/escape_catapult.png",
+      "caption": "escape_catapult \u2014 round-3 tour (end of wave 2)"
+    },
+    {
+      "path": "renders/tour3/cat_tigers_close.png",
+      "caption": "cat_tigers_close \u2014 round-3 tour (end of wave 2)"
+    },
+    {
+      "path": "renders/tour3/cat_main_street.png",
+      "caption": "cat_main_street \u2014 round-3 tour (end of wave 2)"
+    },
+    {
+      "path": "renders/tour3/cave_skylight.png",
+      "caption": "cave_skylight \u2014 round-3 tour (end of wave 2)"
+    },
+    {
+      "path": "renders/tour3/palace_wide.png",
+      "caption": "palace_wide \u2014 round-3 tour (end of wave 2)"
+    },
+    {
+      "path": "renders/tour3/candy_cupcake_wide.png",
+      "caption": "candy_cupcake_wide \u2014 round-3 tour (end of wave 2)"
+    },
+    {
+      "path": "renders/tour3/candy_village.png",
+      "caption": "candy_village \u2014 round-3 tour (end of wave 2)"
+    },
+    {
+      "path": "renders/tour3/candy_arrival.png",
+      "caption": "candy_arrival \u2014 round-3 tour (end of wave 2)"
+    },
+    {
+      "path": "renders/tour3/world_overview.png",
+      "caption": "world_overview \u2014 round-3 tour (end of wave 2)"
+    }
+  ],
+  "log": [
+    {
+      "t": "2026-09-12 day 1",
+      "text": "Scaffold: world map (two islands, landmarks, paths, river, lake), engine loop, iso camera, headless render harness, builder brief, critic protocol."
+    },
+    {
+      "t": "2026-09-12 day 1",
+      "text": "Wave 1 launched: 14 Opus builders in parallel, one per system."
+    },
+    {
+      "t": "Sep 12 06:08",
+      "text": "UI builder finished (5.6 h wall time under heavy render load). Terrain + particles builders died to API stalls; fresh finisher agents spawned. Render harness now simulates settle frames without drawing (10x cheaper shots)."
+    },
+    {
+      "t": "Sep 12 06:32",
+      "text": "Candyland vegetation builder finished. Fixed Chocolate Lake bowl in world.js (surface 2.0 / floor 0.8) after the builder flagged the surface/terrain mismatch."
+    },
+    {
+      "t": "Sep 12 06:55",
+      "text": "Sky/lighting builder finished (no post-processing by design: keeps MSAA + fog match)."
+    },
+    {
+      "t": "Sep 12 07:41",
+      "text": "Critic r1 (vegetation): loses to Pikmin on understory/polish; gap sent back to the builder."
+    },
+    {
+      "t": "Sep 12 07:45",
+      "text": "Critic r1 (sky): toss-up, lighting 4/10 \u2014 directional authority gap sent to the sky builder; sea/ground flags routed to terrain, night lamps to candy architecture. Cat Island nature builder finished."
+    },
+    {
+      "t": "Sep 12 07:46",
+      "text": "Player/camera builder finished; default camera distance tightened to 36 for character readability."
+    },
+    {
+      "t": "Sep 12 07:48",
+      "text": "Critic r1 (UI): toss-up \u2014 banner/composition gap sent to the UI builder. Cat citizens builder finished."
+    },
+    {
+      "t": "Sep 12 08:13",
+      "text": "Critic r1 (particles): loses \u2014 night FX layer missing; gap to particles builder; fountain/lamp flags to candy architecture, lantern emissive to cat architecture, butterflies to creatures."
+    },
+    {
+      "t": "Sep 12 08:16",
+      "text": "Sour Patch Kids builder finished."
+    },
+    {
+      "t": "Sep 12 08:33",
+      "text": "Critic r1 (player/camera): toss-up \u2014 occlusion gap sent to the player builder."
+    },
+    {
+      "t": "Sep 12 08:47",
+      "text": "Creatures and Cat architecture builders died to API stalls (after ~7 h each); fresh finisher agents spawned with their files intact."
+    },
+    {
+      "t": "Sep 12 08:54",
+      "text": "Critic r1 (citizens): loses conf 4 \u2014 staging + silhouette gap; fresh fixer agent spawned (original builder context too large). Ferry builder died to an API stall; finisher spawned."
+    },
+    {
+      "t": "Sep 12 08:56",
+      "text": "Vegetation builder died mid-fix (API stall); fresh vegetation fixer spawned with the r1 gap list."
+    },
+    {
+      "t": "Sep 12 08:58",
+      "text": "Critic r1 (cat nature): loses conf 4 \u2014 pine-crown gap; fresh nature fixer spawned. Render harness: free-camera views now teleport the player to the target so location banners match."
+    },
+    {
+      "t": "Sep 12 09:21",
+      "text": "Critic r1 (Sour Patch): loses conf 4 \u2014 sugar-crust/sparkle gap; fresh fixer spawned."
+    },
+    {
+      "t": "Sep 12 10:15",
+      "text": "UI builder died mid-fix (API stall); fresh UI fixer spawned to finish the r1 list."
+    },
+    {
+      "t": "Sep 12 10:22",
+      "text": "Containment builder died (API stall); finisher spawned."
+    },
+    {
+      "t": "Sep 12 10:48",
+      "text": "Sky, terrain finisher and candy architecture builders died (API stalls) mid-fix; fresh finishers spawned for all three."
+    },
+    {
+      "t": "Sep 12 10:52",
+      "text": "Particles and player fixers died (API stalls); fresh finishers spawned. Every original wave-1 agent has now been replaced by a short-context finisher."
+    },
+    {
+      "t": "Sep 12 13:32",
+      "text": "Vegetation fix r1 landed; the island-wide confetti was traced to the terrain ground shader (flagged to terrain)."
+    },
+    {
+      "t": "Sep 12 13:40",
+      "text": "Cat Island architecture finisher landed. Flags routed: EXIT signs \u2192 containment, night ambient \u2192 sky."
+    },
+    {
+      "t": "Sep 12 14:01",
+      "text": "Containment finisher landed (all beats verified by script). Note: Sour Patch Kids reported wandering onto Cat Island \u2014 route to Sour Patch fixer."
+    },
+    {
+      "t": "Sep 12 14:07",
+      "text": "UI fix r1 landed."
+    },
+    {
+      "t": "Sep 12 14:09",
+      "text": "Sky fix r1 landed. Flagged: candy architecture's chocolate/licorice albedo ~0.02 goes black under any light (raise to ~0.10)."
+    },
+    {
+      "t": "Sep 12 14:11",
+      "text": "Particles fix r1 landed."
+    },
+    {
+      "t": "Sep 12 14:24",
+      "text": "Candy architecture finisher landed."
+    },
+    {
+      "t": "Sep 12 14:29",
+      "text": "Terrain finisher landed."
+    },
+    {
+      "t": "Sep 12 14:37",
+      "text": "Player/camera finisher landed. Only the Sour Patch fixer remains before the build presentation."
+    },
+    {
+      "t": "Sep 12 14:43",
+      "text": "Sour Patch fix r1 landed \u2014 every wave-1 system is now built and through one critic round (round-2 critique pending)."
+    },
+    {
+      "t": "Sep 12 15:49",
+      "text": "Full 25-view tour rendered clean (no console errors; 100\u2013245 draw calls, 0.57\u20131.07M tris per view, inside the 450 / 1.3M budget). Build presented."
+    },
+    {
+      "t": "Sep 12 16:03",
+      "text": "Critic r2 (terrain, first critique): THEIRS 3 \u2014 water slabs gap. Harness: free views no longer teleport the player into the sea; debug teleport nudges off colliders (two critic 'bugs' were harness artifacts)."
+    },
+    {
+      "t": "Sep 12 16:04",
+      "text": "Critic r2 (candy architecture, first critique): THEIRS 4 \u2014 landmark framing + night fixtures gap."
+    },
+    {
+      "t": "Sep 12 16:08",
+      "text": "Round-2 critics in for the 6 never-judged systems: cat architecture OURS 3 (first win), containment TOSS-UP, terrain/candy arch/creatures/ferry THEIRS. Suspected regression: the player's blocker-fade is fading whole merged district meshes (translucent roofs, invisible pier deck). Ben added wave-2 features (ways back, weapons, spray bottle, tigers at night, helper cat, canoe + flying machine, follow camera)."
+    },
+    {
+      "t": "Sep 12 16:14",
+      "text": "Wave 2 launched: 10 builders (camera/acrobatics, inventory+weapons, citizens+tigers+helper cat, palace+cave, catapult/canoe/flyer, ferry fix, sour patch hooks, UI hotbar, cat interiors+collisions, candy interiors+collisions) + art director."
+    },
+    {
+      "t": "Sep 12 16:36",
+      "text": "UI wave-2 builder finished."
+    },
+    {
+      "t": "Sep 12 17:36",
+      "text": "Sour Patch wave-2 hooks finished. Ben reports the ferry not rendering in his Chrome \u2014 investigating (a transient ferry/textures.js export error occurred while the ferry fixer was mid-edit)."
+    },
+    {
+      "t": "Sep 12 17:52",
+      "text": "Player/camera wave-2 builder finished. Ferry mid-edit: glowTex export missing at that moment (ferry fixer running)."
+    },
+    {
+      "t": "Sep 12 18:00",
+      "text": "Inventory/weapons wave-2 builder finished (all Ben's weapon items live; Caramelizer at the Watchtower foot)."
+    },
+    {
+      "t": "Sep 12 18:02",
+      "text": "Art-director pass #1 complete; wave 2b spawned: camera occlusion v3, UI 3, particles 2, sky 3; ferry got the crossing-beat addendum."
+    },
+    {
+      "t": "Sep 12 18:09",
+      "text": "Escape B (catapult/canoe/flyer) finished and verified end-to-end; weapons now skip input while riding a vehicle."
+    },
+    {
+      "t": "Sep 12 19:09",
+      "text": "Ben: 'the flying machine needs to fly much higher' \u2192 flyer ceiling 40\u2192170, stronger flaps, camera pulls back with altitude (patched directly). Ben: 'the big cat graphics need work' \u2192 tiger look made the top priority of the citizens finisher. Palace/cave, cat interiors and citizens agents stalled; fresh finishers spawned."
+    },
+    {
+      "t": "Sep 12 19:19",
+      "text": "UI 2b finished."
+    },
+    {
+      "t": "Sep 12 19:38",
+      "text": "Containment 2b finished. Flag: the 'tan tetra' beach scatter is cat nature's agave rosettes."
+    },
+    {
+      "t": "Sep 12 19:46",
+      "text": "Particles 2b finished; fixed the vehicles' unknown 'petal' particle shape \u2192 'leaf'."
+    },
+    {
+      "t": "Sep 12 19:49",
+      "text": "Candyland interiors + collisions finished."
+    },
+    {
+      "t": "Sep 12 19:51",
+      "text": "Nature/vegetation colliders finished (3,035 colliders in the scene). Moved the candy_peak view out of the new palace footprint; added candy_palace views."
+    },
+    {
+      "t": "Sep 12 20:02",
+      "text": "Camera occlusion v3 finished."
+    },
+    {
+      "t": "Sep 12 20:07",
+      "text": "Sour Patch pool polish finished."
+    },
+    {
+      "t": "Sep 12 20:10",
+      "text": "Sky 2b finished. Open: the moon can't appear at the game camera's elevation (needs a look-up/night cinematic); sea near-black at dawn (terrain); lanterns don't consume lampsOn yet."
+    },
+    {
+      "t": "Sep 12 20:57",
+      "text": "Ferry r2 finished; camera now guards null bounding spheres too. candy_arrival view re-aimed toward the sea per the ferry builder."
+    },
+    {
+      "t": "Sep 12 21:02",
+      "text": "Camera moonrise moment + hold-L look-up finished (UI to list 'L look up')."
+    },
+    {
+      "t": "Sep 12 21:22",
+      "text": "Nature/vegetation polish finished. Routed: Purrliament north face + roof and harbour crates \u2192 cat architecture; bluff stones \u2192 terrain."
+    },
+    {
+      "t": "Sep 12 21:29",
+      "text": "Citizens/tigers finisher landed (Ben's 'big cat graphics' item)."
+    },
+    {
+      "t": "Sep 12 21:33",
+      "text": "Terrain 2b finished."
+    },
+    {
+      "t": "Sep 12 21:53",
+      "text": "Cat interiors finisher landed. Flags: Main Street sunflowers pass through shop interiors (nature); a terrain decor mass inside the Watchtower room."
+    },
+    {
+      "t": "Sep 12 22:19",
+      "text": "Clearance fixer done: 112 plants moved out of building footprints, 5 decor lumps removed from the Watchtower; 0 intrusions across all 13 interiors."
+    },
+    {
+      "t": "Sep 12 22:24",
+      "text": "Palace + cave finisher landed (four real bugs fixed incl. palace walls with no collision)."
+    },
+    {
+      "t": "Sep 12 22:38",
+      "text": "Candy architecture 2b landed \u2014 every wave-2 builder has now reported (creatures 2b still running). Starting the round-3 tour."
+    },
+    {
+      "t": "Sep 12 23:25",
+      "text": "Creatures 2b landed \u2014 all wave-2 builders complete."
+    },
+    {
+      "t": "Sep 12 23:55",
+      "text": "Critic r3 (sky): toss-up \u2014 night is a multiply, not a light change; sky 4 fixer spawned."
+    },
+    {
+      "t": "Sep 12 23:59",
+      "text": "Critic r3 (weapons/HUD): toss-up \u2014 pickup presentation gap; fixer spawned."
+    },
+    {
+      "t": "Sep 13 00:01",
+      "text": "Critics r3: ferry, player/camera, vegetation all TOSS-UP 3 \u2014 fixers spawned (face/wake/gangway; occlusion + avatar read; gummy material + sway)."
+    },
+    {
+      "t": "Sep 13 00:03",
+      "text": "Critics r3: sour patch, escape, citizens all TOSS-UP 3 \u2014 fixers spawned."
+    },
+    {
+      "t": "Sep 13 00:06",
+      "text": "Critic r3 (cat nature): toss-up \u2014 catnip bed gap; fixer spawned."
+    },
+    {
+      "t": "Sep 13 00:07",
+      "text": "Critics r3: candy architecture + particles TOSS-UP 3 \u2014 fixers spawned. Player can wade under the lake surface (routed to player 4)."
+    },
+    {
+      "t": "Sep 13 00:08",
+      "text": "Critics r3: creatures + cat architecture TOSS-UP 3 \u2014 fixers spawned; camera gets a town-pitch addendum."
+    },
+    {
+      "t": "Sep 13 00:10",
+      "text": "Critic r3 (terrain): toss-up \u2014 water detail vanishes with distance; terrain 3 fixer spawned."
+    },
+    {
+      "t": "Sep 13 00:10",
+      "text": "Critic r3 (UI): OURS conf 4 \u2014 first system to clear the bar; a final polish round (minimap footprints etc.) spawned."
+    },
+    {
+      "t": "Sep 13 00:13",
+      "text": "Critic r3 (containment): toss-up \u2014 shape-over-text gap; fixer spawned; addenda routed (flower backfaces \u2192 nature, ghosted whale \u2192 camera, paw decals \u2192 terrain, statue eyes \u2192 cat arch, tiger railing \u2192 citizens)."
+    },
+    {
+      "t": "Sep 13 01:19",
+      "text": "Sky 4 landed (night as a light change). Flags: vegetation's night self-glow 0.40\u00d7albedo (drop \u22640.10 as a rim); terrain decor gumdrop glow."
+    },
+    {
+      "t": "Sep 13 01:28",
+      "text": "UI 4 landed (UI system complete: critic OURS 4 + polish)."
+    },
+    {
+      "t": "Sep 13 01:31",
+      "text": "Containment 3 landed."
+    },
+    {
+      "t": "Sep 13 01:54",
+      "text": "Vegetation 3 landed. Flag: camera dollies to ~6 u on close views (regression during player 4's edits)."
+    },
+    {
+      "t": "Sep 13 01:58",
+      "text": "Terrain 3 + cat nature 3 landed; cat_park view moved to the catnip bed (the bandstand roof was filling the old frame)."
+    },
+    {
+      "t": "Sep 13 02:18",
+      "text": "Player/camera 4 landed. AD #2 found a rendering bug: terrain ground + sea vanish in far/free views (bisected: the terrain shaders, not culling) \u2014 hotfix agent spawned."
+    },
+    {
+      "t": "Sep 13 02:21",
+      "text": "Sour Patch 3 landed. AD #2 ranked list read; leftovers (camera 34/0.44 + landmark override, tiger eyes from above, roofs standable, cupcake interior, white paper props) queued for round 4."
+    },
+    {
+      "t": "Sep 13 02:35",
+      "text": "Candy architecture 4 landed. Containment: drawScheduleBack undefined seen (containment 3 finished \u2014 verify at tour time)."
+    },
+    {
+      "t": "Sep 13 02:38",
+      "text": "Cat architecture 4 landed. Routed: harbour sea stack on the boats + gull slabs + rack leg \u2192 nature; dark shore quad \u2192 terrain decor."
+    }
+  ]
+}

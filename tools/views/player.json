@@ -1,0 +1,312 @@
+{
+  "player_portrait": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "az": 1.1,
+    "el": 0.3,
+    "dist": 6.0,
+    "frames": 40
+  },
+  "player_face": {
+    "pos": [
+      -140,
+      40
+    ],
+    "free": [
+      -140,
+      40
+    ],
+    "y": 5.95,
+    "az": 1.1,
+    "el": 0.1,
+    "dist": 2.3,
+    "time": 11,
+    "frames": 30
+  },
+  "player_face_night": {
+    "pos": [
+      -140,
+      40
+    ],
+    "free": [
+      -140,
+      40
+    ],
+    "y": 5.95,
+    "az": 1.1,
+    "el": 0.1,
+    "dist": 2.3,
+    "time": 22,
+    "frames": 30
+  },
+  "player_full": {
+    "pos": [
+      -140,
+      40
+    ],
+    "free": [
+      -140,
+      40
+    ],
+    "y": 5.2,
+    "az": 1.1,
+    "el": 0.12,
+    "dist": 4.6,
+    "time": 11,
+    "frames": 30
+  },
+  "player_back": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "az": -2.05,
+    "el": 0.34,
+    "dist": 6.0,
+    "frames": 40
+  },
+  "player_default": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "dist": 28,
+    "frames": 40
+  },
+  "player_gameplay": {
+    "pos": [
+      -125,
+      0
+    ],
+    "time": 10.5,
+    "dist": 31,
+    "frames": 40,
+    "el": 0.64
+  },
+  "player_walk": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "az": 1.2,
+    "el": 0.52,
+    "dist": 12,
+    "walk": {
+      "x": 0,
+      "y": 1,
+      "n": 23
+    },
+    "frames": 0
+  },
+  "player_walk_side": {
+    "pos": [
+      -105,
+      36
+    ],
+    "time": 11,
+    "az": 1.2,
+    "el": 0.26,
+    "dist": 10,
+    "walk": {
+      "x": 1,
+      "y": 0,
+      "n": 20
+    },
+    "frames": 0
+  },
+  "player_run_side": {
+    "pos": [
+      -105,
+      36
+    ],
+    "time": 11,
+    "az": 1.2,
+    "el": 0.26,
+    "dist": 11,
+    "walk": {
+      "x": 1.58,
+      "y": 0,
+      "n": 22
+    },
+    "frames": 0
+  },
+  "player_wade": {
+    "pos": [
+      -43,
+      39
+    ],
+    "time": 12,
+    "az": 1.1,
+    "el": 0.22,
+    "dist": 10,
+    "walk": {
+      "x": -1,
+      "y": 0,
+      "n": 30
+    },
+    "frames": 0
+  },
+  "player_night": {
+    "pos": [
+      -133,
+      24
+    ],
+    "time": 22,
+    "az": 1.08,
+    "el": 0.3,
+    "dist": 9.0,
+    "frames": 40
+  },
+  "player_night_wide": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 22,
+    "dist": 28,
+    "frames": 40
+  },
+  "player_zoom_out": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "dist": 78,
+    "el": 0.7,
+    "frames": 40
+  },
+  "player_zoom_in": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "dist": 16,
+    "el": 0.4,
+    "frames": 40
+  },
+  "player_horizon": {
+    "pos": [
+      -118,
+      62
+    ],
+    "time": 17,
+    "az": 0.6,
+    "el": 0.21,
+    "dist": 30,
+    "frames": 40
+  },
+  "player_on_cat": {
+    "pos": [
+      118,
+      0
+    ],
+    "time": 13,
+    "az": 1.1,
+    "el": 0.28,
+    "dist": 9,
+    "frames": 40
+  },
+  "player_occlude": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "az": 0.79,
+    "el": 0.3,
+    "dist": 16,
+    "frames": 40
+  },
+  "player_occlude_cat": {
+    "pos": [
+      118,
+      2
+    ],
+    "time": 12,
+    "az": 0.79,
+    "el": 0.55,
+    "dist": 18,
+    "frames": 40
+  },
+  "occ_cupcake": {
+    "pos": [
+      -88,
+      -6
+    ],
+    "time": 19,
+    "frames": 45
+  },
+  "occ_pier_walk": {
+    "pos": [
+      70,
+      20
+    ],
+    "time": 12,
+    "walk": {
+      "x": 1,
+      "y": 0,
+      "n": 60
+    },
+    "frames": 2
+  },
+  "occ_gym_tunnel": {
+    "pos": [
+      204,
+      -38
+    ],
+    "time": 12,
+    "frames": 45
+  },
+  "occ_whisker_night": {
+    "pos": [
+      178,
+      48
+    ],
+    "time": 22,
+    "frames": 45
+  },
+  "occ_candy_forest": {
+    "pos": [
+      -200,
+      -20
+    ],
+    "time": 14,
+    "frames": 45
+  },
+  "cam_moon_moment": {
+    "pos": [
+      -70,
+      18
+    ],
+    "time": 21.4,
+    "moonMoment": true,
+    "call": {
+      "camera.moonMoment": []
+    },
+    "frames": 80
+  },
+  "occ_silhouette": {
+    "pos": [
+      -94,
+      -24
+    ],
+    "time": 12,
+    "frames": 45
+  },
+  "occ_silhouette_night": {
+    "pos": [
+      -94,
+      -24
+    ],
+    "time": 22,
+    "frames": 45
+  }
+}

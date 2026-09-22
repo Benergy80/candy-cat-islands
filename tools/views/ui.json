@@ -1,0 +1,130 @@
+{
+  "ui_hud_day": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "frames": 60
+  },
+  "ui_hud_dusk": {
+    "pos": [
+      -120,
+      30
+    ],
+    "time": 19.2,
+    "frames": 60
+  },
+  "ui_hud_night": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 23,
+    "frames": 90
+  },
+  "ui_hud_cat": {
+    "pos": [
+      152,
+      6
+    ],
+    "time": 14,
+    "frames": 60
+  },
+  "ui_hud_tiger": {
+    "pos": [
+      152,
+      6
+    ],
+    "time": 20.4,
+    "frames": 60
+  },
+  "ui_hud_secret": {
+    "pos": [
+      -218,
+      -44
+    ],
+    "time": 13,
+    "frames": 60
+  },
+  "ui_hud_sea": {
+    "pos": [
+      -44,
+      22
+    ],
+    "time": 17,
+    "frames": 45
+  },
+  "ui_say_cat": {
+    "pos": [
+      112,
+      2
+    ],
+    "az": -0.92,
+    "el": 0.46,
+    "dist": 56,
+    "time": 12,
+    "frames": 70,
+    "call": {
+      "ui.clear": [],
+      "ui.say": [
+        "Welcome to Main Street! You will love it here. Nobody ever leaves, which is the highest compliment a town can be paid.",
+        {
+          "speaker": "Sprint Whiskerby",
+          "duration": 40,
+          "pos": {
+            "x": 112,
+            "z": 2
+          }
+        }
+      ]
+    }
+  },
+  "ui_say_short": {
+    "pos": [
+      112,
+      2
+    ],
+    "az": -0.92,
+    "el": 0.46,
+    "dist": 56,
+    "time": 12,
+    "frames": 70,
+    "call": {
+      "ui.clear": [],
+      "ui.say": [
+        "Mine now.",
+        {
+          "speaker": "Biscuit",
+          "duration": 40,
+          "pos": {
+            "x": 112,
+            "z": 2
+          }
+        }
+      ]
+    }
+  },
+  "ui_say_tiger": {
+    "pos": [
+      152,
+      6
+    ],
+    "time": 20.6,
+    "frames": 70,
+    "call": {
+      "ui.clear": [],
+      "ui.say": [
+        "You should be indoors, little guest. It is not safe, and I am very hungry, and those two facts are related.",
+        {
+          "speaker": "Mayor Mittens",
+          "duration": 40,
+          "pos": {
+            "x": 152,
+            "z": 6
+          }
+        }
+      ]
+    }
+  }
+}

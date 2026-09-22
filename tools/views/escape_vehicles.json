@@ -1,0 +1,86 @@
+{
+  "escape_catapult": {
+    "free": [
+      130.5,
+      70.0
+    ],
+    "y": 8.0,
+    "az": 2.356,
+    "el": 0.5,
+    "dist": 50,
+    "time": 12,
+    "frames": 70
+  },
+  "escape_catapult_dusk": {
+    "free": [
+      130.5,
+      70.0
+    ],
+    "y": 8.0,
+    "az": 2.356,
+    "el": 0.5,
+    "dist": 50,
+    "time": 19.4,
+    "frames": 70
+  },
+  "escape_canoe_cove": {
+    "pos": [
+      240.0,
+      49.4
+    ],
+    "az": -1.05,
+    "el": 0.45,
+    "dist": 22,
+    "time": 12,
+    "frames": 70,
+    "call": {
+      "story.set": "helper_1"
+    }
+  },
+  "escape_canoe_night": {
+    "pos": [
+      240.0,
+      49.4
+    ],
+    "az": -1.05,
+    "el": 0.45,
+    "dist": 22,
+    "time": 22,
+    "frames": 80,
+    "call": {
+      "story.set": "helper_1"
+    }
+  },
+  "escape_flyer_pad": {
+    "pos": [
+      206.4,
+      6.0
+    ],
+    "az": 3.93,
+    "el": 0.42,
+    "dist": 32,
+    "time": 12,
+    "frames": 70
+  },
+  "escape_flyer_night": {
+    "pos": [
+      206.4,
+      6.0
+    ],
+    "az": 3.93,
+    "el": 0.42,
+    "dist": 32,
+    "time": 22,
+    "frames": 80
+  },
+  "escape_beach_landing": {
+    "pos": [
+      -56,
+      44
+    ],
+    "time": 12,
+    "frames": 60,
+    "dist": 30,
+    "el": 0.5
+  }
+}

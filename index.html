@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Candyland &amp; Cat Island</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0a12; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+  #ui { position: fixed; inset: 0; pointer-events: none; }
+  #ui * { pointer-events: auto; }
+  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 22px; background: #0b0a12; z-index: 10; transition: opacity .6s; }
+  #loading.done { opacity: 0; pointer-events: none; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/" } }
+</script>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="ui"></div>
+  <div id="loading">baking the islands…</div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

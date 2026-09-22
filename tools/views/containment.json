@@ -1,0 +1,179 @@
+{
+ "cnt_ferry_office": {
+  "pos": [
+   63,
+   13
+  ],
+  "time": 12,
+  "frames": 60,
+  "dist": 46
+ },
+ "cnt_lifeguard": {
+  "pos": [
+   46,
+   36
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": 0.9,
+  "dist": 44
+ },
+ "cnt_bus_stop": {
+  "pos": [
+   122,
+   -2
+  ],
+  "time": 12.5,
+  "frames": 50,
+  "dist": 38
+ },
+ "cnt_posters": {
+  "pos": [
+   92,
+   9
+  ],
+  "time": 11.5,
+  "frames": 50,
+  "dist": 38
+ },
+ "cnt_shop_window": {
+  "pos": [
+   105,
+   3
+  ],
+  "time": 13,
+  "frames": 50,
+  "dist": 38
+ },
+ "cnt_exit_arrows": {
+  "pos": [
+   152,
+   6
+  ],
+  "time": 11,
+  "frames": 60,
+  "dist": 54
+ },
+ "cnt_guest_room": {
+  "pos": [
+   168,
+   53
+  ],
+  "time": 21.4,
+  "frames": 60,
+  "dist": 38
+ },
+ "cnt_curfew": {
+  "pos": [
+   172,
+   46
+  ],
+  "time": 19.4,
+  "frames": 90,
+  "dist": 46
+ },
+ "cnt_harbor_crates": {
+  "pos": [
+   103,
+   59
+  ],
+  "time": 9.5,
+  "frames": 50
+ },
+ "cnt_tunnel": {
+  "pos": [
+   202,
+   -38
+  ],
+  "time": 13,
+  "frames": 50,
+  "az": -2.11,
+  "dist": 40
+ },
+ "cnt_beach_gate": {
+  "pos": [
+   220,
+   -14
+  ],
+  "time": 12,
+  "frames": 55,
+  "dist": 46
+ },
+ "cnt_beach_walk": {
+  "pos": [
+   250,
+   -18
+  ],
+  "time": 12.5,
+  "frames": 50,
+  "dist": 56
+ },
+ "cnt_raft_rope": {
+  "pos": [
+   257,
+   -8
+  ],
+  "time": 13,
+  "frames": 50,
+  "dist": 44
+ },
+ "cnt_cove": {
+  "pos": [
+   255,
+   -29
+  ],
+  "time": 14,
+  "frames": 50,
+  "dist": 42
+ },
+ "cnt_cove_night": {
+  "pos": [
+   255,
+   -29
+  ],
+  "time": 22,
+  "frames": 60,
+  "dist": 42
+ },
+ "cnt_wave": {
+  "pos": [
+   52,
+   34
+  ],
+  "time": 12,
+  "walk": {
+   "x": -1,
+   "y": 0,
+   "n": 45
+  },
+  "frames": 38,
+  "dist": 42
+ },
+ "cnt_schedule": {
+  "pos": [
+   62,
+   16
+  ],
+  "time": 12,
+  "frames": 50,
+  "dist": 30
+ },
+ "cnt_tunnel_bank": {
+  "pos": [
+   204,
+   -38
+  ],
+  "time": 12,
+  "frames": 50,
+  "dist": 42
+ },
+ "cnt_tiger_night": {
+  "pos": [
+   172,
+   46
+  ],
+  "time": 22,
+  "frames": 60,
+  "dist": 44
+ }
+}

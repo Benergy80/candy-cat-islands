@@ -1,0 +1,8 @@
+node_modules/
+renders/
+renders.noindex/
+critiques/**/*.png
+critiques/**/*.jpg
+critiques/**/*.jpeg
+*.log
+.DS_Store

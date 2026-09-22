@@ -1,0 +1,191 @@
+{
+  "nat_feather": {
+    "free": [
+      142.6,
+      -40.6
+    ],
+    "y": 12.0,
+    "az": -1.37,
+    "el": 0.36,
+    "dist": 44,
+    "time": 11,
+    "frames": 60
+  },
+  "nat_pond": {
+    "free": [
+      126,
+      -70
+    ],
+    "y": 6.0,
+    "az": -1.5,
+    "el": 0.5,
+    "dist": 20,
+    "time": 15,
+    "frames": 60
+  },
+  "nat_maze": {
+    "free": [
+      163.8,
+      -42.1
+    ],
+    "y": 9.5,
+    "az": -0.75,
+    "el": 0.5,
+    "dist": 50,
+    "time": 10,
+    "frames": 60
+  },
+  "nat_grove": {
+    "free": [
+      154,
+      56
+    ],
+    "az": -0.6,
+    "el": 0.45,
+    "dist": 58,
+    "time": 17,
+    "frames": 40
+  },
+  "nat_beach": {
+    "pos": [
+      252,
+      -12
+    ],
+    "time": 12,
+    "frames": 60
+  },
+  "nat_harbor": {
+    "free": [
+      96,
+      58
+    ],
+    "az": -2.3,
+    "el": 0.5,
+    "dist": 62,
+    "time": 9,
+    "frames": 60
+  },
+  "nat_gymrocks": {
+    "pos": [
+      206,
+      -30
+    ],
+    "time": 16,
+    "frames": 60
+  },
+  "nat_night_boxes": {
+    "free": [
+      152,
+      -67
+    ],
+    "y": 7.6,
+    "az": 2.2,
+    "el": 0.3,
+    "dist": 15,
+    "time": 22,
+    "frames": 90
+  },
+  "nat_parkwide": {
+    "free": [
+      148,
+      -52
+    ],
+    "az": -0.9,
+    "el": 0.55,
+    "dist": 120,
+    "time": 13,
+    "frames": 30
+  },
+  "nat_coastwide": {
+    "free": [
+      230,
+      -20
+    ],
+    "az": -1.9,
+    "el": 0.45,
+    "dist": 130,
+    "time": 17,
+    "frames": 30
+  },
+  "nat_topiary": {
+    "free": [
+      169.75,
+      -36.18
+    ],
+    "y": 10.0,
+    "az": 0.9,
+    "el": 0.34,
+    "dist": 20,
+    "time": 12,
+    "frames": 60
+  },
+  "nat_plaza_beds": {
+    "free": [
+      78,
+      18
+    ],
+    "y": 8.0,
+    "az": 0.6,
+    "el": 0.46,
+    "dist": 34,
+    "time": 10,
+    "frames": 60
+  },
+  "nat_north_bluff": {
+    "free": [
+      138,
+      -76
+    ],
+    "az": 3.93,
+    "el": 0.42,
+    "dist": 78,
+    "time": 12,
+    "frames": 30
+  },
+  "nat_agave_beach": {
+    "free": [
+      252,
+      -12
+    ],
+    "az": 0.78,
+    "el": 0.55,
+    "dist": 44,
+    "time": 12,
+    "frames": 60
+  },
+  "nat_outcrops": {
+    "free": [
+      132,
+      -78
+    ],
+    "az": 3.6,
+    "el": 0.4,
+    "dist": 40,
+    "time": 16,
+    "frames": 60
+  },
+  "nat_commons_bed": {
+    "free": [
+      141,
+      -64
+    ],
+    "y": 4.0,
+    "az": -1.45,
+    "el": 0.42,
+    "dist": 34,
+    "time": 12,
+    "frames": 60
+  },
+  "nat_ridge": {
+    "free": [
+      148,
+      -24
+    ],
+    "y": 8.0,
+    "az": 2.25,
+    "el": 0.44,
+    "dist": 54,
+    "time": 10,
+    "frames": 40
+  }
+}

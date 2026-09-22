@@ -1,0 +1,106 @@
+{
+  "palace_day": {
+    "pos": [
+      -150,
+      -20
+    ],
+    "time": 12,
+    "dist": 40
+  },
+  "palace_wide": {
+    "free": [
+      -150,
+      -24
+    ],
+    "y": 24,
+    "el": 0.45,
+    "dist": 96,
+    "time": 12
+  },
+  "palace_night": {
+    "free": [
+      -150,
+      -24
+    ],
+    "y": 24,
+    "el": 0.45,
+    "dist": 96,
+    "time": 22
+  },
+  "palace_throne": {
+    "free": [
+      -153.2,
+      -34.6
+    ],
+    "y": 15.6,
+    "az": 0.785,
+    "el": 0.72,
+    "dist": 21,
+    "time": 12,
+    "frames": 80
+  },
+  "palace_cellar": {
+    "pos": [
+      -151.6,
+      -44.2
+    ],
+    "time": 12,
+    "frames": 80
+  },
+  "cave_hatch": {
+    "pos": [
+      204,
+      -71
+    ],
+    "time": 12,
+    "dist": 36
+  },
+  "cave_enter": {
+    "call": {
+      "escape.routes.cave.enterCave": "cat"
+    },
+    "time": 12,
+    "frames": 110
+  },
+  "cave_corridor": {
+    "pos": [
+      1376,
+      -39
+    ],
+    "time": 12,
+    "frames": 70
+  },
+  "cave_skylight": {
+    "pos": [
+      1404,
+      -2
+    ],
+    "time": 12,
+    "frames": 70
+  },
+  "cave_nook": {
+    "pos": [
+      1413,
+      46
+    ],
+    "time": 12,
+    "frames": 70
+  },
+  "cave_cellar_door": {
+    "pos": [
+      1401,
+      122
+    ],
+    "time": 12,
+    "frames": 70
+  },
+  "palace_throne_play": {
+    "pos": [
+      -153.0,
+      -33.8
+    ],
+    "az": 0.785,
+    "time": 12,
+    "frames": 80
+  }
+}

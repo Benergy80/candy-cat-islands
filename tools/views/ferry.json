@@ -1,0 +1,241 @@
+{
+ "ferry_pier": {
+  "free": [
+   -24,
+   22
+  ],
+  "y": 3,
+  "pos": [
+   -31,
+   22
+  ],
+  "az": 0.95,
+  "el": 0.33,
+  "dist": 58,
+  "time": 10,
+  "frames": 50,
+  "call": {
+   "ferry.moor": "candy"
+  }
+ },
+ "ferry_pier_wide": {
+  "free": [
+   -25,
+   22
+  ],
+  "y": 3,
+  "pos": [
+   -32.5,
+   22
+  ],
+  "az": 1.0,
+  "el": 0.42,
+  "dist": 72,
+  "time": 13,
+  "frames": 50,
+  "call": {
+   "ferry.moor": "candy"
+  }
+ },
+ "ferry_night": {
+  "free": [
+   -22,
+   22
+  ],
+  "y": 3,
+  "pos": [
+   -32.5,
+   22
+  ],
+  "az": 1.12,
+  "el": 0.32,
+  "dist": 54,
+  "time": 22,
+  "frames": 60,
+  "call": {
+   "ferry.moor": "candy"
+  }
+ },
+ "ferry_night_pier": {
+  "free": [
+   -25,
+   23
+  ],
+  "y": 2.6,
+  "pos": [
+   -31,
+   22
+  ],
+  "az": 1.22,
+  "el": 0.24,
+  "dist": 34,
+  "time": 22,
+  "frames": 60,
+  "call": {
+   "ferry.moor": "candy"
+  }
+ },
+ "ferry_lanterns": {
+  "free": [
+   -23.5,
+   19
+  ],
+  "y": 4,
+  "pos": [
+   -32.5,
+   22
+  ],
+  "az": 1.35,
+  "el": 0.2,
+  "dist": 17,
+  "time": 22.5,
+  "frames": 60,
+  "call": {
+   "ferry.moor": "candy"
+  }
+ },
+ "ferry_deck": {
+  "free": [
+   -22.5,
+   21
+  ],
+  "y": 5.5,
+  "pos": [
+   -32.5,
+   22
+  ],
+  "az": 1.3,
+  "el": 0.46,
+  "dist": 21,
+  "time": 11,
+  "frames": 50,
+  "call": {
+   "ferry.moor": "candy"
+  }
+ },
+ "ferry_captain": {
+  "free": [
+   -21.5,
+   16.6
+  ],
+  "y": 5.2,
+  "pos": [
+   -32.5,
+   22
+  ],
+  "az": 2.05,
+  "el": 0.2,
+  "dist": 11,
+  "time": 11,
+  "frames": 40,
+  "call": {
+   "ferry.moor": "candy"
+  }
+ },
+ "ferry_gangway": {
+  "free": [
+   -25.5,
+   22
+  ],
+  "y": 4.0,
+  "pos": [
+   -31,
+   22
+  ],
+  "az": 2.2,
+  "el": 0.62,
+  "dist": 34,
+  "time": 10,
+  "frames": 45,
+  "call": {
+   "ferry.moor": "candy"
+  }
+ },
+ "ferry_boarding": {
+  "pos": [
+   -30.5,
+   22
+  ],
+  "az": 1.6,
+  "el": 0.3,
+  "dist": 34,
+  "time": 9.5,
+  "frames": 50,
+  "call": {
+   "ferry.moor": "candy"
+  }
+ },
+ "ferry_cat_dock": {
+  "free": [
+   24,
+   22
+  ],
+  "y": 3,
+  "pos": [
+   33,
+   22
+  ],
+  "az": -0.78,
+  "el": 0.32,
+  "dist": 48,
+  "time": 10,
+  "frames": 50,
+  "call": {
+   "ferry.moor": "cat"
+  }
+ },
+ "ferry_crossing": {
+  "free": [
+   1,
+   24
+  ],
+  "y": 3.4,
+  "az": 0.95,
+  "el": 0.34,
+  "dist": 54,
+  "time": 15,
+  "frames": 40,
+  "call": {
+   "ferry.moor": "candy",
+   "ferry.setProgress": 0.5
+  }
+ },
+ "ferry_arrival_candy": {
+  "free": [
+   -26.2,
+   21.6
+  ],
+  "y": 3.4,
+  "pos": [
+   -31,
+   22
+  ],
+  "az": 2.2,
+  "el": 0.6,
+  "dist": 37,
+  "time": 10,
+  "frames": 50,
+  "call": {
+   "ferry.moor": "candy"
+  }
+ },
+ "ferry_face": {
+  "free": [
+   -22.4,
+   14.5
+  ],
+  "y": 2.6,
+  "pos": [
+   -31,
+   22
+  ],
+  "az": 2.5,
+  "el": 0.22,
+  "dist": 19,
+  "time": 11,
+  "frames": 40,
+  "call": {
+   "ferry.moor": "candy"
+  }
+ }
+}

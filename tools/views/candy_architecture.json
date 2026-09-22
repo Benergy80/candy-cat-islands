@@ -1,0 +1,390 @@
+{
+  "candy_pier": {
+    "pos": [
+      -38,
+      22
+    ],
+    "time": 10,
+    "frames": 45,
+    "az": 1.9,
+    "el": 0.42,
+    "dist": 38
+  },
+  "candy_welcome": {
+    "pos": [
+      -50,
+      26
+    ],
+    "time": 9.5,
+    "frames": 45,
+    "az": 1.6,
+    "el": 0.4,
+    "dist": 30
+  },
+  "candy_plaza": {
+    "pos": [
+      -137,
+      50
+    ],
+    "time": 11,
+    "frames": 60,
+    "az": 2.5,
+    "el": 0.52,
+    "dist": 34
+  },
+  "candy_market": {
+    "pos": [
+      -130,
+      38
+    ],
+    "time": 12,
+    "frames": 60,
+    "az": 2.2,
+    "el": 0.45,
+    "dist": 30
+  },
+  "candy_cupcake_close": {
+    "free": [
+      -88,
+      -18
+    ],
+    "y": 16,
+    "time": 10.5,
+    "frames": 60,
+    "az": 0.6,
+    "el": 0.42,
+    "dist": 72
+  },
+  "candy_peak_close": {
+    "free": [
+      -178,
+      -60
+    ],
+    "y": 22,
+    "time": 15,
+    "frames": 60,
+    "az": 1.1,
+    "el": 0.42,
+    "dist": 62
+  },
+  "candy_peak_cave": {
+    "pos": [
+      -176,
+      -68
+    ],
+    "time": 14,
+    "frames": 60,
+    "az": 3.14,
+    "el": 0.42,
+    "dist": 30
+  },
+  "candy_lake_close": {
+    "free": [
+      -200,
+      48
+    ],
+    "y": 4,
+    "time": 15,
+    "frames": 60,
+    "az": 1.0,
+    "el": 0.4,
+    "dist": 62
+  },
+  "candy_shrine": {
+    "free": [
+      -218,
+      -44
+    ],
+    "y": 12,
+    "time": 13,
+    "frames": 60,
+    "az": 0.35,
+    "el": 0.66,
+    "dist": 40
+  },
+  "candy_shrine_night": {
+    "free": [
+      -218,
+      -44
+    ],
+    "y": 12,
+    "time": 22.5,
+    "frames": 60,
+    "az": 0.35,
+    "el": 0.6,
+    "dist": 40
+  },
+  "candy_donut": {
+    "pos": [
+      -74,
+      32
+    ],
+    "time": 11,
+    "frames": 60,
+    "az": 1.35,
+    "el": 0.36,
+    "dist": 40
+  },
+  "candy_bridge": {
+    "pos": [
+      -118,
+      39
+    ],
+    "time": 13,
+    "frames": 60,
+    "az": 1.9,
+    "el": 0.4,
+    "dist": 32
+  },
+  "candy_bartower": {
+    "pos": [
+      -160,
+      27
+    ],
+    "time": 16,
+    "frames": 60,
+    "az": 1.0,
+    "el": 0.38,
+    "dist": 34
+  },
+  "candy_pier_night": {
+    "pos": [
+      -40,
+      23
+    ],
+    "time": 22,
+    "frames": 60,
+    "az": 1.9,
+    "el": 0.42,
+    "dist": 38
+  },
+  "candy_lake_night": {
+    "free": [
+      -200,
+      48
+    ],
+    "y": 4,
+    "time": 22.5,
+    "frames": 60,
+    "az": 1.0,
+    "el": 0.4,
+    "dist": 62
+  },
+  "candy_fountain": {
+    "free": [
+      -141,
+      48
+    ],
+    "y": 4.5,
+    "az": 2.3,
+    "el": 0.36,
+    "dist": 26,
+    "time": 11,
+    "frames": 60
+  },
+  "candy_fountain_night": {
+    "free": [
+      -141,
+      48
+    ],
+    "y": 4.5,
+    "az": 2.3,
+    "el": 0.36,
+    "dist": 26,
+    "time": 23,
+    "frames": 90
+  },
+  "candy_lamp_night": {
+    "free": [
+      -136.5,
+      48.5
+    ],
+    "y": 8.0,
+    "az": 2.1,
+    "el": 0.24,
+    "dist": 13,
+    "time": 23,
+    "frames": 90
+  },
+  "candy_arch_overview": {
+    "free": [
+      -140,
+      10
+    ],
+    "az": 0.8,
+    "el": 0.62,
+    "dist": 200,
+    "time": 12,
+    "frames": 30
+  },
+  "candy_in_house0": {
+    "pos": [
+      -152,
+      48
+    ],
+    "time": 21,
+    "az": 1.8925,
+    "el": 0.72,
+    "dist": 16,
+    "frames": 60
+  },
+  "candy_in_house4": {
+    "pos": [
+      -123,
+      46
+    ],
+    "time": 13,
+    "az": -1.6878,
+    "el": 0.72,
+    "dist": 16,
+    "frames": 60
+  },
+  "candy_in_house8": {
+    "pos": [
+      -139,
+      26
+    ],
+    "time": 21,
+    "az": -0.0555,
+    "el": 0.72,
+    "dist": 16,
+    "frames": 60
+  },
+  "candy_in_booth": {
+    "pos": [
+      -43.6,
+      30.4
+    ],
+    "time": 21,
+    "az": -1.5708,
+    "el": 0.78,
+    "dist": 15,
+    "frames": 60
+  },
+  "candy_in_cupcake": {
+    "pos": [
+      -88,
+      -18
+    ],
+    "time": 12,
+    "az": 0.0,
+    "el": 0.5,
+    "dist": 26,
+    "frames": 60
+  },
+  "candy_in_tower": {
+    "pos": [
+      -181.5,
+      -57.5
+    ],
+    "time": 12,
+    "az": 0.4712,
+    "el": 0.58,
+    "dist": 18,
+    "frames": 60
+  },
+  "candy_house_night": {
+    "free": [
+      -150,
+      49
+    ],
+    "y": 7,
+    "az": 2.35,
+    "el": 0.42,
+    "dist": 34,
+    "time": 23,
+    "frames": 90
+  },
+  "candy_boathouse": {
+    "free": [
+      -204.5,
+      42.5
+    ],
+    "y": 4,
+    "az": 2.35,
+    "el": 0.38,
+    "dist": 32,
+    "time": 12,
+    "frames": 60
+  },
+  "candy_cupcake_wide": {
+    "free": [
+      -88,
+      6
+    ],
+    "y": 24,
+    "az": 0.95,
+    "el": 0.2,
+    "dist": 66,
+    "time": 10.5,
+    "frames": 60
+  },
+  "candy_cupcake_bite": {
+    "free": [
+      -77.5,
+      -14.75
+    ],
+    "y": 11.0,
+    "az": 1.05,
+    "el": 0.32,
+    "dist": 46,
+    "time": 11,
+    "frames": 60
+  },
+  "candy_peak_wide": {
+    "free": [
+      -176.0,
+      -61.0
+    ],
+    "y": 26,
+    "az": 1.72,
+    "el": 0.22,
+    "dist": 94,
+    "time": 11,
+    "frames": 60
+  },
+  "candy_peak_reveal": {
+    "free": [
+      -153,
+      -66
+    ],
+    "y": 16,
+    "az": 1.84,
+    "el": 0.16,
+    "dist": 46,
+    "time": 15,
+    "frames": 60
+  },
+  "candy_cupcake_night": {
+    "free": [
+      -88,
+      6
+    ],
+    "y": 24,
+    "az": 0.95,
+    "el": 0.2,
+    "dist": 66,
+    "time": 22.5,
+    "frames": 90
+  },
+  "candy_dawn_lamps": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 5.9,
+    "frames": 60
+  },
+  "candy_lake_boat": {
+    "free": [
+      -205.5,
+      47
+    ],
+    "y": 3.5,
+    "az": 0.35,
+    "el": 0.35,
+    "dist": 20,
+    "time": 12,
+    "frames": 60
+  }
+}

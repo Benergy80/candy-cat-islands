@@ -1,0 +1,20 @@
+{
+  "name": "candy-cat-islands",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "serve": "node tools/serve.mjs 8787",
+    "render": "node tools/render.mjs",
+    "tour": "node tools/render.mjs --all",
+    "mapcheck": "node tools/mapcheck.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "playwright": "^1.49.1",
+    "three": "^0.170.0"
+  },
+  "type": "module"
+}

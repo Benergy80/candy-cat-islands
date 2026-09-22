@@ -1,0 +1,320 @@
+{
+ "cat_citizens_street": {
+  "pos": [
+   116,
+   1
+  ],
+  "free": [
+   117.2,
+   -0.5
+  ],
+  "az": 0.8,
+  "el": 0.88,
+  "dist": 22,
+  "y": 6.2,
+  "time": 12,
+  "frames": 70
+ },
+ "cat_citizens_promenade": {
+  "pos": [
+   116,
+   1
+  ],
+  "free": [
+   119,
+   1
+  ],
+  "az": 0.8,
+  "el": 0.92,
+  "dist": 32,
+  "y": 6,
+  "time": 18.4,
+  "frames": 90
+ },
+ "cat_citizens_nap": {
+  "pos": [
+   118,
+   0
+  ],
+  "free": [
+   118,
+   -2
+  ],
+  "az": 0.8,
+  "el": 1.24,
+  "dist": 30,
+  "y": 6.2,
+  "time": 14.5,
+  "frames": 90
+ },
+ "cat_citizens_nap_md": {
+  "pos": [
+   128,
+   -20
+  ],
+  "el": 0.78,
+  "dist": 32,
+  "time": 14.6,
+  "frames": 90
+ },
+ "cat_citizens_watch": {
+  "pos": [
+   111,
+   -5
+  ],
+  "free": [
+   112,
+   -6
+  ],
+  "az": 0.8,
+  "el": 0.92,
+  "dist": 28,
+  "y": 6,
+  "time": 22.5,
+  "frames": 80
+ },
+ "cat_citizens_gym": {
+  "free": [
+   196.5,
+   -27.0
+  ],
+  "az": 0.78,
+  "el": 0.95,
+  "dist": 25,
+  "y": 8.0,
+  "time": 16,
+  "frames": 80
+ },
+ "cat_gym_close": {
+  "free": [
+   195.6,
+   -28.6
+  ],
+  "az": 0.78,
+  "el": 0.85,
+  "dist": 15,
+  "y": 8.4,
+  "time": 16,
+  "frames": 70
+ },
+ "cat_citizens_sprint": {
+  "pos": [
+   214,
+   -14
+  ],
+  "el": 0.75,
+  "dist": 40,
+  "time": 7.4,
+  "frames": 80
+ },
+ "cat_citizens_kittens": {
+  "pos": [
+   140,
+   -52
+  ],
+  "free": [
+   140,
+   -56
+  ],
+  "az": 0.6,
+  "el": 0.62,
+  "dist": 26,
+  "y": 6.8,
+  "time": 13,
+  "frames": 80
+ },
+ "cat_citizens_beach": {
+  "pos": [
+   227,
+   -8
+  ],
+  "free": [
+   226.5,
+   -7
+  ],
+  "az": 1.6,
+  "el": 0.26,
+  "dist": 10,
+  "y": 5.2,
+  "time": 15,
+  "frames": 70
+ },
+ "cat_citizens_square": {
+  "free": [
+   152,
+   7
+  ],
+  "az": 0.78,
+  "el": 0.72,
+  "dist": 40,
+  "y": 9.0,
+  "time": 12,
+  "frames": 90
+ },
+ "cat_citizens_plaza": {
+  "pos": [
+   80,
+   18
+  ],
+  "free": [
+   78,
+   21
+  ],
+  "az": 0.8,
+  "el": 0.88,
+  "dist": 24,
+  "y": 5.6,
+  "time": 11,
+  "frames": 70
+ },
+ "cat_citizens_pier": {
+  "pos": [
+   46,
+   24
+  ],
+  "el": 0.72,
+  "dist": 24,
+  "time": 21,
+  "frames": 70
+ },
+ "cat_citizens_harbor": {
+  "pos": [
+   100,
+   54
+  ],
+  "el": 0.8,
+  "dist": 32,
+  "time": 12,
+  "frames": 70
+ },
+ "cat_citizens_tower": {
+  "pos": [
+   214,
+   30
+  ],
+  "el": 0.7,
+  "dist": 34,
+  "time": 19,
+  "frames": 80
+ },
+ "cat_citizens_sunbathe": {
+  "pos": [
+   178,
+   44
+  ],
+  "el": 0.68,
+  "dist": 34,
+  "time": 12.6,
+  "frames": 90
+ },
+ "cat_tigers": {
+  "free": [
+   119.0,
+   1.5
+  ],
+  "az": 0.8,
+  "el": 0.95,
+  "dist": 30,
+  "y": 6.4,
+  "time": 22,
+  "frames": 150
+ },
+ "cat_tigers_close": {
+  "free": [
+   119.0,
+   1.0
+  ],
+  "az": 0.8,
+  "el": 0.7,
+  "dist": 16,
+  "y": 6.4,
+  "time": 22,
+  "frames": 200
+ },
+ "cat_tigers_dusk": {
+  "pos": [
+   118,
+   0
+  ],
+  "time": 20.2,
+  "dist": 26,
+  "el": 0.58,
+  "frames": 90
+ },
+ "cat_tigers_gym": {
+  "pos": [
+   198,
+   -16
+  ],
+  "time": 23,
+  "dist": 28,
+  "el": 0.55,
+  "frames": 150
+ },
+ "cat_rusty": {
+  "pos": [
+   91,
+   45
+  ],
+  "el": 0.5,
+  "dist": 15,
+  "time": 12,
+  "frames": 70
+ },
+ "cat_rusty_night": {
+  "pos": [
+   91,
+   45
+  ],
+  "el": 0.5,
+  "dist": 15,
+  "time": 21.5,
+  "frames": 70
+ },
+ "cat_citizens_main_noon": {
+  "free": [
+   117.0,
+   1.4
+  ],
+  "az": 0.8,
+  "el": 0.92,
+  "dist": 32,
+  "y": 6.2,
+  "time": 12,
+  "frames": 120
+ },
+ "cat_citizens_commons": {
+  "pos": [
+   150,
+   -46
+  ],
+  "time": 17.5,
+  "dist": 32,
+  "el": 0.62,
+  "frames": 120
+ },
+ "cat_citizens_loaves": {
+  "free": [
+   172,
+   44
+  ],
+  "az": 0.78,
+  "el": 0.42,
+  "dist": 40,
+  "y": 8,
+  "time": 19.2,
+  "frames": 45
+ },
+ "cat_citizens_catnip": {
+  "free": [
+   141,
+   -62
+  ],
+  "az": 0.8,
+  "el": 0.62,
+  "dist": 22,
+  "y": 6.0,
+  "time": 13,
+  "frames": 80
+ }
+}

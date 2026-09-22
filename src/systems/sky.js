@@ -1,0 +1,586 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// SKY, LIGHTING & DAY/NIGHT
+//
+// Owns: gradient sky dome, stylised sun + big cartoon moon, twinkling stars,
+// drifting low-poly clouds, the key/fill/bounce light rig, fog, and the
+// renderer exposure curve. Everything is driven from one hand-authored colour
+// grade (systems/sky/palette.js) sampled at ctx.state.time.
+//
+// Exposed API:
+//   sunDir, moonDir (Vector3)      live unit directions toward sun / moon
+//   phase                          'dawn' | 'day' | 'dusk' | 'night'
+//   daylight                       0..1 (also written to ctx.state.daylight)
+//   horizonColor, zenithColor      THREE.Color, refreshed every frame — use
+//   sunColor, sunDiscColor         these to tint water reflections, glints, etc.
+//   sun, fill, moon, hemi, ambient the light rig
+//   lampsOn (bool), lampMix (0..1)  street lamps / window glow master switch:
+//                                   ON through dusk, OUT by 06:21. Other
+//                                   systems should drive lantern emissive and
+//                                   PointLights from these, not from daylight.
+//   mistAmount                     0..1 sea-mist density (dawn weather)
+//   group, clouds, mist, grade, refresh()
+// Events: ctx.events.emit('sky:phase', phase) on change + once on world:ready
+//         ctx.events.emit('sky:lamps', { on, mix }) when lampsOn flips
+//
+// Colour-space contract (keep this if you touch the shaders): every sky mesh
+// writes literal sRGB with tone mapping disabled, and scene.fog is applied by
+// three AFTER tone mapping in output space — so dome horizon == fog colour ==
+// authored hex, and renderer.toneMappingExposure grades only the lit world.
+// ─────────────────────────────────────────────────────────────────────────────
+import * as THREE from 'three';
+import { clamp, lerp, smoothstep, damp } from '../core/util.js';
+import { makeGrade, sampleGrade, phaseOf, lampMixAt } from './sky/palette.js';
+import { createDome } from './sky/dome.js';
+import { createSun, createMoon, createStars } from './sky/celestial.js';
+import { createClouds } from './sky/clouds.js';
+import { createMist, mistAmountAt } from './sky/mist.js';
+
+// ── AERIAL PERSPECTIVE (one-time global shader patch) ────────────────────────
+// three's stock fog only lerps toward fogColor, which means a saturated candy
+// forest 200 units out still SHOUTS at the same chroma as the one at your feet.
+// Real aerial perspective loses chroma faster than it loses contrast, so we
+// desaturate ahead of the colour lerp. Patching the fog chunk at import time
+// (sky is system #0, so this runs before any other system compiles a material)
+// buys the whole game aerial perspective for zero draw calls and zero uniforms.
+// Runs in OUTPUT space — three applies fog after tone mapping — so the sRGB
+// luma weights below are the right ones.
+if (!/ccAer/.test(THREE.ShaderChunk.fog_fragment)) {
+  THREE.ShaderChunk.fog_fragment = /* glsl */`
+#ifdef USE_FOG
+  #ifdef FOG_EXP2
+    float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+    float ccAer = fogFactor;
+  #else
+    float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+    // the chroma ramp starts nearer and saturates sooner than the colour lerp:
+    // that is what makes the far half of the island read as distance instead of
+    // as a second, equally loud foreground.
+    float ccAer = smoothstep( fogNear * 0.70, fogFar * 0.62, vFogDepth );
+  #endif
+  float ccLum = dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( ccLum ), ccAer * 0.55 );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+#endif
+`;
+}
+
+// ── DARKNESS-WEIGHTED SKY WASH (one-time global shader patch) ────────────────
+// Two critique rounds in a row said the same thing in different words: "night
+// and dusk are a global brightness multiply, not a change of light", and "noon
+// cast shadows are hard near-black stencils with no fill". Both are the same
+// bug — the only thing reaching an unlit surface was `blue_light × albedo`, and
+// a blue light on a saturated red gummy is not blue, it is BLACK. You cannot
+// desaturate a surface toward the sky by multiplying it.
+//
+// So the AmbientLight now does double duty. It still lights diffusely, but it
+// is ALSO added on top of the shaded result, un-multiplied by albedo, weighted
+// by how dark that pixel already is:
+//
+//   wash = ambientLightColor · 1/(1 + lit·14) · (0.20 + 0.46·fresnel²)
+//
+// • On a sunlit face the weight collapses to ~0.03 — noon keeps its punch.
+// • In a cast shadow it is ~0.4 — which is the warm ground bounce the critic
+//   asked for, arriving exactly where the stencil was black and nowhere else.
+// • On the away-from-the-moon side of a gummy bear at night it is ~0.95 and the
+//   ambient is a saturated blue-violet, so the unlit half goes BLUE rather than
+//   simply going dark — a change of light, not a brightness multiply.
+// • Warm lamp pools are bright, so the weight there is ~0, and the lamps stay
+//   the only saturated warm colour in a night frame.
+//
+// It rides `ambientLightColor`, which three uploads to every lit material as a
+// scene-level uniform, so this costs no draw calls, no new uniforms and no
+// per-material plumbing — the same trick as the fog patch above. The grade's
+// `ambC`/`ambI` therefore choose BOTH the colour of the lift and its strength.
+if (!/ccWash/.test(THREE.ShaderChunk.lights_fragment_end)) {
+  THREE.ShaderChunk.lights_fragment_end += /* glsl */`
+{
+  vec3 ccLitRGB = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse
+                + reflectedLight.directSpecular + totalEmissiveRadiance;
+  float ccLit = dot( ccLitRGB, vec3( 0.2126, 0.7152, 0.0722 ) );
+  float ccFres = 1.0 - abs( dot( geometryNormal, geometryViewDir ) );
+  float ccWash = ( 0.20 + 0.46 * ccFres * ccFres ) / ( 1.0 + ccLit * 14.0 );
+  reflectedLight.indirectDiffuse += ambientLightColor * ccWash;
+}
+`;
+}
+
+// 05:27, not 06:00. The HUD dial calls 05:00–07:00 "SUNRISE", and at 05:53 the
+// old arc still had the disc a degree BELOW the horizon with a 0.8-intensity
+// key — the label said sunrise and the world rendered flat night. The sun now
+// clears the horizon at 05:27, so by 05:53 it is genuinely ~4° up and the key
+// really does rake in from the east.
+const SUNRISE = 5.45, SUNSET = 19.5;
+const DAY_ARC = SUNSET - SUNRISE, NIGHT_ARC = 24 - DAY_ARC;
+// The sun rides a great circle from due east, through a noon point tilted
+// toward +Z, to due west — so shadows rake across the isometric camera instead
+// of pointing straight down. Keep the noon height WELL under 1: at y=0.91 the
+// midday sun is nearly overhead and every shadow hides under its own object,
+// which is exactly why the day grade read as directionless. y=0.78 → a noon
+// shadow 0.8× the object's height, still clearly pointing somewhere.
+const NOON = new THREE.Vector3(0, 0.78, 0.6258);
+
+// ── MOON ARC (independent of the sun since wave 2b) ──────────────────────────
+// The moon used to be pinned to the anti-sun direction, which put it at 20°
+// at 21:00 and dragged it round the sky in lock-step. It now rides its own
+// path: up at 18:48, down at 05:54, and — because `MOON_PLATEAU < 1` compresses
+// the middle of the arc — it CLIMBS FAST and then loafs between 35° and 52°
+// from 21:00 to 03:00, which is the band the art direction asked for.
+// Measured: 21:00 → 35.8°, 23:00 → 50.0°, 01:00 → 52.4°, 03:00 → 41.9°.
+const MOONRISE = 18.8, MOON_SPAN = 11.1;
+const MOON_TILT_Y = 0.80, MOON_TILT_Z = 0.60;   // unit: 0.80² + 0.60² = 1
+const MOON_PLATEAU = 0.58;
+
+const SHADOW_MIN = 38;           // gameplay: crisp 76-unit box
+const SHADOW_MAX = 124;          // scenic/low-angle: up to a 248-unit box
+// 4096 EVERYWHERE (was 2048 at the gameplay box). At distance 28 / FOV 30 a
+// 2048 map over an 88-unit box is 0.043 world units per texel, which is ~3
+// screen pixels of staircase on any big flat pink or tan surface — exactly the
+// artefact two critique rounds kept flagging. 76 units over 4096 is 0.0186 u
+// (~1.2 px) and the steps stop reading. One map, one light at a time (sun by
+// day, moon by night), so this is a single 4096² depth pass.
+const SHADOW_MAP = 4096;
+const KEY_DIST = 150;
+// 0.155: the shadow of a caster is ~6.5× its height — still unmistakably a
+// low-sun shadow — but the up-facing GROUND now gets 0.155 of the key instead
+// of 0.12, which is the difference between a dawn cast shadow you can see and
+// one that is lost in the skylight. (Below ~0.12 the shadow also leaves the
+// fitted box before it ever fades.)
+const MIN_KEY_ELEV = 0.155;
+const GROUND_RAY_MAX = 185;      // how far ahead we bother fitting the shadow box
+
+// Ground-bounce colour per island (hemisphere light lower hemisphere).
+const GROUND_TINT = { candy: 0xffb4d6, cat: 0xbcd674, sea: 0x74c2de };
+// What the island bounce desaturates TOWARD at night (grade.gSat drives it).
+const NIGHT_NEUTRAL = new THREE.Color(0x96a0bc);
+
+function sunAngle(t) {
+  const h = ((t % 24) + 24) % 24;
+  if (h >= SUNRISE && h <= SUNSET) return Math.PI * (h - SUNRISE) / DAY_ARC;
+  const u = ((h - SUNSET) + 24) % 24;
+  return Math.PI + Math.PI * (u / NIGHT_ARC);
+}
+
+/** Unit direction toward the moon at hour `t`, written into `out`. */
+function moonAt(t, out) {
+  const h = ((t % 24) + 24) % 24;
+  let u = h - MOONRISE; if (u < 0) u += 24;
+  const th = Math.PI * clamp(u / MOON_SPAN, -0.10, 1.10);
+  const s = Math.sin(th);
+  // Keep the sign, compress the magnitude: sin^0.58 rises steeply off the
+  // horizon and then flattens, which is what plateaus the arc.
+  const sh = s >= 0 ? Math.pow(s, MOON_PLATEAU) : -Math.pow(-s, MOON_PLATEAU);
+  const ang = Math.asin(clamp(sh, -1, 1));
+  const th2 = th > Math.PI * 0.5 ? Math.PI - ang : ang;
+  const cs = Math.cos(th2), sn = Math.sin(th2);
+  return out.set(cs, MOON_TILT_Y * sn, MOON_TILT_Z * sn);
+}
+
+export function create(ctx) {
+  const { scene, renderer } = ctx;
+
+  // ── backdrop ────────────────────────────────────────────────────────────────
+  const group = new THREE.Group();
+  group.name = 'sky';
+  scene.add(group);
+
+  const dome = createDome();
+  const stars = createStars();
+  const sunDisc = createSun(800);
+  const moonDisc = createMoon(780);
+  group.add(dome.mesh, stars.points, moonDisc.mesh, sunDisc.mesh);
+
+  const clouds = createClouds();
+  scene.add(clouds.group);
+
+  // low sea mist — dawn weather, one draw call, world-fixed
+  const mist = createMist(ctx.world);
+  scene.add(mist.mesh);
+
+  // ── light rig: warm key + cool counter-fill + a bounce that actually fills ──
+  const sun = new THREE.DirectionalLight(0xfff2dc, 2.6);
+  sun.name = 'sunLight';
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
+  sun.shadow.camera.near = 1;
+  sun.shadow.bias = -0.00035;
+  sun.shadow.normalBias = 0.022;
+  scene.add(sun, sun.target);
+
+  const moon = new THREE.DirectionalLight(0xa6b4d4, 0.0);
+  moon.name = 'moonLight';
+  moon.castShadow = false;
+  moon.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
+  moon.shadow.camera.near = 1;
+  moon.shadow.bias = -0.0006;
+  moon.shadow.normalBias = 0.05;
+  scene.add(moon, moon.target);
+
+  // Cool directional from the anti-sun side. This is what makes away-facing
+  // surfaces read cool-blue while sun-facing ones read warm — a hemisphere
+  // light can only split up/down, never toward/away from the sun.
+  const fill = new THREE.DirectionalLight(0x86aee8, 0.3);
+  fill.name = 'skyFill';
+  fill.castShadow = false;
+  scene.add(fill, fill.target);
+
+  const hemi = new THREE.HemisphereLight(0xb8dcff, 0xffd9c2, 0.46);
+  scene.add(hemi);
+  const ambient = new THREE.AmbientLight(0x2e3358, 0.0);
+  scene.add(ambient);
+
+  scene.fog = new THREE.Fog(0xdfeef0, 62, 380);
+  scene.background = null; // the dome always covers the frame
+
+  // ── scratch (no per-frame allocation past this point) ───────────────────────
+  const grade = makeGrade();
+  const sunDir = new THREE.Vector3(0, 1, 0);
+  const moonDir = new THREE.Vector3(0, -1, 0);
+  const anchor = new THREE.Vector3();
+  const groundCol = new THREE.Color(GROUND_TINT.candy);
+  const targetGround = new THREE.Color(GROUND_TINT.candy);
+  const bounceCol = new THREE.Color();
+  const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
+  const ray = new THREE.Vector3(), hit = new THREE.Vector3(), centroid = new THREE.Vector3();
+  const fitPts = [0, 0, 0, 0, 0].map(() => new THREE.Vector3());
+  const Z_AXIS = new THREE.Vector3(0, 0, 1);
+  const WORLD_UP = new THREE.Vector3(0, 1, 0);
+  const negDir = new THREE.Vector3();
+  const horizonColor = new THREE.Color();
+  const zenithColor = new THREE.Color();
+  const sunColor = new THREE.Color();
+  const sunDiscColor = new THREE.Color();
+  const haze = [0, 0, 0];   // far-haze colour in literal sRGB (see the fog block)
+  // screen-space samples used to fit the shadow box: centre, both bottom
+  // corners, and two rays slightly ABOVE centre (the far ground).
+  const FIT_SAMPLES = [[0, 0], [-1, -1], [1, -1], [-0.85, 0.16], [0.85, 0.16]];
+  let phase = phaseOf(ctx.state.time);
+  let booted = false;
+  let shadowHalf = SHADOW_MIN;
+  let lampsOn = lampMixAt(ctx.state.time) > 0.5;
+
+  const setV = (u, c) => u.value.set(c[0], c[1], c[2]);
+  const setL = (col, c) => col.setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace);
+
+  /**
+   * Fit the shadow box to the ground the CAMERA actually sees, not to a fixed
+   * radius around the player. A steep gameplay camera keeps the tight 88-unit
+   * box; a low-elevation or long-lens shot widens it (quantised, so the box
+   * doesn't jitter) so long raking shadows read right across the ground.
+   */
+  function fitShadowBox(groundY, keyElev) {
+    const cam = ctx.camera;
+    const tanV = Math.tan((cam.fov * 0.5) * Math.PI / 180);
+    const tanH = tanV * cam.aspect;
+    centroid.set(0, 0, 0);
+    for (let i = 0; i < FIT_SAMPLES.length; i++) {
+      const [sx, sy] = FIT_SAMPLES[i];
+      ray.set(sx * tanH, sy * tanV, -1).applyQuaternion(cam.quaternion).normalize();
+      const t = ray.y < -0.02 ? (groundY - cam.position.y) / ray.y : GROUND_RAY_MAX;
+      hit.copy(cam.position).addScaledVector(ray, clamp(t, 0, GROUND_RAY_MAX));
+      fitPts[i].copy(hit);
+      centroid.add(hit);
+    }
+    centroid.multiplyScalar(1 / FIT_SAMPLES.length);
+    let r = 0;
+    for (const p of fitPts) r = Math.max(r, Math.hypot(p.x - centroid.x, p.z - centroid.z));
+    // the player must never fall outside the box
+    const pl = ctx.systems.player?.position;
+    if (pl) r = Math.max(r, Math.hypot(pl.x - centroid.x, pl.z - centroid.z) + 6);
+    // A dawn key at 7° throws a shadow eight times the caster's height. Fitting
+    // the box to the camera alone would cut those off halfway across the frame,
+    // which is the opposite of the long raking dawn shadows we want — so widen
+    // the box as the key drops. Quantised with the rest so it never jitters.
+    const low = clamp((0.34 - keyElev) / 0.34, 0, 1);
+    r *= 1 + low * 0.55;
+    anchor.set(centroid.x, groundY, centroid.z);
+    return clamp(Math.ceil((r + 10) / 6) * 6, SHADOW_MIN, SHADOW_MAX);
+  }
+
+  /**
+   * Aim a key light at `anchor`, snapped to the shadow texel grid.
+   *
+   * Bias is expressed in TEXELS, not in magic world units. The old rig used a
+   * 0.012 normalBias at midday against a 0.024-unit texel — HALF a texel — and
+   * PCFSoftShadowMap spreads its taps over 2–3 texels, so every smooth curved
+   * surface (the pink fountain tiers in Gumdrop Village were the worst case)
+   * self-shadowed into stair-step moiré bands. The offset now scales with the
+   * real texel size and with 1/sin(elevation), which is how far a texel smears
+   * along the ground at a grazing key: ~2.7 texels at noon, ~5 at dawn.
+   */
+  function aimKey(light, dir, dist, half) {
+    tmpA.copy(dir);
+    if (tmpA.y < MIN_KEY_ELEV) { tmpA.y = MIN_KEY_ELEV; tmpA.normalize(); }
+    const res = light.shadow.mapSize.x;
+    // world size of one shadow texel, and how far it smears along the ground
+    const texel = (half * 2) / res;
+    const elev = Math.max(tmpA.y, 0.18);
+    light.shadow.normalBias = clamp(texel * (1.30 + 1.05 / elev), 0.030, 0.110);
+    light.shadow.bias = -0.00022 - texel * 0.0040;
+    const c = light.shadow.camera;
+    const far = dist + half * 2 + 140;
+    if (c.right !== half || c.far !== far) {
+      c.left = -half; c.right = half; c.top = half; c.bottom = -half; c.far = far;
+      c.updateProjectionMatrix();
+    }
+    // light-space basis for texel snapping (kills shadow crawl while walking)
+    tmpB.copy(WORLD_UP).cross(tmpA).normalize();     // right
+    tmpC.copy(tmpA).cross(tmpB).normalize();         // up
+    const px = anchor.dot(tmpB), py = anchor.dot(tmpC);
+    const dx = Math.round(px / texel) * texel - px;
+    const dy = Math.round(py / texel) * texel - py;
+    light.target.position.copy(anchor).addScaledVector(tmpB, dx).addScaledVector(tmpC, dy);
+    light.position.copy(light.target.position).addScaledVector(tmpA, dist);
+    light.target.updateMatrixWorld();
+  }
+
+  function applyGrade(dt) {
+    const t = ctx.state.time;
+    sampleGrade(t, grade);
+
+    // ── celestial geometry ───────────────────────────────────────────────────
+    const th = sunAngle(t);
+    const cs = Math.cos(th), sn = Math.sin(th);
+    sunDir.set(cs, NOON.y * sn, NOON.z * sn).normalize();
+    moonAt(t, moonDir);
+    const elev = sunDir.y;
+    // Knee pulled in from 0.38 to 0.26 (≈15° of sun elevation, not 22°). Half
+    // the game reads `state.daylight` to decide how night-ish to be, and with
+    // the old curve a sun 4.5° above the horizon still scored 0.26 — so at
+    // 05:53 the lanterns were at 74%, the Sour Patch Kids were still hunting
+    // and every night shader was still on. Dawn now actually arrives for
+    // everybody, not just for the sky.
+    const daylight = smoothstep(-0.09, 0.26, elev);
+    ctx.state.daylight = daylight;
+    api.daylight = daylight;
+
+    // ── phase event ──────────────────────────────────────────────────────────
+    const ph = phaseOf(t);
+    if (ph !== phase || !booted) { phase = ph; api.phase = ph; ctx.events.emit('sky:phase', ph); }
+
+    // ── street-lamp master switch ────────────────────────────────────────────
+    // Driven by the clock, not by daylight, so "lamps out by 06:21" is exact
+    // and every lantern in both towns can agree on one number.
+    const lampMix = lampMixAt(t);
+    api.lampMix = lampMix;
+    const lampNow = lampMix > 0.5;
+    if (lampNow !== lampsOn || !booted) {
+      lampsOn = lampNow; api.lampsOn = lampNow;
+      ctx.events.emit('sky:lamps', { on: lampNow, mix: lampMix });
+    }
+
+    // ── dome ─────────────────────────────────────────────────────────────────
+    const du = dome.uniforms;
+    setV(du.uZen, grade.zen); setV(du.uMid, grade.mid); setV(du.uHor, grade.hor);
+    setV(du.uHalo, grade.halo); setV(du.uBand, grade.band);
+    setV(du.uLine, grade.lineC);
+    du.uHaloS.value = grade.haloS; du.uBandS.value = grade.bandS;
+    du.uLineS.value = grade.lineS;
+    du.uMoonHalo.value = grade.mHalo;
+    // the warm band rides up with its luminary so glow and disc are one shape
+    const lum = Math.max(sunDir.y > -0.06 ? sunDir.y : moonDir.y, 0);
+    du.uBandY.value = clamp(lum * 0.62, 0.0, 0.36);
+    du.uBandW.value = lerp(11.5, 5.2, smoothstep(0.0, 0.5, lum));
+    du.uSunDir.value.copy(sunDir); du.uMoonDir.value.copy(moonDir);
+    // sun and moon no longer share an axis, so the band/horizon-line azimuth
+    // has to pick a side: the sun while it has any say, the moon after that
+    du.uBandDir.value.copy(sunDir.y > -0.06 ? sunDir : moonDir);
+    du.uStarA.value = grade.starA;
+
+    // ── stars ────────────────────────────────────────────────────────────────
+    stars.uniforms.uTime.value = ctx.state.elapsed;
+    stars.uniforms.uAlpha.value = grade.starA;
+    stars.uniforms.uPR.value = renderer.getPixelRatio();
+    // Stars are sized in device pixels, so a long lens (a scenic shot at FOV
+    // 45-70) spreads the same sky over more of them and they thin out. Push the
+    // gain back up as the lens widens so the night sky reads at every framing.
+    stars.uniforms.uGain.value = clamp(0.92 + (ctx.camera.fov - 30) * 0.012, 0.9, 1.45);
+    stars.points.visible = grade.starA > 0.01;
+
+    // ── sun / moon billboards ────────────────────────────────────────────────
+    const su = sunDisc.uniforms;
+    setV(su.uDisc, grade.discC); setV(su.uCore, grade.coreC); setV(su.uGlow, grade.glowC);
+    su.uGlowS.value = grade.glowS;
+    const sunVis = smoothstep(-0.12, 0.02, sunDir.y);
+    su.uAlpha.value = sunVis;
+    sunDisc.mesh.visible = sunVis > 0.01;
+    if (sunDisc.mesh.visible) {
+      sunDisc.mesh.position.copy(sunDir).multiplyScalar(sunDisc.dist);
+      negDir.copy(sunDir).negate();
+      sunDisc.mesh.quaternion.setFromUnitVectors(Z_AXIS, negDir);
+    }
+
+    const mu = moonDisc.uniforms;
+    // The moon used to inherit the starfield's alpha, which meant it only
+    // existed once the sky was fully dark — it winked out of every dusk frame
+    // just as it cleared the horizon. Give it its own curve: a pale daytime
+    // moon at dusk (28%), full brightness once night lands.
+    const nightness = clamp(1 - daylight * 1.25, 0, 1);
+    const moonVis = smoothstep(-0.02, 0.10, moonDir.y) * lerp(0.28, 1.0, nightness);
+    mu.uAlpha.value = moonVis;
+    mu.uGlowS.value = 0.38 + 0.42 * nightness;
+    moonDisc.mesh.visible = moonVis > 0.01;
+    if (moonDisc.mesh.visible) {
+      moonDisc.mesh.position.copy(moonDir).multiplyScalar(moonDisc.dist);
+      negDir.copy(moonDir).negate();
+      moonDisc.mesh.quaternion.setFromUnitVectors(Z_AXIS, negDir);
+    }
+
+    // ── lights ───────────────────────────────────────────────────────────────
+    setL(sun.color, grade.sunC);
+    sun.intensity = grade.sunI;
+    setL(moon.color, grade.moonC);
+    moon.intensity = grade.moonI;
+    setL(fill.color, grade.fillC);
+    fill.intensity = grade.fillI;
+
+    setL(hemi.color, grade.hSky);
+    const isl = GROUND_TINT[ctx.state.island] !== undefined ? ctx.state.island : 'candy';
+    targetGround.setHex(GROUND_TINT[isl]);
+    if (!booted) groundCol.copy(targetGround);
+    else {
+      groundCol.r = damp(groundCol.r, targetGround.r, 1.4, dt);
+      groundCol.g = damp(groundCol.g, targetGround.g, 1.4, dt);
+      groundCol.b = damp(groundCol.b, targetGround.b, 1.4, dt);
+    }
+    // desaturate the island bounce at night (grass must not go acid lime)
+    bounceCol.copy(groundCol).lerp(NIGHT_NEUTRAL, 1 - grade.gSat);
+    hemi.groundColor.setRGB(grade.hGnd[0], grade.hGnd[1], grade.hGnd[2], THREE.SRGBColorSpace);
+    hemi.groundColor.multiply(bounceCol);
+    hemi.intensity = grade.hI;
+
+    setL(ambient.color, grade.ambC);
+    ambient.intensity = grade.ambI;
+
+    // exported sky colours for other systems (sea reflections, glints, …)
+    setL(horizonColor, grade.hor);
+    setL(zenithColor, grade.zen);
+    setL(sunColor, grade.sunI > grade.moonI ? grade.sunC : grade.moonC);
+    setL(sunDiscColor, grade.discC);
+
+    // one shadow map at a time: sun by day, moon by night
+    const sunCasts = grade.sunI > 0.35;
+    sun.castShadow = sunCasts;
+    moon.castShadow = !sunCasts && grade.moonI > 0.30;
+
+    // ── shadow box fitted to what the camera sees ────────────────────────────
+    const pl = ctx.systems.player?.position;
+    const groundY = pl ? pl.y : 2;
+    shadowHalf = fitShadowBox(groundY, Math.max((sunCasts ? sunDir : moonDir).y, MIN_KEY_ELEV));
+    const keyDist = KEY_DIST + (shadowHalf - SHADOW_MIN) * 1.5;
+    aimKey(sun, sunDir, keyDist, shadowHalf);
+    aimKey(moon, moonDir, keyDist, shadowHalf);
+    // COOL COUNTER-FILL, always from the side opposite whichever key is live —
+    // derived from the key itself rather than from "the other luminary", which
+    // used to leave dusk and deep night with the fill and the key on the SAME
+    // side (no two-sided rig at all, which is most of why night read flat).
+    // Lifted well above the horizon so shadowed up-facing ground catches it.
+    const keyV = sunCasts ? sunDir : moonDir;
+    tmpA.set(-keyV.x, 0, -keyV.z);
+    if (tmpA.lengthSq() < 1e-6) tmpA.set(0, 0, 1);
+    tmpA.normalize();
+    tmpA.y = 0.38 + Math.max(keyV.y, 0) * 0.22;
+    tmpA.normalize();
+    fill.target.position.copy(anchor);
+    fill.position.copy(anchor).addScaledVector(tmpA, 120);
+    fill.target.updateMatrixWorld();
+
+    // ── fog: tracks the horizon colour, the camera pitch and fogScale ────────
+    // …but NOT exactly. Matching the dome horizon pixel-for-pixel is what made
+    // the sea dissolve into the sky at dawn and dusk — there was no seam at
+    // all, so the water just stopped existing somewhere in the haze. Push the
+    // far haze a few percent darker and greyer than `uHor` (grade.hzD) and the
+    // distant sea becomes a band that ENDS, right under the dome's bright
+    // horizon line. Land in the far distance loses a little chroma too, which
+    // is aerial perspective doing its job.
+    // Worked in literal sRGB (grade.hor's own space) so the offset from the
+    // dome's horizon is exactly the authored percentage.
+    const hz = grade.hzD;
+    const hl = grade.hor[0] * 0.2126 + grade.hor[1] * 0.7152 + grade.hor[2] * 0.0722;
+    const hk = 1 - hz * 0.20;
+    haze[0] = lerp(grade.hor[0], hl * 0.96, hz * 0.42) * hk;
+    haze[1] = lerp(grade.hor[1], hl * 0.99, hz * 0.42) * hk;
+    haze[2] = lerp(grade.hor[2], hl * 1.07, hz * 0.42) * hk;
+    setL(scene.fog.color, haze);
+    // A flat/horizon camera stares down hundreds of units of ground, so fog has
+    // to start close for aerial perspective; a steep gameplay camera only sees
+    // ~40 u, so push fog back and keep near props crisp.
+    tmpB.set(0, 0, -1).applyQuaternion(ctx.camera.quaternion);
+    const pitch = clamp(-tmpB.y, 0, 1);
+    const steep = smoothstep(0.12, 0.58, pitch);
+    const nearMul = lerp(1.0, 1.42, steep);
+    const farMul = lerp(0.84, 1.14, steep);
+    // Overview shots ask for a big fogScale so the far island stays legible;
+    // let `far` follow it but keep `near` almost put so haze still builds.
+    const fs0 = Math.max(1, ctx.state.fogScale || 1);
+    const fsFar = 1 + (fs0 - 1) * 0.68;
+    const fsNear = 1 + (fs0 - 1) * 0.32;
+    // …and a long lens sees more world per pixel, so let `far` breathe with the
+    // camera distance too (keeps the far island legible in scenic shots).
+    const camDist = ctx.systems.camera?.params?.distance || 46;
+    const distMul = clamp(1 + (camDist - 46) * 0.0042, 1, 1.34);
+    scene.fog.near = grade.fogN * nearMul * fsNear;
+    scene.fog.far = grade.fogF * farMul * fsFar * distMul;
+
+    // ── clouds ───────────────────────────────────────────────────────────────
+    const cu = clouds.uniforms;
+    setV(cu.uLit, grade.cLit); setV(cu.uShad, grade.cShad); setV(cu.uRim, grade.cRim);
+    cu.uRimS.value = grade.cRimS;
+    cu.uSunDir.value.copy(sunDir.y > -0.05 ? sunDir : moonDir);
+    // clouds fade into the DOME's horizon, not into the darker sea haze —
+    // they are sky, and they should disappear into sky
+    setV(cu.uFogCol, grade.hor);
+    cu.uFogNear.value = scene.fog.near * 2.6;
+    cu.uFogFar.value = scene.fog.far * 1.9;
+    clouds.update(ctx.state.elapsed, ctx.camera.position.x, ctx.camera.position.z);
+
+    // ── sea mist ─────────────────────────────────────────────────────────────
+    const mistAmt = mistAmountAt(t, daylight);
+    api.mistAmount = mistAmt;
+    mist.mesh.visible = mistAmt > 0.01;
+    if (mist.mesh.visible) {
+      const mi = mist.uniforms;
+      mi.uAmt.value = mistAmt;
+      mi.uTime.value = ctx.state.elapsed;
+      // near mist is lit by the sky overhead, far mist becomes the haze itself
+      // (both literal sRGB, like every other sky mesh — see the header)
+      setV(mi.uNear, grade.mistC);
+      setV(mi.uFar, haze);
+      mi.uFogN.value = scene.fog.near * 1.25;
+      mi.uFogF.value = scene.fog.far * 0.92;
+    }
+
+    // ── exposure ─────────────────────────────────────────────────────────────
+    renderer.toneMappingExposure = grade.exp;
+
+    // dome/stars/discs ride with the camera so the horizon never runs out
+    group.position.copy(ctx.camera.position);
+    booted = true;
+  }
+
+  const api = {
+    sun, moon, fill, hemi, ambient, group, clouds, mist, grade,
+    sunDir, moonDir, phase, daylight: 1,
+    horizonColor, zenithColor, sunColor, sunDiscColor,
+    // street lamps / window glow / lanterns: ON through dusk, OUT by 06:21.
+    // Read `lampMix` for a smooth 0..1 (emissive strength), `lampsOn` for the
+    // boolean (whether to add a PointLight at all). 'sky:lamps' fires on flips.
+    lampsOn, lampMix: lampMixAt(ctx.state.time),
+    mistAmount: 0,
+    get shadowHalf() { return shadowHalf; },
+    /** Force a full re-grade (used after time jumps). */
+    refresh() { applyGrade(1 / 30); },
+    update(dt) { applyGrade(dt); },
+  };
+
+  // one line in the render log so the budget is measured, not asserted
+  console.warn(`[sky] ${4 + clouds.group.children.length + 1} draw calls max `
+    + `(dome, stars, sun, moon, ${clouds.group.children.length} cloud batches, mist) · `
+    + `mist ${mist.tris} tris · clouds ${clouds.count} puffs · shadow ${SHADOW_MAP}²`);
+
+  ctx.events.on('time:set', () => api.refresh());
+  // sky is system #0, so nobody is listening yet during create(): announce the
+  // opening phase once everyone exists.
+  ctx.events.on('world:ready', () => ctx.events.emit('sky:phase', api.phase));
+  applyGrade(1 / 30);
+  return api;
+}

@@ -1,0 +1,232 @@
+{
+  "candy_arrival": {
+    "pos": [
+      -50,
+      26
+    ],
+    "time": 9.5,
+    "frames": 45,
+    "az": -1.435,
+    "dist": 44
+  },
+  "candy_village": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "frames": 60
+  },
+  "candy_forest": {
+    "pos": [
+      -200,
+      -20
+    ],
+    "time": 14,
+    "frames": 60
+  },
+  "candy_peak": {
+    "pos": [
+      -178,
+      -52
+    ],
+    "time": 16,
+    "frames": 60
+  },
+  "candy_meadow": {
+    "pos": [
+      -110,
+      -45
+    ],
+    "time": 12,
+    "frames": 60
+  },
+  "candy_river": {
+    "pos": [
+      -120,
+      30
+    ],
+    "time": 13,
+    "frames": 60
+  },
+  "candy_lake": {
+    "pos": [
+      -190,
+      40
+    ],
+    "time": 15,
+    "frames": 60
+  },
+  "candy_cupcake": {
+    "pos": [
+      -88,
+      -10
+    ],
+    "time": 10,
+    "frames": 60
+  },
+  "candy_night": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 23,
+    "frames": 90
+  },
+  "candy_dusk": {
+    "pos": [
+      -120,
+      30
+    ],
+    "time": 19.2,
+    "frames": 60
+  },
+  "candy_overview": {
+    "free": [
+      -150,
+      0
+    ],
+    "az": 0.8,
+    "el": 0.75,
+    "dist": 240,
+    "time": 12,
+    "frames": 30
+  },
+  "cat_arrival": {
+    "pos": [
+      50,
+      24
+    ],
+    "time": 10,
+    "frames": 45
+  },
+  "cat_plaza": {
+    "pos": [
+      78,
+      18
+    ],
+    "time": 11,
+    "frames": 60
+  },
+  "cat_main_street": {
+    "pos": [
+      118,
+      0
+    ],
+    "time": 12,
+    "frames": 60
+  },
+  "cat_meow_donalds": {
+    "pos": [
+      128,
+      -20
+    ],
+    "time": 12.5,
+    "frames": 60
+  },
+  "cat_square": {
+    "pos": [
+      152,
+      6
+    ],
+    "time": 14,
+    "frames": 60
+  },
+  "cat_residential": {
+    "pos": [
+      178,
+      48
+    ],
+    "time": 15,
+    "frames": 60
+  },
+  "cat_park": {
+    "pos": [
+      138,
+      -68
+    ],
+    "time": 13,
+    "frames": 60
+  },
+  "cat_gym": {
+    "pos": [
+      198,
+      -26
+    ],
+    "time": 16,
+    "frames": 60
+  },
+  "cat_harbor": {
+    "pos": [
+      100,
+      58
+    ],
+    "time": 9,
+    "frames": 60
+  },
+  "cat_lighthouse": {
+    "pos": [
+      214,
+      28
+    ],
+    "time": 18,
+    "frames": 60
+  },
+  "cat_night": {
+    "pos": [
+      118,
+      0
+    ],
+    "time": 22,
+    "frames": 90
+  },
+  "cat_overview": {
+    "free": [
+      150,
+      0
+    ],
+    "az": -0.8,
+    "el": 0.75,
+    "dist": 240,
+    "time": 12,
+    "frames": 30
+  },
+  "sea_crossing": {
+    "free": [
+      0,
+      22
+    ],
+    "az": 0.5,
+    "el": 0.5,
+    "dist": 90,
+    "time": 17,
+    "frames": 30
+  },
+  "world_overview": {
+    "free": [
+      0,
+      0
+    ],
+    "az": 0.0,
+    "el": 0.9,
+    "dist": 520,
+    "time": 12,
+    "frames": 20
+  },
+  "candy_palace": {
+    "pos": [
+      -150,
+      -12
+    ],
+    "time": 12,
+    "frames": 60
+  },
+  "candy_palace_night": {
+    "pos": [
+      -150,
+      -12
+    ],
+    "time": 22,
+    "frames": 60
+  }
+}
