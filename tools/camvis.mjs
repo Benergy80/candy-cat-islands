@@ -22,6 +22,10 @@
 //                       (s7 (h) is the mode-2 horizon: the geometric sky band per frame and the RENDERED
 //                       open sky in it at the last frame, skyBand(); "--script horizon" runs (h) alone)
 //                       (seed = tools/_tmp/camprobe.mjs's own probe protocol, the §1 cross-check)
+//                       (a7 also runs a7x, LAST on the page (after a6x): the look's edges — the lens riding the look
+//                       zoom (zoom 0.7 return, zoom 1.6 at once, V + wheel), a look begun on a dollied lens (a
+//                       synthetic noCut wall, and occ_silhouette in mode 2: out AND home again, back on the dolly),
+//                       playerScreen across the lens plane, and the vehicle / flying look; "--script a7x" runs it alone)
 //   --s9                also run every view in tools/views/camera.json (§9) as rows (view-major, own
 //                       camera.setMode replaced by the row's mode; a view that asks for mode 3 also gets m3)
 //   --shots <dir>       render each row at --w × --h (default 1600 × 1000) to <dir>/<view>_m<mode>.png
@@ -1010,6 +1014,172 @@ function pageLib() {
     return out;
   }
 
+  // A7x — the look's edges (camera step 6 fix; runs LAST on the page, after a6x, so every other script keeps its page
+  // history; it ends in the air). (1) The lens rides the look's own distance: a zoom-0.7 look is back within 2% at
+  // 0.6 s after the release (§3 λ8, A7's own tolerance), look({zoom:1.6}) is at 1.6× by the 2nd frame, the wheel
+  // while V is held moves a goal the zoom follows at λ lookIn with the lens on it, and a look begun on a DOLLIED lens
+  // (a synthetic noCut wall on the sight line) never jumps — and comes HOME onto the dolly: within 2% of the pre-look
+  // lens 0.6 s after the release, no return frame faster than the λ8 return, no pop once the look is over (step 6
+  // fix 2; the same at occ_silhouette in mode 2, the natural dolly row, when it still starts dollied).
+  // (2) playerScreen across the lens plane: a forward pan to 37.5 / 38 / 39.5 /
+  // 40 u at (118,0) keeps him BELOW the frame (0 < depth ≤ near must not be un-flipped). (3) The vehicle / flying look
+  // (§3): V + mouse while flying (debugFly): look on, veh, fov → lookFovVeh (48) at ≤ fovRate °/s, moveLock 0, pan 0,
+  // the mouse feeds lookYaw, a flap (Space) does not end it, release eases home, params.azimuth unchanged.
+  function a7x(occV) {
+    if (!impl.look) return NI('camera.look() does not exist');
+    const c = cam(), inp = ctx.input, out = { status: 'ok', checks: [] };
+    const d2t = () => C.position.distanceTo(c.target);
+    // The way home from a look begun on a dollied lens (l0 = the pre-look lens): n frames after look({on:false}).
+    // λ8 bound: no frame may move the lens more than the λ8 return of the whole gap would on its first frame
+    // (+5% and 0.02 u for the aim's own motion); `after`: the largest step once camera.looking is back to 0.
+    const F8 = 1 - Math.exp(-8 / 30);
+    function homeTrace(l0, n) {
+      const lRel = d2t(), tr = [];
+      for (let i = 0; i < n; i++) { g.step(1, 1 / 30); tr.push({ d: d2t(), k: get('looking') }); }
+      const allow = Math.abs(lRel - l0) * F8 * 1.05 + 0.02;
+      let maxStep = 0, prev = lRel; for (const x of tr) { maxStep = Math.max(maxStep, Math.abs(x.d - prev)); prev = x.d; }
+      const endAt = tr.findIndex((x) => x.k === 0);
+      let after = null; if (endAt >= 0) { after = 0; for (let i = endAt + 1; i < tr.length; i++) after = Math.max(after, Math.abs(tr[i].d - tr[i - 1].d)); }
+      return { atRelease: r(lRel / l0, 4), at0_37s: r(tr[10].d / l0, 4), at0_6s: r(tr[17].d / l0, 4), at1_0s: r(tr[29].d / l0, 4), atEnd: r(tr[n - 1].d / l0, 4),
+        maxStep: r(maxStep, 4), allowed: r(allow, 4), lookEndsFrame: endAt, maxStepAfter: r(after, 4), _err06: Math.abs(tr[17].d / l0 - 1), _excess: maxStep - allow, _after: after };
+    }
+    function homeChecks(tag, h) {
+      out.checks.push(chk(`${tag}: lens/pre-look within 2% at 0.6 s after the release (|ratio−1|)`, h._err06, '<=', 0.02));
+      out.checks.push(chk(`${tag}: no return frame faster than the λ8 return (u, excess)`, h._excess, '<=', 0));
+      out.checks.push(chk(`${tag}: no pop once the look is over (max step, u)`, h._after, '<=', 0.05));
+      delete h._err06; delete h._excess; delete h._after;
+    }
+    const zoomOf = () => { const s = c.lookState; return s && typeof s.zoom === 'number' ? s.zoom : null; };
+    // (1a) zoom 0.7 for 1 s, release · (1b) zoom 1.6 at once
+    setup({ ...MEADOW, frames: 30 }, 1);
+    let d0 = d2t();
+    c.look({ on: true, zoom: 0.7 }); g.step(30, 1 / 30);
+    const dIn = d2t();
+    c.look({ on: false });
+    const tr = []; for (let i = 0; i < 30; i++) { g.step(1, 1 / 30); tr.push({ d: d2t() / d0, z: zoomOf() }); }
+    let track = 0; for (const x of tr) if (x.z) track = Math.max(track, Math.abs(x.d / x.z - 1));
+    out.zoomOut = { lensIn: r(dIn / d0, 4), at0_37s: r(tr[10].d, 4), at0_6s: r(tr[17].d, 4), at1_0s: r(tr[29].d, 4), maxLensVsZoom: r(track, 4) };
+    out.checks.push(chk('zoom 0.7 look: lens back within 2% at 0.6 s (|ratio−1|)', Math.abs(tr[17].d - 1), '<=', 0.02));
+    out.checks.push(chk('zoom 0.7 return: lens rides the look zoom (max |lens/zoom − 1|)', track, '<=', 0.02));
+    setup({ ...MEADOW, frames: 30 }, 1);
+    d0 = d2t();
+    c.look({ on: true, zoom: 1.6 }); g.step(2, 1 / 30);
+    const d2 = d2t() / d0;
+    c.look({ on: false }); g.step(30, 1 / 30);
+    out.zoomHook = { at2frames: r(d2, 4) };
+    out.checks.push(chk('look({zoom:1.6}): lens at 1.6× by frame 2 (|ratio/1.6 − 1|)', Math.abs(d2 / 1.6 - 1), '<=', 0.02));
+    // (1c) the wheel while V is held
+    setup({ ...MEADOW, frames: 30 }, 1);
+    d0 = d2t();
+    inp.pressed.add('KeyV'); inp.keys.add('KeyV'); g.step(8, 1 / 30);
+    inp.wheel = 300; g.step(1, 1 / 30);
+    const wt = []; for (let i = 0; i < 20; i++) { g.step(1, 1 / 30); wt.push({ d: d2t() / d0, z: zoomOf() }); }
+    inp.keys.delete('KeyV'); g.step(30, 1 / 30);
+    let wTrack = 0, wStep = 0; for (let i = 0; i < wt.length; i++) { if (wt[i].z) wTrack = Math.max(wTrack, Math.abs(wt[i].d / wt[i].z - 1)); if (i) wStep = Math.max(wStep, Math.abs(wt[i].d - wt[i - 1].d)); }
+    const goalW = Math.exp(300 * 0.035 / 31);
+    out.wheel = { goal: r(goalW, 4), lensAt0_33s: r(wt[9].d, 4), lensAt0_67s: r(wt[19].d, 4), maxLensVsZoom: r(wTrack, 4), maxStepPerFrame: r(wStep, 4) };
+    out.checks.push(chk('V + wheel 300 px: lens at the goal ×1.403 within 2% by 0.67 s', Math.abs(wt[19].d / goalW - 1), '<=', 0.02));
+    out.checks.push(chk('V + wheel: lens rides the look zoom (max |lens/zoom − 1|)', wTrack, '<=', 0.02));
+    // (1d) a look begun on a DOLLIED lens: a synthetic unpatched (noCut) 16 × 30 × 1 wall 24 u up the lens line
+    // from the aim at MEADOW (mode 1) — the window may not cut it, so the sweep's rule-2 dolly pulls the lens in
+    // front of it (with the sweep's triangle budget lifted for the script: a fresh 12-triangle mesh otherwise waits
+    // for the round-robin cursor, several seconds behind the merged districts) — then a look. While the look holds
+    // the ladder the dolly releases at its own λ3.5, as before this fix: the first frame may move the lens by
+    // (dist − occDist)·(1 − e^(−3.5/30)) and no more (the naive occDist = dist would jump the whole gap at once).
+    // The wall and the budget are put back afterwards.
+    setup({ ...MEADOW, frames: 30 }, 1);
+    const B0 = c.params.occBudget;
+    const tg = c.target, azW = c.current.azimuth, elW = c.current.elevation, hd = 24 * Math.cos(elW);
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(16, 30, 1), new THREE.MeshStandardMaterial({ color: 0x888888 }));
+    wall.name = 'camvis_a7x_wall'; wall.userData.noCut = true;
+    wall.position.set(tg.x + Math.sin(azW) * hd, tg.y + 24 * Math.sin(elW), tg.z + Math.cos(azW) * hd); wall.rotation.y = azW;
+    let od0 = null, gd0 = null, l0 = null, first = null, jump = 0, lens1s = null;
+    try {
+      c.params.occBudget = 1e9;
+      ctx.scene.add(wall); wall.updateMatrixWorld(true);
+      g.step(45, 1 / 30);
+      od0 = get('occDist'); gd0 = get('goalDistance'); l0 = d2t();
+      c.look({ on: true });
+      let prev = l0;
+      for (let i = 0; i < 30; i++) { g.step(1, 1 / 30); const d = d2t(); if (i === 0) first = Math.abs(d - l0); else jump = Math.max(jump, Math.abs(d - prev)); prev = d; }
+      lens1s = prev;
+      c.look({ on: false });
+      out.dollied_home = homeTrace(l0, 45);
+    } finally {
+      ctx.scene.remove(wall); wall.geometry.dispose(); wall.material.dispose(); c.params.occBudget = B0;
+    }
+    g.step(30, 1 / 30);
+    const gap = gd0 !== null && od0 !== null ? gd0 - od0 : null;
+    const allow = gap !== null ? gap * (1 - Math.exp(-3.5 / 30)) + 0.1 : null;
+    out.dollied = { occDist0: r(od0, 3), goal: r(gd0, 3), lens0: r(l0, 3), firstFrame: r(first, 4), allowed: r(allow, 4), naiveJump: r(gap, 3), laterMaxStep: r(jump, 4), lens1s: r(lens1s, 3) };
+    out.checks.push(chk('look on a dollied lens: the wall dollied the lens first (goal − occDist, u)', gap, '>=', 3));
+    out.checks.push(chk('look on a dollied lens: first-frame lens move ≤ the dolly\'s λ3.5 release (u, excess)', first !== null && allow !== null ? first - allow : null, '<=', 0));
+    out.checks.push(chk('look on a dollied lens: no later frame moves more than the first (u, excess)', first !== null ? jump - first : null, '<=', 1e-3));
+    if (out.dollied_home) homeChecks('look on a dollied lens, the way home', out.dollied_home);
+    // (1e) the natural dolly row: occ_silhouette in mode 2 (the §1 order), a plain look for 1 s, then home. Its dolly
+    // comes from the Great Cupcake shell (noFade, so the window may not cut it); if that ever changes (the requested
+    // noGhost edit), the row no longer starts dollied and these checks are reported n/a — (1d) still covers it.
+    if (occV && occV.pos) {
+      setup(occV, 2);
+      const l0e = d2t(), od = get('occDist'), gd = get('goalDistance');
+      const pre = { lens0: r(l0e, 3), occDist0: r(od, 3), goal: r(gd, 3) };
+      if (!(gd - l0e >= 2)) out.dolliedOcc = { ...pre, na: 'occ_silhouette m2 no longer starts dollied (goal − lens < 2 u): n/a, see (1d)' };
+      else {
+        c.look({ on: true }); g.step(30, 1 / 30);
+        c.look({ on: false });
+        const h = homeTrace(l0e, 60);
+        out.dolliedOcc = { ...pre, ...h };
+        homeChecks('occ_silhouette m2, a look on its dollied lens', out.dolliedOcc);
+      }
+    } else out.dolliedOcc = { na: 'no occ_silhouette view' };
+    // (2) playerScreen across the lens plane
+    setup({ pos: [118, 0], time: 12, frames: 30 }, 1);
+    const sz = new THREE.Vector2(); ctx.renderer.getSize(sz);
+    out.playerScreen = [];
+    for (const dz of [37.5, 38, 39.5, 40]) {
+      c.look({ on: true, pan: [0, dz] }); g.step(10, 1 / 30);
+      const ps = c.playerScreen, e = C.matrixWorld.elements, P = pl().position;
+      const depth = -((P.x - e[12]) * e[8] + (P.y - e[13]) * e[9] + (P.z - e[14]) * e[10]);
+      out.playerScreen.push({ pan: dz, depth: r(depth, 4), x: r(ps.x, 1), y: r(ps.y, 1), on: ps.on });
+      out.checks.push(chk(`pan [0,${dz}]: his feet below the frame (playerScreen.y − h, px)`, ps.on ? -1 : ps.y - sz.y, '>', 0));
+      c.look({ on: false }); g.step(30, 1 / 30);
+    }
+    // (3) the vehicle / flying look, synthetic keys (the real-key run is tools/_tmp/fx6/proof.mjs)
+    const fly = resolveFn('escape.routes.flyer.debugFly');
+    if (!fly) { out.flying = 'no escape.routes.flyer.debugFly'; out.checks.push(chk('flying look: debugFly exists', false, '==', true)); return out; }
+    setup({ pos: [206.4, 6], time: 12, frames: 0 }, 1, { noStep: true });
+    fly.fn.call(fly.o, 206.4, 6, 60, -1.5708, true); g.step(40, 1 / 30);
+    const pAz0 = c.params.azimuth, fov0 = C.fov;
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 800, clientY: 500, bubbles: true, pointerType: 'mouse', buttons: 0 }));
+    g.step(1, 1 / 30);
+    inp.pressed.add('KeyV'); inp.keys.add('KeyV');
+    const ft = []; let lock = 0, pan = 0;
+    for (let i = 0; i < 30; i++) { g.step(1, 1 / 30); const s = c.lookState; ft.push(C.fov); lock = Math.max(lock, inp.moveLock || 0); pan = Math.max(pan, Math.hypot(s.pan[0], s.pan[1])); }
+    const sOn = c.lookState, y0 = c.lookYaw;
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 900, clientY: 500, bubbles: true, pointerType: 'mouse', buttons: 0 }));
+    g.step(1, 1 / 30);
+    const dYaw = c.lookYaw - y0;
+    inp.pressed.add('Space'); g.step(1, 1 / 30); g.step(5, 1 / 30);
+    const afterFlap = c.lookState.on;
+    inp.keys.delete('KeyV');
+    const yr = []; let py = c.lookYaw;
+    for (let i = 0; i < 40; i++) { g.step(1, 1 / 30); ft.push(C.fov); yr.push(Math.abs(c.lookYaw - py) * 30); py = c.lookYaw; }
+    let fr = 0; for (let i = 1; i < ft.length; i++) fr = Math.max(fr, Math.abs(ft[i] - ft[i - 1]) * 30);
+    out.flying = { flying: !!ctx.state.flying, on: sOn.on, veh: sOn.veh, fov0: r(fov0, 2), fovAt1s: r(ft[29], 2), maxFovRate: r(fr, 2), moveLock: lock, pan: r(pan, 4), mouseDYaw: r(dYaw, 4),
+      onAfterFlap: afterFlap, lookYawEnd: r(c.lookYaw, 5), lookingEnd: r(c.looking, 5), maxReturnRate: r(maxOf(yr), 3), pAzChange: r(Math.abs(wrap(c.params.azimuth - pAz0)), 6) };
+    out.checks.push(chk('flying: V starts the vehicle look (on && veh)', !!(sOn.on && sOn.veh), '==', true));
+    out.checks.push(chk('flying look: fov toward lookFovVeh 48 (fov at 1 s)', ft[29], '>=', 47));
+    out.checks.push(chk('flying look: fov rate (°/s)', fr, '<=', 12.01));
+    out.checks.push(chk('flying look: moveLock', lock, '==', 0));
+    out.checks.push(chk('flying look: no pan (u)', pan, '<=', 0));
+    out.checks.push(chk('flying look: mouse 100 px feeds lookYaw (|Δ + 0.55|)', Math.abs(dYaw + 0.55), '<=', 1e-6));
+    out.checks.push(chk('flying look: a flap (Space) does not end it', afterFlap, '==', true));
+    out.checks.push(chk('flying look: home after release (|lookYaw|, 1.3 s)', Math.abs(c.lookYaw), '<=', 1e-6));
+    out.checks.push(chk('flying look: return rate (rad/s)', maxOf(yr), '<=', 2.5));
+    out.checks.push(chk('flying look: params.azimuth unchanged', Math.abs(wrap(c.params.azimuth - pAz0)), '<=', 1e-6));
+    return out;
+  }
+
   // A9 — mouse buttons and touch-style writes
   function a9() {
     const c = cam(), inp = ctx.input, pt = inp.pointer, cv = ctx.renderer.domElement;
@@ -1415,7 +1585,7 @@ function pageLib() {
       ] };
   }
 
-  window.__cv = { impl, a3Read, probe, renderNow, skyBand, seenBody, sway, horizon, undo: undoSticky, dirty, watchStart, watchStop, seenStates, a4, seedHoldD, seedProbe, a5, a6, a6x, a7, a8, a9, a10, s7, s7cave,
+  window.__cv = { impl, a3Read, probe, renderNow, skyBand, seenBody, sway, horizon, undo: undoSticky, dirty, watchStart, watchStop, seenStates, a4, seedHoldD, seedProbe, a5, a6, a6x, a7, a7x, a8, a9, a10, s7, s7cave,
     ua: navigator.userAgent,
     gl: (() => { try { const gl = ctx.renderer.getContext(); const x = gl.getExtension('WEBGL_debug_renderer_info'); return x ? gl.getParameter(x.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); } catch { return '?'; } })() };
   return impl;
@@ -1676,6 +1846,8 @@ try {
     if (SCRIPTS.includes('sway')) await run('sway', () => window.__cv.sway());
     // last, so every other script keeps the page history it had before a6x existed
     if (SCRIPTS.includes('a6') || SCRIPTS.includes('a6x')) await run('a6x', () => window.__cv.a6x());
+    // …and after it the look's edges (camera step 6 fix), which ends in the air
+    if (SCRIPTS.includes('a7') || SCRIPTS.includes('a7x')) await run('a7x', (v) => window.__cv.a7x(v), views.occ_silhouette || null);
     out.impl = await page.evaluate(() => window.__cv.impl);
   }
 } catch (err) {

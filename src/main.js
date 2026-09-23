@@ -17,10 +17,19 @@ const SYSTEM_FILES = [
   ['particles', './systems/particles.js'],
   ['inventory', './systems/inventory.js'], ['weapons', './systems/weapons.js'], ['powerups', './systems/powerups.js'],
   ['interaction', './systems/interaction.js'], ['story', './systems/story.js'],
-  ['ui', './systems/ui.js'], ['audio', './systems/audio.js'],
+  ['ui', './systems/ui.js'], ['intro', './systems/intro.js'], ['audio', './systems/audio.js'],
 ];
 const SYSTEMS = [];
+// LOADING-SCREEN HOOK. index.html owns the loading screen and may define
+// window.__cciLoad(stage, done, total, label) — called as modules download and as
+// systems are created, with a frame yielded in between so the screen can animate.
+// Nothing here depends on it existing (the harness has none).
+const LOAD_TOTAL = SYSTEM_FILES.length * 2 + 2;   // imports + creates + warm-up + ready
+let loadStep = 0;
+const loadNote = (stage, label) => { try { window.__cciLoad?.(stage, loadStep++, LOAD_TOTAL, label); } catch (e) {} };
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 for (const [name, file] of SYSTEM_FILES) {
+  loadNote('import', name);
   try { SYSTEMS.push([name, await import(file)]); }
   catch (err) { console.error(`[system ${name}] failed to load ${file}:`, err.message); SYSTEMS.push([name, { create: () => ({ update() {}, __loadError: String(err.message) }) }]); }
 }
@@ -62,6 +71,8 @@ const ctx = {
 
 // Create systems in order; failures in one system must not kill the game.
 for (const [name, mod] of SYSTEMS) {
+  loadNote('create', name);
+  if (!SHOT) await nextFrame();   // let the loading screen paint between heavy builds
   try { ctx.systems[name] = mod.create(ctx) || {}; ctx.systems[name].__name = name; }
   catch (err) { console.error(`[system ${name}] failed to create`, err); ctx.systems[name] = { update() {} , __error: err }; }
 }
@@ -100,7 +111,10 @@ window.addEventListener('resize', () => { cam.aspect = window.innerWidth / windo
 const api = installDebug(ctx, loop);
 if (params.has('pos')) { const [x, z] = params.get('pos').split(',').map(Number); api.teleport(x, z); }
 // warm-up frames so damped systems settle and shaders compile
+loadNote('warmup', 'shaders');
+if (!SHOT) await nextFrame();
 for (let i = 0; i < 3; i++) tick(1 / 30);
-document.getElementById('loading').classList.add('done');
+loadNote('ready', 'ready');
+document.getElementById('loading')?.classList.add('done');
 api.ready = true;
 if (!SHOT) requestAnimationFrame(raf);

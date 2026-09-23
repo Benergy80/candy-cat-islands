@@ -21,6 +21,19 @@
 //   drag         orbit (any mouse button) — vertical drag changes elevation
 //   L (hold)     LOOK UP — flattens to elevation 0.15, widens to fov 44 and
 //                pitches the lens up while held, easing back on release
+//   V (hold)     LOOK AROUND (CAMERA_SPEC §3) — held 0.18 s (or the mouse moves 6 px, or a
+//                movement key goes down) the visitor stands still (input.moveLock) and the
+//                view is yours: the mouse (no button) or any drag orbits a look yaw / pitch,
+//                WASD pans the look point on a 40 u leash (10 u indoors; 14 u/s, Shift 26),
+//                Q/E step it 45°, the wheel zooms ×0.7..1.6; +0.12 el, fov 40. Release
+//                and it all eases home (λ8, yaw ≤ 2.5 rad/s); params.azimuth and
+//                controlAzimuth are never touched, so WASD means what it meant. Space, C,
+//                R, X, Enter, a left click, 1/2/3, E at something, a cinematic, snap(),
+//                setFree(), a teleport, the pause, a lock (on foot), the ferry end it in 0.25 s.
+//                On a vehicle / flying V only orbits (fov 48, no lock, no pan; the machine's own
+//                keys — a flap, a stroke, a boost — do not end it; 1/2/3 and boarding / landing do).
+//   V (tap)      RECENTRE behind the visitor: modes 1/3 snap to the 45° step nearest
+//                facing + π; mode 2 swings the tether there (λ8, ≤ 3 rad/s)
 //   lead         the aim point runs ahead of you, split in camera space (mode 1:
 //                6.5 toward the lens, 3.5 away, 4.0 sideways; mode 2 and 3 have
 //                their own, CAMERA_SPEC §2), ×1.2 at a run, × the zoom; near a path
@@ -163,10 +176,22 @@
 //           m2ElevOff, m2DistK, m2Fov, m2Pitch, m2PitchCap, m2SkyMin,
 //           pathAlign, pathDelay, pathRate,
 //           basisRate, flyDist, flyElev, flyFov, fovRate,
-//           cut, cutRy, cutRx, cutGrow, cutHold, cutRise, cutFall, nearMin, nearMax}
+//           cut, cutRy, cutRx, cutGrow, cutHold, cutRise, cutFall, nearMin, nearMax,
+//           lookHold, lookTapPx, lookYawK, lookElK, lookPan, lookPanRun, lookLeash,
+//           lookLeashIn, lookTaper, lookElevLook, lookFovLook, lookFovVeh, lookIn,
+//           lookOut, lookReturnRate, lookEndT, lookZoomMin, lookZoomMax, recentreRate}
 //           (followLambda / followRecentre are gone: the mode-2 tether has no
-//           timed recentre, CAMERA_SPEC §2)
+//           timed recentre, CAMERA_SPEC §2; the V look's framing lift is lookElevLook,
+//           not the spec's `lookElev`, which is hold-L's 0.15 and stays so)
 //   basis() · snap() · setFree(v|null) · setParams(p) · isFree()
+//   look({on, yaw, pitch, pan:[dx, dz], zoom}) — the V look as a deterministic hook: sets the
+//           look at full strength (yaw / pitch rad, pitch = the look's own elevation offset;
+//           pan [dx, dz] = right / forward in the look basis, as WASD pans, leashed; zoom =
+//           distance ×0.7..1.6) and holds it until look({on:false}), which eases home as a V
+//           release does
+//   recentre() — tap V · looking (0..1) · lookYaw · lookVehicle · lookState (QA) · playerScreen {x, y, on}
+//           (his feet in CSS px of the canvas after the final pitch; on = in front of the lens
+//           and inside the frame) · emits 'camera:look' {on}
 //   mode · setMode(1|2|3) → emits 'camera:mode' · reveal(seconds?)
 //   shake(intensity, duration) · cinematic({target, azimuth, elevation, distance, duration}) → Promise
 //   moonMoment() → Promise|null (forces the night sky moment; emits 'camera:moon')
@@ -227,6 +252,16 @@ const MOON_TOP = 0.045;       // …plus this much clear sky above it
 const MOON_SEA = 0.055;       // …and this much sea/skyline under the horizon line
 const MOON_BODY = 0.07;       // …and this much frame under the visitor, so he is IN the shot
 const MOON_WINDOW = [21, 23.5];   // once a night, inside this hour window
+// the V look (CAMERA_SPEC §3)
+const LOOK_EL_MIN = 0.26, LOOK_EL_MAX = 1.25;   // the look's final elevation stays inside this
+const LOOK_ON = Object.freeze({ on: true }), LOOK_OFF = Object.freeze({ on: false });   // 'camera:look' payloads (no allocation)
+// keys that end a look at once (0.25 s ease) and then act as usual; E only with something in reach
+const LOOK_END_KEYS = ['Space', 'KeyC', 'KeyR', 'KeyX', 'Enter', 'NumpadEnter', 'Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'];
+// …on a vehicle / flying only the mode keys: the look locks nothing there, so the machine's own keys (the
+// flyer's Space flap and X boost, the canoe's Space stroke) already act as usual and must not end it
+const LOOK_END_KEYS_VEH = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'];
+// a movement key going down while V is still pending means "pan": the look starts at once
+const LOOK_MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 
 export function create(ctx) {
   const cam = ctx.camera;
@@ -328,6 +363,17 @@ export function create(ctx) {
     // clamp(0.2 × lens distance, nearMin, nearMax) deep.
     cut: ctx.params?.get?.('cut') === '0' ? 0 : 1,
     cutRy: 1.25, cutRx: 0.8, cutGrow: 1.4, cutHold: 0.6, cutRise: 12, cutFall: 3, nearMin: 2, nearMax: 6,
+    // V LOOK-AROUND (CAMERA_SPEC §3, §6.1). Held lookHold s — or lookTapPx of mouse motion, or a
+    // movement key — it is a look; shorter and stiller it is a tap (recentre). Mouse: yaw −= dx·lookYawK,
+    // el += dy·lookElK. WASD pans the look point lookPan u/s (lookPanRun with Shift), accel λ8, on a
+    // lookLeash leash (lookLeashIn indoors) that tapers over its last lookTaper u. Framing: el +
+    // lookElevLook, fov lookFovLook (lookFovVeh on a vehicle / flying), in at λ lookIn; release eases
+    // home at λ lookOut, the yaw at ≤ lookReturnRate rad/s; a key / event that ends it takes lookEndT s.
+    // The wheel zooms ×lookZoomMin..lookZoomMax. Tap V in mode 2 swings the tether at ≤ recentreRate rad/s.
+    lookHold: 0.18, lookTapPx: 6, lookYawK: 0.0055, lookElK: 0.0035, lookPan: 14, lookPanRun: 26,
+    lookLeash: 40, lookLeashIn: 10, lookTaper: 8, lookElevLook: 0.12, lookFovLook: 40, lookFovVeh: 48,
+    lookIn: 9, lookOut: 8, lookReturnRate: 2.5, lookEndT: 0.25, lookZoomMin: 0.7, lookZoomMax: 1.6,
+    recentreRate: 3,
   };
   // lookAhead is gone (§6.1): kept as a deprecated alias of leadAway
   Object.defineProperty(p, 'lookAhead', { enumerable: false, configurable: true, get: () => p.leadAway, set: (v) => { p.leadAway = v; } });
@@ -403,6 +449,40 @@ export function create(ctx) {
   const cutO = { ry: 1.25, rx: 0.8, rMin: CUT_RMIN, rMax: CUT_RMAX, nearMin: 2, nearMax: 6 };
   let cine = null;
   let lookK = 0;                // hold-L look-up, eased 0..1
+  // ── V LOOK (§3) ── vWas / downWas: V and the left button last frame (edges); vPend: V is down, not yet a
+  // tap or a look (vT s, vMove px of motion, vPanned a movement key went down); lookOn: the look owns the
+  // mouse, Q/E, the wheel and WASD (lookHook: set by look(o), held until look({on:false}); lookVeh: the
+  // vehicle / flying variant); lookLive: some look offset is still non-zero (on, or easing home).
+  let vWas = false, downWas = false, vPend = false, vT = 0, vMove = 0, vPanned = false;
+  let lookOn = false, lookHook = false, lookVeh = false, lookLive = false;
+  let vLookK = 0, lookYaw = 0, lookEl = 0, lookZoom = 0;        // strength 0..1, yaw / el (rad), zoom (log of ×)
+  let lookZoomGoal = 0;         // where the wheel has put the zoom (log of ×); lookZoom follows it at λ lookIn
+  let panX = 0, panZ = 0, panVX = 0, panVZ = 0, lookGY = NaN;  // the look point's offset (world xz), its velocity, ground y
+  let lookTurnTotal = 0, lookTurnDone = 1, lookTurnT = 1;       // Q/E while looking: eased 45° steps of lookYaw
+  let lookEndK = 1;                                              // 0→1 over lookEndT: a look ended by a key / event
+  const lookEnd0 = { k: 0, yaw: 0, el: 0, zoom: 0, x: 0, z: 0 };
+  let recOn = false;            // tap V in mode 2: the tether swings behind the facing (§3)
+  // the ladder's latches, held still while looking (the look lens is not the framing the ladder serves)
+  const ladKeep = { sweepLift: 0, sweepDolly: Infinity, lastDolly: Infinity, clearRun: 0, liftMaxRun: 0, giveUp: false, liftCap: 0, shellBy: null, shellDolly: Infinity };
+  const ladAnchor = new THREE.Vector3(), ladGiveUpAt = new THREE.Vector3();
+  // …and the lens distance while held: occDist rides the look's own distance (its zoom and its λ lookOut
+  // return, 1:1) times ladHoldR, the share a dolly still held back as the look began, released at the dolly's
+  // λ3.5 while the look is on (so a look that starts on a dollied lens does not pop out) and brought home WITH
+  // the look's offsets on the way back: ladHoldR = ladBackG + (ladRelR − ladBackG)·(vLookK / ladRelK), where
+  // ladRelR / ladRelK are the share and the look's strength at the release and ladBackG is the dolly goal of
+  // the framing the look returns to (as a share of it, smoothed at the dolly's own λ16 in / λ3.5 out) — so the
+  // lens is back on the dolly exactly as the look ends, never undollied until then and popped in after;
+  // ladHeld: the ladder was held last frame
+  let ladHoldR = 1, ladHeld = false, ladRelR = 1, ladRelK = 1, ladBackG = NaN;
+  // …and the window's reading as the look began: he stands still while looking, so at the release it is the
+  // right reading for the framing the look returns to (the look lens's own sweeps replaced it meanwhile)
+  const winKeepCut = new Map(), winKeepPlain = new Map();
+  const winKeep = { ok: false, instC: 0, instJ: 0, accC: 0, accP: 0, prevC: 0, prevP: 0 };
+  const keepCutCb = (v, o) => { winKeepCut.set(o, v); }, keepPlainCb = (v, o) => { winKeepPlain.set(o, v); };
+  const backCutCb = (v, o) => { cutHits.set(o, v); }, backPlainCb = (v, o) => { plainHits.set(o, v); };
+  // his feet on screen (playerScreen, §6.4): CSS px of the canvas, after the final pitch
+  const pScr = { x: 0, y: 0, on: false };
+  const scrV = new THREE.Vector3(), scrSize = new THREE.Vector2();
   let moonDone = false;         // the night sky moment already ran this night
   let moonTick = 0.6;           // seconds until the next cheap window check
   let moonToastT = -1, moonToastText = '';
@@ -589,7 +669,18 @@ export function create(ctx) {
     orbitNow = 0;
     if (turnT < 1) { turnT = Math.min(1, turnT + dt / azDur); const e = ease(turnT); az += turnTotal * (e - turnDone); turnDone = e; }
     let step = 0;
-    if (flyNow) {
+    if (recOn && !flyNow) {
+      // tap V (§3): the anchor swings behind the facing at λ8, never faster than recentreRate (the Q/E
+      // snap's peak; 0.1% under it so a frame never reads over it); path alignment waits it out
+      fwdT = 0; alignK = 0;
+      const f = pl.facing;
+      if (Number.isFinite(f)) {
+        const e = wrap(f + Math.PI - az), cap = p.recentreRate * 0.999 * dt;
+        const s = clamp(e * (1 - Math.exp(-8 * dt)), -cap, cap);
+        az += s;
+        if (Math.abs(e - s) < 1e-3) recOn = false;
+      } else recOn = false;
+    } else if (flyNow) {
       fwdT = 0; alignK = 0;
       const h = ctx.state.flying?.heading;
       if (Number.isFinite(h) && manualT >= ORBIT_WAIT) step = clamp(wrap(h + Math.PI - az) * (1 - Math.exp(-FLY_L * dt)), -FLY_RATE * dt, FLY_RATE * dt);
@@ -631,7 +722,7 @@ export function create(ctx) {
   }
   /** Rotate the tether by d radians, eased over azDur (Q/E in mode 2). */
   function turnTether(d) { turnTotal = turnTotal * (1 - turnDone) + d; turnDone = 0; turnT = 0; }
-  function resetTether() { turnTotal = 0; turnDone = 1; turnT = 1; orbitNow = 0; fwdT = 0; alignK = 0; }
+  function resetTether() { turnTotal = 0; turnDone = 1; turnT = 1; orbitNow = 0; fwdT = 0; alignK = 0; recOn = false; }
   /** The tether is handing the yaw back to p.azimuth (2→1/3, landing, ownership):
    *  keep the bearing the lens has, including any whisker offset. */
   function handYawBack() {
@@ -674,7 +765,7 @@ export function create(ctx) {
   function updateLead(dt, pl, az) {
     let gx = 0, gz = 0;
     const v = pl?.velocity, vs = v ? Math.hypot(v.x, v.z) : 0;
-    if (vs > 1e-3) {
+    if (vs > 1e-3 && !lookOn) {                // looking (§3): the lead is off (its goal is 0, it decays)
       const Fx = -Math.sin(az), Fz = -Math.cos(az), Rx = Math.cos(az), Rz = -Math.sin(az);
       const f = (v.x * Fx + v.z * Fz) / vs, r = (v.x * Rx + v.z * Rz) / vs;
       let away, toward, side;
@@ -719,6 +810,206 @@ export function create(ctx) {
     cam.lookAt(tgt);
   }
 
+  // ── V LOOK-AROUND (CAMERA_SPEC §3) ───────────────────────────────────────
+  // The look is a set of OFFSETS on top of the gameplay framing — lookYaw, lookEl, lookZoom and the pan
+  // (the look point's xz offset from the aim) — plus vLookK (the framing lift and the look lens). Nothing
+  // the gameplay owns (p.azimuth, cur.*, controlAzimuth, the tether) is written by a look, so the return
+  // is just the offsets easing to 0 and WASD means afterwards what it meant before.
+  function lookZero() {
+    vLookK = 0; lookYaw = 0; lookEl = 0; lookZoom = 0; lookZoomGoal = 0; panX = 0; panZ = 0; panVX = 0; panVZ = 0; lookGY = NaN;
+    lookTurnTotal = 0; lookTurnDone = 1; lookTurnT = 1; lookEndK = 1; lookLive = false;
+  }
+  /** Off at once, no ease (snap(), setFree(), a teleport): a cut starts clean. */
+  function lookReset() {
+    if (lookOn) ctx.events.emit('camera:look', LOOK_OFF);
+    lookOn = false; lookHook = false; vPend = false; winKeep.ok = false; winKeepCut.clear(); winKeepPlain.clear();
+    lookZero(); ladHeld = false;
+    if (ctx.input && ctx.input.moveLock > 0) ctx.input.moveLock = 0;
+  }
+  /** V released / look({on:false}): the offsets ease home (λ lookOut, the yaw ≤ lookReturnRate). */
+  function lookRelease() {
+    if (!lookOn) return;
+    if (!lookVeh) windowRestore();               // he has not moved: the reading from before the look holds
+    ladRelR = ladHoldR; ladRelK = vLookK; ladBackG = NaN;   // the dolly share comes home with the offsets
+    lookOn = false; lookHook = false;
+    if (ctx.input && ctx.input.moveLock > 0) ctx.input.moveLock = 0;
+    ctx.events.emit('camera:look', LOOK_OFF);
+  }
+  /** Ended by a key or an event (§3 "ends the look immediately"): the offsets ease home over lookEndT s. */
+  function lookEnd() {
+    vPend = false;
+    if (!lookOn) return;
+    lookRelease();
+    lookEnd0.k = vLookK; lookEnd0.yaw = lookYaw; lookEnd0.el = lookEl; lookEnd0.zoom = lookZoom; lookEnd0.x = panX; lookEnd0.z = panZ;
+    lookEndK = 0; panVX = 0; panVZ = 0; lookTurnT = 1;
+  }
+  function lookStart(veh) {
+    if (!lookOn) ctx.events.emit('camera:look', LOOK_ON);
+    if (!lookLive) windowSave();                 // a fresh look (a look resumed on the way home keeps the first)
+    lookOn = true; lookHook = false; lookVeh = veh; lookLive = true;
+    lookEndK = 1; recOn = false;                     // a look continues from wherever a return had got to
+    lookZoomGoal = lookZoom;                         // …its zoom included (the wheel moves the goal from there)
+  }
+  const lookLeash = () => (inNow ? p.lookLeashIn : p.lookLeash);
+  /** WASD / arrows (or the stick) pan the look point in the look basis, on the leash (§3). */
+  function lookPanStep(dt, inp) {
+    const run = inp.keys.has('ShiftLeft') || inp.keys.has('ShiftRight');
+    const spd = run ? p.lookPanRun : p.lookPan;
+    const azL = cur.azimuth + occYaw + lookYaw, sa = Math.sin(azL), ca = Math.cos(azL);
+    // F = (−sin, −cos) up-screen, R = (cos, −sin) right
+    let gx = (-sa * axNow.y + ca * axNow.x) * spd, gz = (-ca * axNow.y - sa * axNow.x) * spd;
+    const leash = lookLeash(), r = Math.hypot(panX, panZ);
+    let ux = 0, uz = 0, kT = 1;
+    if (r > 1e-6) {
+      ux = panX / r; uz = panZ / r; kT = clamp((leash - r) / p.lookTaper, 0, 1);
+      const out = gx * ux + gz * uz;
+      if (out > 0) { gx -= ux * out * (1 - kT); gz -= uz * out * (1 - kT); }
+    }
+    const a = 1 - Math.exp(-8 * dt);
+    panVX += (gx - panVX) * a; panVZ += (gz - panVZ) * a;
+    // the taper holds the VELOCITY too (the λ8 lag would otherwise carry it past the taper): outward speed
+    // ≤ spd × what is left of the leash / lookTaper, so the leash is approached, never hit
+    if (r > 1e-6) {
+      const out = panVX * ux + panVZ * uz, maxOut = spd * kT;
+      if (out > maxOut) { panVX -= ux * (out - maxOut); panVZ -= uz * (out - maxOut); }
+    }
+    panX += panVX * dt; panZ += panVZ * dt;
+    const r2 = Math.hypot(panX, panZ);
+    if (r2 > leash) { panX *= leash / r2; panZ *= leash / r2; }
+  }
+  /**
+   * One frame of V (§3), before any other camera input. Returns true while the look owns the mouse, Q/E,
+   * the wheel and WASD (the caller then skips its own orbit / zoom / turn).
+   *   · V down → pending; up within lookHold s and lookTapPx px → TAP (recentre); held, moved or panned → LOOK.
+   *   · the look ends at once (lookEndT) on the keys of LOOK_END_KEYS, a left click, E with something in
+   *     reach, a cinematic, the pause, a lock, the ferry, or a change of vehicle / flying.
+   */
+  function lookInput(dt, inp, pl, busyE) {
+    const P = inp.pointer;
+    const vNow = inp.keys.has('KeyV');
+    const vEdge = vNow && !vWas; vWas = vNow;
+    const click = !!P.down && !downWas; downWas = !!P.down;
+    const veh = !!(pl?.onVehicle || flyNow);
+    // a lock blocks the look on foot only: every vehicle boards through escape/ride.js mount(), which locks the
+    // visitor (pl.locked) for the whole ride, and the vehicle / flying look is the orbit-only variant (§3). A
+    // boarding or a landing still ends a look (veh !== lookVeh, below).
+    const blocked = !!(cine || ctx.state.paused || (pl?.locked && !veh) || pl?.onFerry || ctx.state.ferry);
+    if (lookOn) {
+      let end = blocked || veh !== lookVeh || click || (busyE && inp.pressed.has('KeyE'));
+      const endKeys = lookVeh ? LOOK_END_KEYS_VEH : LOOK_END_KEYS;
+      if (!end && inp.pressed.size) for (let i = 0; i < endKeys.length; i++) if (inp.pressed.has(endKeys[i])) { end = true; break; }
+      if (end) lookEnd();
+      else if (!lookHook && !vNow) lookRelease();
+    }
+    if (vEdge && !lookOn && !blocked) { vPend = true; vT = 0; vMove = 0; vPanned = false; }
+    if (vPend) {
+      if (blocked) vPend = false;
+      else if (!vNow) {
+        vPend = false;
+        // a TAP: short and still. On a vehicle / flying V only looks (§3).
+        if (vT < p.lookHold && vMove < p.lookTapPx && !veh) api.recentre();
+      } else {
+        if (!vEdge) vT += dt;
+        vMove += Math.abs(P.mdx) + Math.abs(P.mdy) + (P.down || P.orbit ? Math.abs(P.dragDX) + Math.abs(P.dragDY) : 0);
+        if (!veh && inp.pressed.size) for (let i = 0; i < LOOK_MOVE_KEYS.length; i++) if (inp.pressed.has(LOOK_MOVE_KEYS[i])) { vPanned = true; break; }
+        if (vT >= p.lookHold || vMove >= p.lookTapPx || vPanned) { vPend = false; lookStart(veh); }
+      }
+    }
+    if (lookOn) {
+      vLookK = lookHook ? 1 : damp(vLookK, 1, p.lookIn, dt);
+      if (!lookVeh) inp.moveLock = 2;              // the visitor stands still (§6.2); refreshed every frame
+      // the mouse with no button, or any drag (right / middle, a touch thumb): the look's yaw and pitch
+      const orb = P.down || P.orbit;
+      const mx = (P.mdx || 0) + (orb ? P.dragDX || 0 : 0), my = (P.mdy || 0) + (orb ? P.dragDY || 0 : 0);
+      if (mx) lookYaw -= mx * p.lookYawK;
+      if (my) lookEl += my * p.lookElK;           // clamped against the frame's elevation where it is composed
+      if (!lookVeh) {
+        if (inp.pressed.has('KeyQ')) lookTurn(+STEP);
+        if (inp.pressed.has('KeyE') && !busyE) lookTurn(-STEP);
+      }
+      if (lookTurnT < 1) { lookTurnT = Math.min(1, lookTurnT + dt / azDur); const e = ease(lookTurnT); lookYaw += lookTurnTotal * (e - lookTurnDone); lookTurnDone = e; }
+      // the wheel moves the zoom's goal; the zoom follows at λ lookIn (the lens rides it 1:1, so no notch pops)
+      if (inp.wheel) lookZoomGoal = clamp(lookZoomGoal + inp.wheel * 0.035 / DIST_REF, Math.log(p.lookZoomMin), Math.log(p.lookZoomMax));
+      if (lookZoom !== lookZoomGoal) {
+        lookZoom = damp(lookZoom, lookZoomGoal, p.lookIn, dt);
+        if (Math.abs(lookZoom - lookZoomGoal) < 1e-5) lookZoom = lookZoomGoal;
+      }
+      if (!lookVeh) lookPanStep(dt, inp); else { panX = 0; panZ = 0; panVX = 0; panVZ = 0; }
+      lookLive = true;
+    } else if (lookLive) lookReturn(dt);
+    return lookOn;
+  }
+  function lookTurn(d) { lookTurnTotal = lookTurnTotal * (1 - lookTurnDone) + d; lookTurnDone = 0; lookTurnT = 0; }
+  /** The way home: λ lookOut with the yaw capped at lookReturnRate (1% under it, so no frame reads over
+   *  it), or — ended by a key / event — lookEndT s of ease. Snaps to exactly 0 once imperceptible. */
+  function lookReturn(dt) {
+    panVX = 0; panVZ = 0; lookTurnT = 1; lookTurnTotal = 0; lookTurnDone = 1;
+    if (lookEndK < 1) {
+      lookEndK = Math.min(1, lookEndK + dt / Math.max(1e-3, p.lookEndT));
+      const w = 1 - ease(lookEndK);
+      vLookK = lookEnd0.k * w; lookYaw = lookEnd0.yaw * w; lookEl = lookEnd0.el * w; lookZoom = lookEnd0.zoom * w;
+      panX = lookEnd0.x * w; panZ = lookEnd0.z * w;
+      if (lookEndK >= 1) lookZero();
+      return;
+    }
+    const k = 1 - Math.exp(-p.lookOut * dt), cap = p.lookReturnRate * 0.99 * dt;
+    lookYaw += clamp(-lookYaw * k, -cap, cap);
+    lookEl -= lookEl * k; lookZoom -= lookZoom * k; panX -= panX * k; panZ -= panZ * k; vLookK -= vLookK * k;
+    if (Math.abs(lookYaw) < 2e-3 && Math.abs(lookEl) < 1e-3 && Math.abs(lookZoom) < 1e-3 && Math.hypot(panX, panZ) < 0.05 && vLookK < 5e-3) lookZero();
+  }
+  function windowSave() {
+    winKeepCut.clear(); winKeepPlain.clear();
+    cutHits.forEach(keepCutCb); plainHits.forEach(keepPlainCb);
+    winKeep.instC = instC; winKeep.instJ = instJ; winKeep.accC = instAccCut; winKeep.accP = instAccPlain;
+    winKeep.prevC = instPrevCut; winKeep.prevP = instPrevPlain; winKeep.ok = true;
+  }
+  function windowRestore() {
+    if (!winKeep.ok) return;
+    winKeep.ok = false;
+    cutHits.clear(); plainHits.clear();
+    winKeepCut.forEach(backCutCb); winKeepPlain.forEach(backPlainCb);
+    winKeepCut.clear(); winKeepPlain.clear();
+    instC = winKeep.instC; instJ = winKeep.instJ; instAccCut = winKeep.accC; instAccPlain = winKeep.accP;
+    instPrevCut = winKeep.prevC; instPrevPlain = winKeep.prevP;
+    cutTally(instPrevCut | instAccCut, instPrevPlain | instAccPlain);
+  }
+  /** Hold the ladder's latches still across a sweep made while looking (the window still reads it). */
+  function ladderSave() {
+    ladKeep.sweepLift = sweepLift; ladKeep.sweepDolly = sweepDolly; ladKeep.lastDolly = lastDolly; ladKeep.clearRun = clearRun;
+    ladKeep.liftMaxRun = liftMaxRun; ladKeep.giveUp = giveUp; ladKeep.liftCap = liftCap; ladKeep.shellBy = shellBy; ladKeep.shellDolly = shellDolly;
+    ladAnchor.copy(liftAnchor); ladGiveUpAt.copy(giveUpAt);
+  }
+  function ladderRestore() {
+    sweepLift = ladKeep.sweepLift; sweepDolly = ladKeep.sweepDolly; lastDolly = ladKeep.lastDolly; clearRun = ladKeep.clearRun;
+    liftMaxRun = ladKeep.liftMaxRun; giveUp = ladKeep.giveUp; liftCap = ladKeep.liftCap; shellBy = ladKeep.shellBy; shellDolly = ladKeep.shellDolly;
+    liftAnchor.copy(ladAnchor); giveUpAt.copy(ladGiveUpAt);
+  }
+  /** playerScreen: his feet projected with the final matrix (call after cam.updateMatrixWorld). */
+  function projectPlayer() {
+    const P = ctx.systems.player?.position;
+    if (!P || free) { pScr.on = false; return; }
+    const e = cam.matrixWorld.elements;
+    const dx = P.x - e[12], dy = P.y - e[13], dz = P.z - e[14];
+    const depth = -(dx * e[8] + dy * e[9] + dz * e[10]);
+    let nx, ny;
+    if (depth > 1e-6) {
+      // in front of the lens (w > 0) the projection keeps his side of the frame, however near the lens plane
+      // he is (0 < depth ≤ near included: huge values, the right way round); `on` below still needs > near
+      scrV.set(P.x, P.y, P.z).project(cam); nx = scrV.x; ny = scrV.y;
+    } else {
+      // at or behind the lens plane (w ≤ 0) the projection flips through the centre (or divides by 0): take his
+      // side from view space instead — the camera's right / up axes, in NDC proportion — and push it far off
+      const th = Math.tan(cam.fov * Math.PI / 360) || 1;
+      nx = (dx * e[0] + dy * e[1] + dz * e[2]) / (th * (cam.aspect || 1));
+      ny = (dx * e[4] + dy * e[5] + dz * e[6]) / th;
+      const l = Math.hypot(nx, ny);
+      if (l > 1e-9) { nx = nx / l * 1e3; ny = ny / l * 1e3; } else { nx = 0; ny = -1e3; }   // dead behind: below
+    }
+    if (ctx.renderer?.getSize) ctx.renderer.getSize(scrSize); else scrSize.set(1, 1);
+    pScr.x = (nx * 0.5 + 0.5) * scrSize.x; pScr.y = (0.5 - ny * 0.5) * scrSize.y;
+    pScr.on = depth > cam.near && nx >= -1 && nx <= 1 && ny >= -1 && ny <= 1;
+  }
+
   const api = {
     params: p, current: cur, target,
     /** Camera-relative forward/right on the ground plane (movement uses this).
@@ -753,6 +1044,7 @@ export function create(ctx) {
 
     snap() {
       status();
+      lookReset();                                 // §6.4: a cut ends the look (and the lock) at once
       // ownership began in mode 2 and this snap is its cut (sourpatch eaten.js locks, then
       // snaps): the owned framing reads p.azimuth, which mode 2 never writes — keep the lens's
       // bearing, unless the owner has just aimed it (update() applies the same rule)
@@ -829,12 +1121,14 @@ export function create(ctx) {
         cutGrowK = cutRays >= 2 || cutPlinth ? p.cutGrow : 1;
         writeCut(cutKraw);
       } else { cut.off(); cutKraw = 0; cutEff = 0; }
+      projectPlayer();
       // not lastPAz: an owner's setParams({azimuth}) just before this snap must still read as the
       // owner's write at the next update() (that is how the cave's corridor aim got clobbered)
       snapFresh = true;
     },
     setFree(v) {
       free = v;
+      lookReset();                                 // either way the look is over (§3, §6.4)
       clearFades(); clearCull();                  // a free camera frames the world, not the player
       // the window and the near-lens band are off under a free camera (free renders stay pixel-identical);
       // back on the player it re-opens from 0 as the sweep asks. The collider trigger's bookkeeping is
@@ -1087,6 +1381,70 @@ export function create(ctx) {
     get cinematicActive() { return !!cine; },
     /** 0..1 — how far into the hold-L look-up the lens currently is. */
     get lookingUp() { return lookK; },
+    /** 0..1 — the V look's strength (§3): 1 while looking, easing to 0 on the way home. */
+    get looking() { return vLookK; },
+    /** The V look's own yaw offset (rad; 0 unless the mouse, a drag or Q/E moved it). */
+    get lookYaw() { return lookYaw; },
+    /** The V look (on, or the last one, easing home) is the vehicle / flying variant: orbit only, no pan (§3). */
+    get lookVehicle() { return lookVeh; },
+    /** QA: the V look's whole state (allocates; not for per-frame use). */
+    get lookState() {
+      return { on: lookOn, hook: lookHook, veh: lookVeh, pending: vPend, k: vLookK, yaw: lookYaw, el: lookEl,
+        zoom: Math.exp(lookZoom), zoomGoal: Math.exp(lookZoomGoal), pan: [panX, panZ], ending: lookEndK < 1, recentring: recOn };
+    },
+    /** His feet on screen, CSS px of the canvas (y down), after the final pitch; on = in front of the
+     *  lens and inside the frame. A shared object: read it, do not keep it. */
+    get playerScreen() { return pScr; },
+    /**
+     * The V look as a deterministic hook (views, debug): { on, yaw, pitch, pan: [dx, dz], zoom }.
+     * on (default true) sets the look at full strength — yaw / pitch (the look's own elevation offset)
+     * in radians, pan [right, forward] in the look basis (as WASD pans it; clamped to the leash), zoom ×0.7..1.6 — with the
+     * look lens at once, and holds it (V's release does not end it) until look({ on: false }), which
+     * eases home exactly as a V release does. On a vehicle / flying it is the orbit-only variant.
+     */
+    look(o = {}) {
+      if (!o || o.on === false) { lookRelease(); return false; }
+      status();
+      const pl = ctx.systems.player;
+      lookStart(!!(pl?.onVehicle || flyNow));
+      lookHook = true; vPend = false;
+      lookTurnTotal = 0; lookTurnDone = 1; lookTurnT = 1;
+      vLookK = 1;
+      lookYaw = Number(o.yaw) || 0; lookEl = Number(o.pitch) || 0;
+      const z = Number(o.zoom);
+      lookZoom = Number.isFinite(z) && z > 0 ? clamp(Math.log(z), Math.log(p.lookZoomMin), Math.log(p.lookZoomMax)) : 0;
+      lookZoomGoal = lookZoom;                     // at once: the lens rides it from the next frame (no dolly lag)
+      panX = 0; panZ = 0; panVX = 0; panVZ = 0; lookGY = NaN;
+      if (!lookVeh && Array.isArray(o.pan)) {
+        // [dx, dz] in the LOOK basis, as WASD pans: dx to the right, dz forward (up-screen) — so pan [0, 38]
+        // puts the look point 38 u ahead and him off the bottom of the frame (cam_look_offscreen). Stored in
+        // world xz, as the pan always is (turning the look afterwards does not swing the look point).
+        const dx = Number(o.pan[0]) || 0, dz = Number(o.pan[1]) || 0;
+        const azL = cur.azimuth + occYaw + lookYaw, sa = Math.sin(azL), ca = Math.cos(azL);
+        panX = ca * dx - sa * dz; panZ = -sa * dx - ca * dz;
+        const r = Math.hypot(panX, panZ), L = lookLeash();
+        if (r > L) { panX *= L / r; panZ *= L / r; }
+      }
+      if (!lookVeh && ctx.input) ctx.input.moveLock = 2;
+      // the look lens at once (a view gets its frames, a debug call its first one)
+      modeFov = lookVeh ? p.lookFovVeh : p.lookFovLook;
+      if (!free) { cam.fov = modeFov; cam.updateProjectionMatrix(); }
+      return true;
+    },
+    /**
+     * Tap V (§3): recentre behind the visitor. Modes 1/3 (and owned mode 2) snap p.azimuth to the 45° step
+     * nearest facing + π (the cave reads that as a manual turn, which it is); mode 2 swings the tether
+     * behind the facing at λ8, ≤ recentreRate rad/s. Clears the path-alignment ramp. Not while flying.
+     */
+    recentre() {
+      status();
+      const f = ctx.systems.player?.facing;
+      if (free || flyNow || !Number.isFinite(f)) return false;
+      fwdT = 0; alignK = 0; manualT = 0;
+      if (mode === 2 && !ownNow) { recOn = true; turnT = 1; turnTotal = 0; turnDone = 1; return true; }
+      snapTo(Math.round((f + Math.PI) / STEP) * STEP);
+      return true;
+    },
     /** Has this night's sky moment already been spent? */
     get moonMomentDone() { return moonDone; },
 
@@ -1180,18 +1538,22 @@ export function create(ctx) {
       // E is also "interact"; only rotate when nothing is in interaction range.
       // Q/E and drag rotate the tether in mode 2 (and while flying), p.azimuth otherwise.
       const busyE = !!ctx.systems.interaction?.nearest?.();
-      const turn = (d) => { if (tOn) { turnTether(d); manualT = 0; alignK = 0; } else startSnap(d); };
-      if (inp.pressed.has('KeyQ')) turn(+STEP);
-      if (inp.pressed.has('KeyE') && !busyE) turn(-STEP);
-      if (inp.wheel) { p.distance = clamp(p.distance + inp.wheel * 0.035, p.minDist, p.maxDist); }
-      // Drag orbits while ANY button is held: left sets pointer.down, right/middle
-      // set pointer.orbit (input contract v3, CAMERA_SPEC §6.2); touch writes either.
-      const orbiting = inp.pointer.down || inp.pointer.orbit;
-      if (orbiting && inp.pointer.dragDX) {
-        if (tOn) { orbitNow -= inp.pointer.dragDX * 0.006; manualT = 0; alignK = 0; }
-        else { p.azimuth -= inp.pointer.dragDX * 0.006; azFrom = azTo = p.azimuth; azT = 1; }
+      // V (§3): tap = recentre, hold = look. While the look is on it owns the mouse, Q/E, the wheel and WASD.
+      const looking = lookInput(dt, inp, pl, busyE);
+      const turn = (d) => { if (tOn) { turnTether(d); manualT = 0; alignK = 0; recOn = false; } else startSnap(d); };
+      if (!looking) {
+        if (inp.pressed.has('KeyQ')) turn(+STEP);
+        if (inp.pressed.has('KeyE') && !busyE) turn(-STEP);
+        if (inp.wheel) { p.distance = clamp(p.distance + inp.wheel * 0.035, p.minDist, p.maxDist); }
+        // Drag orbits while ANY button is held: left sets pointer.down, right/middle
+        // set pointer.orbit (input contract v3, CAMERA_SPEC §6.2); touch writes either.
+        const orbiting = inp.pointer.down || inp.pointer.orbit;
+        if (orbiting && inp.pointer.dragDX) {
+          if (tOn) { orbitNow -= inp.pointer.dragDX * 0.006; manualT = 0; alignK = 0; recOn = false; }
+          else { p.azimuth -= inp.pointer.dragDX * 0.006; azFrom = azTo = p.azimuth; azT = 1; }
+        }
+        if (orbiting && inp.pointer.dragDY) { p.elevation = clamp(p.elevation - inp.pointer.dragDY * 0.004, p.minElev, p.maxElev); if (tOn) { manualT = 0; alignK = 0; } }
       }
-      if (orbiting && inp.pointer.dragDY) { p.elevation = clamp(p.elevation - inp.pointer.dragDY * 0.004, p.minElev, p.maxElev); if (tOn) { manualT = 0; alignK = 0; } }
 
       const sp = ctx.state.playerSpeed || 0;
       // town core? (eases the pitch down and the aim point up — see ZONES)
@@ -1229,8 +1591,9 @@ export function create(ctx) {
       // ── per-mode lens + pitch (§2) ──────────────────────────────────────
       // A mode change eases the FOV at λ5, ≤ fovRate °/s; the take-off does not
       // (flyer.js takes the camera over unless it reads ≥ 33° at 0.6 s).
-      const fg = fovGoalMode();
-      if (flyNow) modeFov = damp(modeFov, fg, FLY_FOV_L, dt);
+      // …and the V look eases to its own lens (lookFovLook, lookFovVeh on a vehicle), capped the same way
+      const fg = lookOn ? (lookVeh ? p.lookFovVeh : p.lookFovLook) : fovGoalMode();
+      if (flyNow && !lookLive) modeFov = damp(modeFov, fg, FLY_FOV_L, dt);
       else { const nf = damp(modeFov, fg, 5, dt); modeFov += clamp(nf - modeFov, -p.fovRate * dt, p.fovRate * dt); }
       pitchBase = damp(pitchBase, pitchGoal(), 5, dt);
       baseDistNow = baseDist();
@@ -1247,7 +1610,10 @@ export function create(ctx) {
       const sa = Math.sin(viewAz), ca = Math.cos(viewAz);
       const eDz = Math.hypot((dx * ca - dz2 * sa) / dzW, (dx * sa + dz2 * ca) / dzD);   // R·d / dzW, F·d / dzD
       const chase = 6.5 + Math.min(1, sp / 6) * 5;
-      if (eDz > 1) {
+      if (lookOn) {                               // looking (§3): no dead zone, the aim is chased as it is
+        target.x = damp(target.x, tmp.x, chase, dt);
+        target.z = damp(target.z, tmp.z, chase, dt);
+      } else if (eDz > 1) {
         const k = 1 - 1 / eDz;
         target.x = damp(target.x, target.x + dx * k, chase, dt);
         target.z = damp(target.z, target.z + dz2 * k, chase, dt);
@@ -1270,7 +1636,8 @@ export function create(ctx) {
       // ── look up (hold L) ────────────────────────────────────────────────
       // A cinematic outranks it; so does the pause. The pitch is the half that
       // actually shows sky (see lookPitch).
-      const wantLook = (!cine && !ctx.state.paused && inp.down('KeyL')) ? 1 : 0;
+      // (and the V look outranks it, §2 "L … suppressed while looking")
+      const wantLook = (!cine && !ctx.state.paused && inp.down('KeyL') && !lookOn && vLookK < 0.05) ? 1 : 0;
       lookK = damp(lookK, wantLook, wantLook > lookK ? 5.5 : 3.2, dt);
 
       // ── compose final view (+ look-up, + cinematic blend) ───────────────
@@ -1279,6 +1646,25 @@ export function create(ctx) {
       let az = cur.azimuth + occYaw, el = cur.elevation + brEl + tiltNow, dist = cur.distance + brDist;
       let fovGoal = modeFov, pitch = pitchBase, holdAng = 0, keepM = 1;   // keepM: the mode pitch's share after the blends
       tmp.copy(target);
+      const az0 = az, el0 = el, dist0 = dist;     // the gameplay framing, before any look offset
+      if (lookLive) {
+        // THE V LOOK (§3): its yaw on top of the view's (never into cur / p / controlAzimuth), the framing
+        // lift (on foot) then its own pitch — which may not push the final elevation out of 0.26..1.25 —
+        // the zoom, and the look point: the aim + the pan, riding the ground under it (groundInfo h + 1.15;
+        // blended in over the first 4 u so the pan starts from the aim, not from a step)
+        az += lookYaw;
+        const base = el + (lookVeh ? 0 : p.lookElevLook * vLookK);
+        lookEl = clamp(lookEl, Math.min(0, LOOK_EL_MIN - base), Math.max(0, LOOK_EL_MAX - base));
+        el = base + lookEl;
+        if (lookZoom !== 0) dist *= Math.exp(lookZoom);
+        const r = Math.hypot(panX, panZ);
+        if (r > 1e-4) {
+          const gy = groundH(target.x + panX, target.z + panZ);
+          lookGY = lookGY === lookGY && !lookHook ? damp(lookGY, gy, 10, dt) : gy;
+          tmp.x += panX; tmp.z += panZ;
+          tmp.y += smoothstep(0, 4, r) * (lookGY + 1.15 - target.y);
+        } else lookGY = NaN;
+      }
       if (lookK > 0.002) {
         el = lerp(el, p.lookElev, lookK);
         fovGoal = lerp(fovGoal, p.lookFov, lookK);
@@ -1310,7 +1696,21 @@ export function create(ctx) {
       // tip up and look over what the lens cannot get in front of. Two sources:
       // the cheap per-frame collider cylinders, and the capsule sweep's real
       // triangle hits (whichever asks for more, gets it).
-      const want = occlude(tmp, az, el, dist, Math.min(dist, occDist));   // occDist: where the lens stood last frame
+      // While LOOKING — and until the way home is over (lookLive) — the ladder holds still (§3: the look lens
+      // frames the look point, not the framing the ladder serves): the lens is never dollied (occDist rides the
+      // look distance 1:1 — its zoom and its λ lookOut return — less any dolly the look began on, released at
+      // λ3.5) nor tilted (occLift held), and the sweep's latches are put back after each sweep;
+      // the window, the cull and the fades still read it. The collider pass is skipped while the look is on
+      // (its sight line runs to the look point, not to him) and feeds only the window's trigger on the way
+      // home. Holding through the return matters: a look that took him off screen shut the window, and a
+      // ladder let go before the window has re-read the frame tilts over what the window would have opened.
+      // On the way home the collider pass and the sweep read the framing the look returns to (az0/el0/dist0 on
+      // the target), not the half-returned lens: that is the framing the ladder and the window serve.
+      const ladHold = lookLive, lookBack = lookLive && !lookOn;
+      const want = lookOn ? occOut
+        : lookBack ? occlude(target, az0, el0, dist0, Math.min(dist0, occDist))
+          : occlude(tmp, az, el, dist, Math.min(dist, occDist));   // occDist: where the lens stood last frame
+      if (lookOn) { occOut.dist = dist; occOut.lift = 0; occOut.trig = false; }
       colRun = want.trig ? colRun + 1 : 0;       // the window's collider trigger needs two frames running
       if (!colRun) colSweeps = 0;
       // THE LADDER AS A SENSOR (§5.2). While the window carries the frame (open, or opening) the lens holds
@@ -1319,13 +1719,37 @@ export function create(ctx) {
       // patched wall from an unpatched one — only dollies alongside a dolly / tilt the sweep is running (colAssist()).
       winCarry = carries(holdAng);
       const colOk = colAssist();
-      const dollyGoal = winCarry ? dist : Math.min(colOk ? want.dist : dist, sweepDolly, shellDolly);
-      occDist = dollyGoal < occDist ? damp(occDist, dollyGoal, 16, dt) : damp(occDist, dollyGoal, 3.5, dt);
-      const liftGoal = winCarry ? 0 : clamp(Math.max(want.lift, sweepLift), 0, liftMaxNow(el));
-      // λ5 up / λ2.5 down (§4.8), and never faster than occLiftRate: a fresh 0.06 collider tilt at λ5 alone
-      // swings the frame 0.28 rad/s, and A10 caps every automatic elevation at 0.15 rad/s
-      const nl = damp(occLift, liftGoal, liftGoal > occLift ? 5 : 2.5, dt);
-      occLift += clamp(nl - occLift, -p.occLiftRate * dt, p.occLiftRate * dt);
+      if (ladHold) {
+        // nothing dollies during a look: the lens distance IS the look's (a zoom-out or the return after a
+        // zoom-in would otherwise trail at the dolly's λ3.5 release), bar the share a dolly held back when the
+        // look began — measured against the gameplay distance (dist0), not the look's, so a look({zoom}) is
+        // not mistaken for a dolly — which releases at that same λ3.5 while the look is on, so the lens never
+        // pops out. On the way home that share comes back with the look's own offsets (vLookK: λ lookOut after
+        // a release, the lookEndT ease after a key) toward the dolly the returning framing wants (az0/el0/dist0
+        // on the target: the collider pass and the sweep read exactly that framing here), so when the look ends
+        // the lens already stands where the dolly holds it (no undollied hold, no λ16 pop-in after).
+        if (!ladHeld) { ladHoldR = dist0 > 1e-6 ? Math.min(1, occDist / dist0) : 1; if (!lookOn) ladRelR = ladHoldR; }
+        if (lookOn) ladHoldR = damp(ladHoldR, 1, 3.5, dt);
+        else {
+          const dg = winCarry ? dist0 : Math.min(colOk ? want.dist : dist0, sweepDolly, shellDolly);
+          const gR = dist0 > 1e-6 ? clamp(dg / dist0, 0, 1) : 1;
+          ladBackG = ladBackG === ladBackG ? damp(ladBackG, gR, gR < ladBackG ? 16 : 3.5, dt) : gR;
+          const w = ladRelK > 1e-4 ? clamp(vLookK / ladRelK, 0, 1) : 0;
+          ladHoldR = ladBackG + (ladRelR - ladBackG) * w;
+        }
+        occDist = dist * ladHoldR;
+      } else {
+        const dollyGoal = winCarry ? dist : Math.min(colOk ? want.dist : dist, sweepDolly, shellDolly);
+        occDist = dollyGoal < occDist ? damp(occDist, dollyGoal, 16, dt) : damp(occDist, dollyGoal, 3.5, dt);
+      }
+      ladHeld = ladHold;
+      if (!ladHold) {
+        const liftGoal = winCarry ? 0 : clamp(Math.max(want.lift, sweepLift), 0, liftMaxNow(el));
+        // λ5 up / λ2.5 down (§4.8), and never faster than occLiftRate: a fresh 0.06 collider tilt at λ5 alone
+        // swings the frame 0.28 rad/s, and A10 caps every automatic elevation at 0.15 rad/s
+        const nl = damp(occLift, liftGoal, liftGoal > occLift ? 5 : 2.5, dt);
+        occLift += clamp(nl - occLift, -p.occLiftRate * dt, p.occLiftRate * dt);
+      }
       // A `noTilt` shot owns its ANGLES: the anti-occlusion lift would swing the
       // authored framing (17° of it) and tip the moon off the top of the frame.
       // The DOLLY still runs — pulling the lens in front of a blocker changes
@@ -1357,9 +1781,13 @@ export function create(ctx) {
         // Measure from the UNDOLLIED stop: if the sweep looked from where the
         // dolly already put the lens, the blocker would read as gone and the
         // lens would spring back out, one frame on, one frame off.
-        lensAt(az, el + occLift, dist, tmp, idealPos);
-        lastSweepFrom.copy(idealPos); sweepAim.copy(tmp);
+        if (lookBack) { lensAt(az0, el0 + occLift, dist0, target, idealPos); sweepAim.copy(target); }
+        else { lensAt(az, el + occLift, dist, tmp, idealPos); sweepAim.copy(tmp); }
+        lastSweepFrom.copy(idealPos);
+        // the look lens's sweeps must not move the ladder's latches (on the way home they read the real framing)
+        if (lookOn) ladderSave();
         sweepOcclusion(idealPos, cam.position);
+        if (lookOn) ladderRestore();
         applyCull();
         if (colRun) colSweeps++;
       }
@@ -1388,6 +1816,7 @@ export function create(ctx) {
       cam.updateMatrixWorld(true);
       // the window's uniforms from this frame's final matrix (a `noTilt` shot's hold shuts it)
       writeCut(cutKraw * (1 - holdAng));
+      projectPlayer();                           // playerScreen: the HUD's "you" marker reads it (§6.3)
       ctx.events.emit('camera:update', cam);
     },
   };
@@ -2377,6 +2806,10 @@ export function create(ctx) {
     azFrom = cur.azimuth; azTo = wrapNear(azFrom, (azT < 1 ? azTo : p.azimuth) + delta); azT = 0; p.azimuth = azTo;
   }
   function wrapNear(from, to) { return from + wrap(to - from); }
+  /** An eased snap to an absolute azimuth (tap V's recentre in modes 1/3): writes p.azimuth at once. */
+  function snapTo(goal) {
+    azFrom = cur.azimuth; azTo = wrapNear(azFrom, goal); azT = 0; p.azimuth = azTo;
+  }
 
   // ── night sky moment: when is the visitor free to be shown something? ──────
   /**
@@ -2420,6 +2853,8 @@ export function create(ctx) {
   // If the UI ever emits its location banner as an event, take it straight —
   // otherwise the poll on ctx.systems.ui.here in update() does the same job.
   ctx.events.on('ui:banner', () => { if (revealMute <= 0) api.reveal(); });
+  // a teleport ends a look at once (§3), whoever moved him (debug.teleport also snaps)
+  ctx.events.on('player:teleport', () => { lookReset(); recOn = false; });
 
   api.snap();
   return api;

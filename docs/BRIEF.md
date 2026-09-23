@@ -254,3 +254,23 @@ round buttons top-right, a hotbar bottom-centre and the dialogue box mid-screen.
   the clock, the objective chip or the dialogue box.
 Also fold in the camera spec's §8.4 requests: a LOOK button that holds `KeyV` while pressed, and `pointer.orbit = true` (not `pointer.down`)
 for the right-thumb look drag once input.js ships `orbit`.
+
+### Contract K — opening cinematic + title hand-off (added 2026-09-23; Ben: "When the game starts there should be a cinematic camera that
+flies over Candyland introducing the audience to the world and lands on the player arriving at the pier, the camera flies around the player
+and then lands at the camera position 2")
+- New system `intro` (src/systems/intro.js, registered after `ui`). API: `takeover(handoff) → Promise` · `active` (bool) · `skip()` ·
+  `play(tSeconds)` (debug: pose the flight at a time, for renders) · event `intro:cinematic:done`. Never runs under `ctx.shot` unless `?cinematic=1`.
+- Title hand-off (ui.js / ui/title.js owner): when the title card is dismissed and `ctx.systems.intro?.takeover` exists, DO NOT restore the
+  camera/time yourself — call `intro.takeover({ view: <the title's current free view>, saved: { time, frozen, fog } })` and let the intro
+  restore everything when it ends or is skipped. Without an intro system, behave exactly as today.
+- The flight (22–30 s, deterministic, Catmull-Rom over authored keyframes, driven by `camera.setFree({...})` each frame): starts from the
+  title's hero view for continuity → sweeps over the Candy Palace (-150,-36) → the Great Cupcake (-92,-24) → the Gummy Forest → Gumdrop
+  Village (-140,40) → descends to Sugar Pier (-50,26) where the visitor stands in his arrival pose (ferry docked) → one full orbit around him
+  (≈5 s, distance 9→6, elevation 0.3, he looks at the camera at the end) → blends into camera MODE 2 (`setMode(2)`, `setFree(null)`, then a
+  1.2 s `cinematic()` from the orbit's last pose to the follow framing if the API is there) → unlocks the player, HUD back, emits the event.
+  Time of day eases from the title's dusk to the 9:30 morning as the camera lands (the day starts; `timeFrozen` restored to false).
+- During the flight: `player.locked = true`, HUD hidden via `ui.showHud(false)` (ui owner adds it: hides every panel except a small
+  "▸ skip" hint bottom-right), Sour Patch Kids/cats keep living. Any key / click / tap = skip: ease to the end state over 0.6 s.
+- Verification: a real-flow Playwright run (no ?shot; ?intro=1): dismiss the title with a keydown, sample the camera every 0.5 s — it must
+  pass within 60 u of palace, cupcake, village and pier in that order; end state = mode 2, `isFree()` false, player unlocked, HUD visible,
+  time unfrozen; skip mid-flight lands in the same end state; six screenshots (tools/views/intro.json keyframes via `play(t)`); no errors.
