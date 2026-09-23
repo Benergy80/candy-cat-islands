@@ -14,6 +14,14 @@
 //                on document.body: input.js adds the code to `pressed` once and
 //                to `keys` while held, and ui.js's capture-phase listeners
 //                (dialogue advance, intro dismissal) see what a real key does.
+//   the title    a tap on the title card is NOT a key: ui.js dismisses it on the
+//                pointerdown itself (window listener); this file only waits.
+//   cinema       while ctx.uiRoot has 'cci-cinema' (the opening cinematic, Contract
+//                K) every touch element but the 'turn your phone' card is GONE
+//                (display:none, body.tch-cinema — the layer too, so no finger is
+//                read as a stick or a look), held controls are released, and no
+//                synthetic keydown is ever sent: a thumb can only reach intro.js's
+//                own skip listener, and only as a fresh tap after its grace.
 //
 // LAYOUT (Contract H2 — "controls that stay out of the way"): corners only.
 //   top-left     the objective as ONE-line chip (tap = expand) + candy pill,
@@ -361,6 +369,8 @@ body.cci-touch.tch-helping #ui .tch-cam[data-tag]::after, body.cci-touch.tch-hel
 
 /* nothing but the title card while it is up */
 body.cci-touch.tch-intro #ui .tch-btn, body.cci-touch.tch-intro #ui .tch-joy { display: none; }
+/* the opening cinematic (#ui.cci-cinema): no stick, no buttons, no look layer — only the rotate card may show */
+body.cci-touch.tch-cinema #ui .tch:not(.tch-rot) { display: none !important; }
 
 /* ── help plate: touch how-to under the objective (the ? chip) ────────────── */
 #ui .tch-tip { z-index: 46; display: none !important; }
@@ -661,7 +671,7 @@ export function create(ctx) {
   let hintEl = null;                // ui.js's controls card (drives our help plate)
   let talkEl = null;                // ui.js's dialogue box (tch-talk: a small phone makes it a sheet)
   let introUp = false, introTextDone = false;
-  const cls = { intro: false, help: false, fly: false, portrait: false, idle: false, tray: false,
+  const cls = { intro: false, cinema: false, help: false, fly: false, portrait: false, idle: false, tray: false,
     objopen: false, tipfade: false, mapyield: false, talk: false, convo: false, chat: false, hush: false, amb: false };
   let portraitOk = false;           // 'play upright anyway'
   let rotateForced = null;          // test hook
@@ -689,8 +699,14 @@ export function create(ctx) {
   const W = () => window.innerWidth || 1;
   const H = () => window.innerHeight || 1;
 
+  /** The opening cinematic owns the screen (ui.showHud(false) / intro.js set this class). Read live:
+   *  ui.js adds it on the very pointerdown that dismisses the title, a frame before our update runs. */
+  const cinemaNow = () => !!root.classList?.contains('cci-cinema');
+
   // ── synthetic keys: exactly what a keyboard does ───────────────────────────
+  // (never a keydown under the cinematic: intro.js reads every key as its skip)
   function sendKey(type, code, key) {
+    if (type === 'keydown' && cinemaNow()) return;
     let ev;
     try { ev = new KeyboardEvent(type, { code, key, bubbles: true, cancelable: true }); }
     catch { return; }
@@ -890,6 +906,7 @@ export function create(ctx) {
     b.el.addEventListener('pointerdown', (e) => {
       if (!on) return;
       e.preventDefault();
+      if (cinemaNow()) return;               // (hidden under the cinematic; a press racing the class is not a key)
       if (cls.tray && id !== 'f') closeTray();
       press(b, e);
       // LOOK: the same finger can drag to orbit while V is held
@@ -944,7 +961,7 @@ export function create(ctx) {
     if (!on) return;
     // While the title card is up the tap only starts the game (ui.js listens on
     // window for pointerdown); fullscreen needs a pointerUP, so remember it.
-    if (introUp || cls.portrait) { if (introUp) wantFullscreen = true; return; }
+    if (introUp || cls.portrait || cinemaNow()) { if (introUp) wantFullscreen = true; return; }
     e.preventDefault();
     if (cls.tray) { closeTray(); return; }   // a tap anywhere else closes the tray
     const x = e.clientX, y = e.clientY;
@@ -1247,7 +1264,7 @@ export function create(ctx) {
       document.documentElement.classList.toggle('cci-touch', on);
       if (!on) {
         releaseAll(); writeNeutral(); closeTray();
-        for (const [k, t] of [['portrait', 'tch-portrait'], ['help', 'tch-helping'], ['intro', 'tch-intro'], ['fly', 'tch-fly'],
+        for (const [k, t] of [['portrait', 'tch-portrait'], ['help', 'tch-helping'], ['intro', 'tch-intro'], ['cinema', 'tch-cinema'], ['fly', 'tch-fly'],
           ['idle', 'tch-idle'], ['objopen', 'tch-objopen'], ['tipfade', 'tch-tipfade'], ['mapyield', 'tch-mapyield'],
           ['talk', 'tch-talk'], ['convo', 'tch-convo'], ['chat', 'tch-chat'], ['hush', 'tch-hush'], ['amb', 'tch-amb']]) setCls(k, false, t);
         ambTexts.clear(); convoLabel = '';
@@ -1714,6 +1731,13 @@ export function create(ctx) {
       introUp = up; setCls('intro', up, 'tch-intro');
       if (up) releaseAll();
     }
+    // the opening cinematic: every control gone and let go of (see the header)
+    const cine = cinemaNow();
+    if (cine !== cls.cinema) {
+      setCls('cinema', cine, 'tch-cinema');
+      if (cine) { releaseAll(); closeTray(); }
+      fitT = 0;
+    }
 
     // portrait → the rotate card, and the world holds its breath behind it
     const tall = H() > W() * 1.05;
@@ -1823,7 +1847,7 @@ export function create(ctx) {
     faces(flying, vehicle);
     let held = joy.id >= 0 || look.id >= 0 || pinch.id >= 0 || cls.tray;
     if (!held) for (const id in btn) if (btn[id].pointer >= 0) { held = true; break; }
-    if (held || cls.help || introUp || showRot) idleT = 0; else idleT += dt;
+    if (held || cls.help || introUp || cls.cinema || showRot) idleT = 0; else idleT += dt;
     setCls('idle', idleT >= IDLE_AFTER, 'tch-idle');
 
     if ((fitT -= dt) <= 0) { fitT = 0.2; fit(); }

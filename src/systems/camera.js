@@ -1,16 +1,20 @@
-// Isometric third-person follow camera.
-//   1 / 2 / 3    camera mode — 1 ISO (you turn it: Q/E, drag; it never auto-yaws),
-//                2 FOLLOW (a ground tether that swings behind your travel, bent
-//                toward the path you walk; Q/E / drag rotate the tether; el −0.18,
-//                distance ×0.72, fov 42, pitched up 0.15 so the horizon is in
-//                frame, and further as the occlusion lift would squeeze the sky
-//                band under 4.5% — CAMERA_SPEC §2, §4.2), 3 TOP (el 1.1,
-//                distance +40%).
-//                Flying (ctx.state.flying) frames every mode at 44 / 0.38 / fov 40
-//                behind the heading (Contract E); anything that owns the framing
-//                (interiors, vehicles, the ferry, a lock) gets mode 1 in mode 2,
-//                from its first frame (an owner's own setParams({azimuth}) + snap()
-//                is never overwritten, even when it snaps before declaring itself).
+// The third-person camera (WAVE 3, docs/CAMERA_SPEC.md): three modes on keys 1 / 2 / 3, a look-around
+// on V, an aim point that runs ahead of you, and a see-through window where the old lens dived into the
+// scenery. Nothing here moves the visitor except V's look, which holds him still while it lasts.
+//   1 ISO (default)  el 0.64 (0.50 in town cores), 31 u, fov 30. You own the orientation (Q/E, a drag);
+//                    it never auto-yaws. Toast "Camera: iso — you turn it (Q/E)".
+//   2 FOLLOW         el − 0.18 (never under 0.40), 31 × 0.72 = 22.3 u, fov 42, pitched up m2Pitch so a
+//                    band of sky stays in frame (more as the occlusion lift would squeeze it under 4.5%).
+//                    A ground tether (§4.2) hangs the lens behind your travel: A/D circle-strafe, S backs
+//                    straight off, pure W on a path bends it toward the path, and the clear-side whiskers
+//                    (§4.4) try a side when he is hidden. Q/E, a drag and tap V turn the tether.
+//                    Toast "Camera: follow — turns with you".
+//   3 TOP            el 1.10, 31 × 1.40 = 43.4 u, fov 30: the lay of the land. Toast "Camera: top — lay of
+//                    the land". The mode toasts are MODE_TOAST; the chip (ui/hotbar.js) lights the mode.
+//   Flying (ctx.state.flying) frames every mode at 44 / 0.38 / fov 40 behind the heading (Contract E).
+//   Anything that owns the framing (interiors, the palace and the cave, vehicles, the ferry, a lock) gets
+//   mode 1's framing in mode 2 from its first frame (its own setParams({azimuth}) + snap() is never
+//   overwritten, even when it snaps before declaring itself); the mode label is kept.
 //   WASD         moves along controlAzimuth, which chases the lens at basisRate
 //                (0.87 rad/s, so the heading turns ≤ 0.9) while you hold a key
 //                (a Q/E or a drag mid-walk bends your heading instead of jerking
@@ -18,7 +22,10 @@
 //   Q / E        rotate the world in eased 45° steps (E defers to "interact" when
 //                something is in range, so it never fights the E key)
 //   wheel        zoom, clamped; the further out you are the more the view tips down
-//   drag         orbit (any mouse button) — vertical drag changes elevation
+//   drag         orbit: right or middle drag (input.js pointer.orbit: never uses the held item, no context
+//                menu, no autoscroll); a left drag (pointer.down) and the touch thumb (touch.js writes
+//                pointer.orbit) orbit too. Across = azimuth (0.006 rad/px), up/down = elevation (0.004 rad/px);
+//                in mode 2 it turns the tether
 //   L (hold)     LOOK UP — flattens to elevation 0.15, widens to fov 44 and
 //                pitches the lens up while held, easing back on release
 //   V (hold)     LOOK AROUND (CAMERA_SPEC §3) — held 0.18 s (or the mouse moves 6 px, or a
@@ -156,9 +163,13 @@
 //              through. A near-lens band dithers patched geometry right at the lens.
 //              Free cameras and ?cut=0 / params.cut = 0 turn both off.
 //   AND THE BACKSTOP: none of this can be relied on, so the VISITOR IS DRAWN
-//   TWICE — see player/visitor.js. The second pass is flat cream, depthFunc
-//   GreaterDepth, so it appears only where something is in front of him. The
-//   camera may lose the argument with the geometry; the player never vanishes.
+//   TWICE — see player/visitor.js. The second pass is a flat AMBER silhouette
+//   (0xffab45 at 76%, unlit, no fog), depthFunc GreaterDepth, so it appears only
+//   where something is in front of him. Where the window discards a blocker it
+//   writes no depth, so his real body shows there and the amber pass draws
+//   nothing. Amber-only is left for the §5.3 cases: terrain, a noCut landmark or
+//   an unpatched mass, a blocker within 1 u in front of him, the feather band.
+//   The camera may lose the argument with the geometry; the player never vanishes.
 //   A cheap per-frame bounding-sphere fade still runs on genuinely prop-sized
 //   separate meshes, so a cat walking across the sight line ghosts instantly
 //   instead of waiting for the next sweep. The docked Sugarfin (and anything
@@ -202,7 +213,12 @@
 //           (followLambda / followRecentre are gone: the mode-2 tether has no
 //           timed recentre, CAMERA_SPEC §2; the V look's framing lift is lookElevLook,
 //           not the spec's `lookElev`, which is hold-L's 0.15 and stays so)
-//   basis() · snap() · setFree(v|null) · setParams(p) · isFree()
+//   basis() · snap() · setFree(v|null) · setParams(p) · isFree() · update(dt, ctx)
+//           snap(): one call, deterministic — lead 0, look off (moveLock cleared), controlAzimuth =
+//           the view, the tether behind the facing, density / terrain lift / cutK settled, the
+//           mode's fov and pitch, matrixWorld and the window's uniforms written. setParams with
+//           elevation or distance PINS (§6.1); snap() and setFree(null) keep the pin, a teleport
+//           clears it. setFree(null) restores the MODE's fov (not p.fov).
 //   look({on, yaw, pitch, pan:[dx, dz], zoom}) — the V look as a deterministic hook: sets the
 //           look at full strength (yaw / pitch rad, pitch = the look's own elevation offset;
 //           pan [dx, dz] = right / forward in the look basis, as WASD pans, leashed; zoom =
@@ -210,11 +226,16 @@
 //           release does
 //   recentre() — tap V · looking (0..1) · lookYaw · lookVehicle · lookState (QA) · playerScreen {x, y, on}
 //           (his feet in CSS px of the canvas after the final pitch; on = in front of the lens
-//           and inside the frame) · emits 'camera:look' {on}
-//   mode · setMode(1|2|3) → emits 'camera:mode' · reveal(seconds?)
-//   shake(intensity, duration) · cinematic({target, azimuth, elevation, distance, duration}) → Promise
-//   moonMoment() → Promise|null (forces the night sky moment; emits 'camera:moon')
-//   lookingUp (0..1)
+//           and inside the frame)
+//   mode · setMode(1|2|3) (toasts MODE_TOAST) · reveal(seconds?) · revealing
+//   shake(intensity, duration) · cinematic({target, azimuth, elevation, distance, fov, pitch, noTilt,
+//           duration, in, hold, out}) → Promise with .cancel() (target: [x,y,z] | Vector3 | {x,y,z} |
+//           () => any of those) · cinematicActive
+//   moonMoment() → Promise|null (forces the night sky moment) · moonMomentDone · lookingUp (0..1)
+//   events: 'camera:mode' n · 'camera:look' {on} · 'camera:hint' hint · 'camera:moon' {azimuth,
+//           elevation, fov} · 'camera:update' cam — LAST in update(), after the final rotateX and
+//           cam.updateMatrixWorld(true), so a listener reads this frame's pose, pitch included
+//           (citizens.js's scruff carry relies on it)
 //   introspection: fading · fadedList · culled · culledList · culledSizes · occDist · occLift ·
 //                  dollyFloor · indoors · ladderHeld (the window carries the frame: no dolly/tilt) ·
 //                  occBlocked · occMs · blockerCount · sweepCount · current · target
@@ -224,6 +245,9 @@
 //                  · hint {key 'Q'|'E'|null, t, seq} (mode 1's keycap hint; emits 'camera:hint')
 //                  · densityState · whiskerState (QA, allocate) · density (the collider sensors:
 //                    top(c), the local list, the fan — camera/density.js)
+//                  · camMs {n, mean, p95, max, sweepP95, nonSweepP95, sweeps} — wall-clock ms of
+//                    update() over the last 600 calls, sweep frames apart (§6.4, A13; QA only:
+//                    allocates, and nothing in the camera reads it)
 //                  occDebug({fromStop}?) — one unbudgeted sweep, reported not applied
 //                    (fromStop: cast from the last sweep's undollied stop, as update() does)
 //                  bodyVisibility() — five rays, whole scene (instances too),
@@ -299,6 +323,7 @@ const WHISK_BEAT = 0.25;      // a candidate must beat the current one by this�
 const TERRAIN_N = 8;          // world.height samples along lens → chest, every frame (§4.7)
 const TERRAIN_M = 0.3;        // u: …the sight line keeps this clear of the ground
 const HINT_BLOCK = 2, HINT_SHOW = 2, HINT_GAP = 60;   // mode 1's Q/E hint (§4.4): blocked ≥ 3/5 this long, pulse, once per
+const CAM_MS_N = 600;         // camMs (§6.4, A13): update() calls in the rolling cost window
 
 export function create(ctx) {
   const cam = ctx.camera;
@@ -558,6 +583,10 @@ export function create(ctx) {
   let cineW = 0;                // this frame's cinematic weight (occYaw and density fade out under a shot)
   // mode 1's Q/E hint (§4.4): the key to pulse ('Q' / 'E' / null), how long it shows, the cooldown, the timer
   let hintKey = null, hintT = 0, hintCool = 0, hintBlkT = 0, hintSeq = 0;
+  // camMs (§6.4): update()'s own wall-clock cost, a ring of the last CAM_MS_N calls, and which of them ran the
+  // capsule sweep (sweptNow, set by update()). QA only: nothing in the camera reads it, so no frame depends on it.
+  const camMsBuf = new Float32Array(CAM_MS_N), camMsSw = new Uint8Array(CAM_MS_N);
+  let camMsI = 0, camMsN = 0, sweptNow = false;
   cam.fov = p.fov; cam.updateProjectionMatrix();
 
   const wrap = (a) => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; };
@@ -1536,6 +1565,15 @@ export function create(ctx) {
     get dollyFloor() { return dollyFloor(); },
     /** The window carries the frame (open or opening): the ladder's dolly and tilt hold still (§5.2). */
     get ladderHeld() { return winCarry; },
+    /** update()'s cost (§6.4, A13): wall-clock ms over the last CAM_MS_N calls, the sweep frames (6 Hz) apart.
+     *  QA only (allocates): { n, mean, p95, max, sweepP95, nonSweepP95, sweeps }. */
+    get camMs() {
+      const n = camMsN, all = [], sw = [], ns = [];
+      for (let i = 0; i < n; i++) { const v = camMsBuf[i]; all.push(v); (camMsSw[i] ? sw : ns).push(v); }
+      const p95 = (a) => { if (!a.length) return null; a.sort((x, y) => x - y); return +a[Math.min(a.length - 1, Math.round(0.95 * (a.length - 1)))].toFixed(3); };
+      const mean = n ? +(all.reduce((s, x) => s + x, 0) / n).toFixed(3) : null;
+      return { n, mean, p95: p95(all.slice()), max: n ? +Math.max(...all).toFixed(3) : null, sweepP95: p95(sw), nonSweepP95: p95(ns), sweeps: sw.length };
+    },
     /** One unbudgeted sweep from where the lens is now, reported rather than
      *  applied — the QA hook for "why can I not see him in this frame". The
      *  tilt/dolly control state and the window's reading are put back afterwards
@@ -2140,7 +2178,7 @@ export function create(ctx) {
       if (candT >= p.fadeRefresh) { candT = 0; refreshCandidates(); }
       sweepT += dt;
       if (sweepT >= p.occSweep) {
-        sweepT = 0;
+        sweepT = 0; sweptNow = true;
         // Measure from the UNDOLLIED stop: if the sweep looked from where the
         // dolly already put the lens, the blocker would read as gone and the
         // lens would spring back out, one frame on, one frame off.
@@ -3219,6 +3257,16 @@ export function create(ctx) {
   // a teleport ends a look at once (§3), whoever moved him (debug.teleport also snaps)
   // …and clears the pin (§6.1: render.mjs / camvis re-pin exactly the views that carry --el / --dist)
   ctx.events.on('player:teleport', () => { lookReset(); recOn = false; pinned = false; });
+
+  // camMs (§6.4): time update() as main.js calls it. The wrapper only measures; update() itself is unchanged.
+  const updateFrame = api.update;
+  api.update = function update(dt, c) {
+    sweptNow = false;
+    const t0 = performance.now();
+    updateFrame.call(api, dt, c);
+    camMsBuf[camMsI] = performance.now() - t0; camMsSw[camMsI] = sweptNow ? 1 : 0;
+    camMsI = (camMsI + 1) % CAM_MS_N; if (camMsN < CAM_MS_N) camMsN++;
+  };
 
   api.snap();
   return api;

@@ -73,8 +73,15 @@
 //   DURING THE FLIGHT: player.locked (re-asserted every frame), posed standing,
 //   the ferry moored at Sugar Pier, the HUD hidden (ui.showHud(false), and the
 //   class 'cci-cinema' on ctx.uiRoot), the world keeps living. ANY key / click /
-//   tap (after a 0.35 s grace, so the press that dismissed the title never
-//   skips) = SKIP: in the morning half, the same landing eased over 0.6 s from
+//   tap = SKIP, once the INPUT GRACE is over: for 1.0 s after takeover (on the
+//   flight's clock AND on the wall clock, by the event's own timeStamp, so a
+//   press queued behind a long first frame on a phone still counts as early)
+//   every key / pointer / touch is ignored — the gesture that dismissed the
+//   title (a tap, a tap-and-hold, a quick double tap, a thumb still popping the
+//   loading screen's sprinkles) can never also skip the flight; so is anything
+//   while the game is paused (the 'turn your phone' card and its button). Only
+//   fresh PRESSES skip (keydown, pointerdown, touchstart — never the up / click
+//   tail of a gesture). SKIP: in the morning half, the same landing eased over 0.6 s from
 //   wherever the lens is; in the dusk half, a 0.25 s rise to white, the cut to
 //   the landed state under it, and 0.35 s back — never a whip across the
 //   island, never the sun running back through the afternoon. Key presses in
@@ -109,7 +116,8 @@ const T_DIP0 = 16.7, T_CUT = 17.3, T_DIP1 = 17.95, WHITE_HOLD = 0.06;   // the d
 const T_ORBIT = 23.0;         // the push-in hands over to the orbit here
 const ORBIT_DUR = 5.0;
 const T_END = T_ORBIT + ORBIT_DUR;
-const LAND_DUR = 1.2, SKIP_DUR = 0.6, SKIP_UP = 0.25, SKIP_GRACE = 0.35;
+const LAND_DUR = 1.2, SKIP_DUR = 0.6, SKIP_UP = 0.25;
+const SKIP_GRACE = 1.0;       // s after takeover (flight clock AND wall clock) in which no input can skip
 const DEG = Math.PI / 180;
 // The orbit: COUNTER-CLOCKWISE from above (azimuth rising: dir +1), one full turn from and back to
 // azEnd — east of him, on the side the find looks from. It is entered AT SPEED (k'(0) = m0: the
@@ -492,13 +500,25 @@ export function create(ctx) {
   // ── skip listeners (window, capture, only while active) ─────────────────────
   // In flight every key is the cinematic's: swallowed before input.js / the HUD see it.
   const NO_SCROLL = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+  const wallNow = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+  let armedAt = 0;             // wall ms (performance clock) of the takeover
+  /** May this input event skip? Not inside the grace (flight clock and wall clock, the latter by the
+   *  event's own timeStamp: a tap queued behind a long frame is judged by when the finger landed),
+   *  and not while the game is paused (the 'turn your phone' card is being tapped). */
+  const maySkip = (e) => {
+    if (graceT < SKIP_GRACE || ctx.state.paused) return false;
+    const n = wallNow();
+    let ts = e && e.timeStamp;
+    if (!(ts > 0) || ts > n + 50 || n - ts > 10000) ts = n;    // not on the performance clock (an old engine): now
+    return ts - armedAt >= SKIP_GRACE * 1000;
+  };
   const onKey = (e) => {
     if (phase !== 'fly' && phase !== 'skipdip') return;
     e.stopImmediatePropagation();
     if (NO_SCROLL.has(e.code)) e.preventDefault();
-    if (!e.repeat && graceT >= SKIP_GRACE) api.skip();
+    if (!e.repeat && phase === 'fly' && maySkip(e)) api.skip();
   };
-  const onPoint = () => { if (phase === 'fly' && graceT >= SKIP_GRACE) api.skip(); };
+  const onPoint = (e) => { if (phase === 'fly' && maySkip(e)) api.skip(); };
   const TOUCH_OPT = { capture: true, passive: true };
   let listening = false;
   function listen(on) {
@@ -675,7 +695,7 @@ export function create(ctx) {
       mooredAtPier(false);
       flight = buildFlight(world, heroView, arrive);
       prepareBanner();
-      clock = 0; graceT = 0; skipped = false; lastEmotion = undefined;
+      clock = 0; graceT = 0; armedAt = wallNow(); skipped = false; lastEmotion = undefined;
       phase = 'fly';
       hud(false);
       listen(true);

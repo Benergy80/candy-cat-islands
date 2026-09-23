@@ -4,6 +4,9 @@
 //   node tools/camvis.mjs --tag x --filter cat_ --script none  # a quick subset, no scripts
 //   node tools/camvis.mjs --tag before --mode 1,2 --script none --s9 --shots renders/cam_before
 //   node tools/camvis.mjs --tag perf --script perf [--gl hw] [--perf-frames 600]   # A13 (live loop, ?camvis=perf)
+//   node tools/camvis.mjs --tag final --a12 final_a --a13 final_perf --a13-frame fr_pin,fr_live --a14-shots renders/cam_after/s7
+//                       # the full run with the A1-A14 table filled in (camera step 8; see "The A1-A14 table")
+//   node tools/camvis.mjs --retable final --a12 final_a --a13 final_perf   # offline: recompute a run's A1-A14 table
 //   node tools/camvis.mjs --diff baseline,run2 [--allow-meta]  # offline: compare two runs minus the timing block (A12);
 //                       exit 0 identical · 1 comparable rows differ · 2 not comparable (see "Isolation" below);
 //                       with --allow-meta, 0/1 judge only the rows whose page history matches (the rest are listed)
@@ -11,8 +14,16 @@
 // Options
 //   --tag <name>        output renders.noindex/camvis/<tag>.json + <tag>.md (default "run")
 //   --mode 1,2,3        modes for the probe rows (default all three)
-//   --filter <substr>   only probe / §9 views whose name contains it
-//   --script <list>     a4,a5,a6,a7,a8,a9,a10,s7,seed | all | none (default all; perf only when named)
+//   --filter <substr>   only probe / §9 views whose name contains it (a|b: any of them)
+//   --script <list>     a4,a5,a6,a7,a8,a9,a10,s7,seed,a14 | all | none (default all; perf only when named)
+//                       (a14, LAST on its own fresh page: the §7 must-not-break views shot exactly as render.mjs
+//                       shoots a --view — mode 1 and default params as a fresh process starts, render.mjs's own
+//                       "view call: not a function" / "view call failed" errors — with the PAGEERRORs, "[system X]
+//                       update error"s and view-call errors each one logs counted against it; the §7 rows each
+//                       shot carries (free = no camera:update and the window + near band off, the moon hold's
+//                       offsets, interiors in modes 1 and 2, the flyer's distance writes, the ferry's silhouette);
+//                       cinematic() target fn / array / object / Vector3 + .cancel(); the mode toasts; candy_arrival
+//                       on two fresh pages: identical stats + PNG hash. Frames to --a14-shots (renders/camvis_a14))
 //                       (a10 also runs d7, LAST on the page: camera step 7's own proof — the mode-2 whiskers switch,
 //                       rate, survive a walk, cancel on tap V / drag / Q, 0 in mode 1 and pinned; the pin rule; density's
 //                       forced-0 list; the terrain whisker on Frosting Peak's flank. "--script d7" runs it alone)
@@ -30,7 +41,9 @@
 //                       synthetic noCut wall, and occ_silhouette in mode 2: out AND home again, back on the dolly),
 //                       playerScreen across the lens plane, and the vehicle / flying look; "--script a7x" runs it alone)
 //   --s9                also run every view in tools/views/camera.json (§9) as rows (view-major, own
-//                       camera.setMode replaced by the row's mode; a view that asks for mode 3 also gets m3)
+//                       camera.setMode replaced by the row's mode; a view that asks for mode 3 also gets m3; a row
+//                       that starts with the visitor still inside the last row's interior walks out first, so its
+//                       owner frames it on entry: row.leftInterior)
 //   --shots <dir>       render each row at --w × --h (default 1600 × 1000) to <dir>/<view>_m<mode>.png
 //   --p-src merged|viewsjson   how P names resolve: "merged" (default) = exactly what render.mjs --view uses
 //                       (tools/views.json, then tools/views/*.json in readdir order, later files win);
@@ -65,6 +78,11 @@
 //   noFade / unpatched blocker is NOT excused: occ_silhouette must still open); A2base reads the mode-1 raw
 //   floor from renders.noindex/camvis/baseline.json (this instrument's own pre-edit run) instead of the seed
 //   probe's 0.908. Both lines say "as written" / "proposed"; neither replaces the other.
+// The A1-A14 table (summary.table, "## Acceptance A1-A14" at the top of the .md; camera step 8): every criterion
+//   of CAMERA_SPEC §1 AS WRITTEN, PASS / FAIL / n/a with the measured numbers (accTable()). Cross-run rows need
+//   their other runs named: --a12 <tag> (the rerun this run is diffed against, diffRuns(): A12), --a13 <tag> (a
+//   --script perf --gl hw run on the M1 Pro: A13's camMs), --a13-frame <pinTag,liveTag> (the render-side frame sample,
+//   camera pinned to its pre-edit commit vs live, same world, back to back; without it: this run vs baseline.json).
 // A11 (summary.A11, "## A11" in the .md; camera step 7), whenever mode-1 rows ran: static neutrality against
 //   renders.noindex/camvis/post5.json and the baseline rows the old ladder never touched (a11Summary()).
 // A3 (summary.A3, "## A3" in the .md; camera step 5), over every probe row that ran, in any mode or filter: the
@@ -111,6 +129,7 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os';
 import { execSync } from 'node:child_process';
+import crypto from 'node:crypto';
 
 const argv = process.argv.slice(2);
 const args = {};
@@ -125,11 +144,13 @@ const outDir = path.join(root, 'renders.noindex/camvis');
 fs.mkdirSync(outDir, { recursive: true });
 
 // ── offline diff (A12 / A11 helper) ───────────────────────────────────────────
-if (args.diff) {
-  const [a, b] = String(args.diff).split(',');
-  const load = (t) => JSON.parse(fs.readFileSync(path.join(outDir, t + '.json'), 'utf8'));
-  const A = load(a), B = load(b);
-  const allow = !!args['allow-meta'];
+/**
+ * Compare two runs (A12), timing and provenance stripped: rows / §9 rows / scripts keyed by name, each compared
+ * only when its page history matches (header, "Isolation"), then the run-wide fields (impl, errors; summary —
+ * less its own acceptance table —, frame, reloads, warnings when the composition arguments match).
+ * → { metaDiff, same, differ, notComp, onlyA, onlyB, whole, diffs, code } (code as the CLI's exit code).
+ */
+function diffRuns(A, B, allow) {
   // the arguments a row depends on (header, "Isolation"); date/commit/tag/pinned are provenance, not composition
   // (renders do not change rows: verify0_pinned_m13, no shots, and verify0_live_m13, with shots, are row-identical)
   const COMP = ['modes', 'filter', 's9', 'pSrc', 'pin', 'scripts', 'w', 'h', 'protocol', 'whatIf'];
@@ -150,7 +171,12 @@ if (args.diff) {
     return m;
   };
   const hist = (x) => (x && x.page ? `${x.page.seq}:${x.page.sig}` : null);
-  const strip = (x) => { const c = { ...x }; delete c.page; return c; };
+  // provenance, not results: where a14 wrote its frames (--a14-shots) is an argument, not a measurement
+  const strip = (x) => {
+    const c = { ...x }; delete c.page; delete c.dir;
+    if (Array.isArray(c.views)) c.views = c.views.map((v) => { if (!v || typeof v !== 'object') return v; const w = { ...v }; delete w.png; return w; });
+    return c;
+  };
   const KA = keyed(A), KB = keyed(B);
   let same = 0, differ = 0;
   const notComp = [], onlyA = [], onlyB = [];
@@ -166,7 +192,18 @@ if (args.diff) {
   for (const k of KB.keys()) if (!KA.has(k)) onlyB.push(k);
   // run-wide fields: impl and errors always; the composition-dependent ones only when the arguments match
   let whole = walk(A.impl ?? null, B.impl ?? null, 'impl') + walk(A.errors ?? [], B.errors ?? [], 'errors');
-  if (!metaDiff.length) for (const f of ['summary', 'frame', 'reloads', 'warnings']) whole += walk(A[f] ?? null, B[f] ?? null, f);
+  const runWide = (j, f) => { if (f !== 'summary' || !j.summary) return j[f] ?? null; const c = { ...j.summary }; delete c.table; delete c.a12diff; return c; };
+  if (!metaDiff.length) for (const f of ['summary', 'frame', 'reloads', 'warnings']) whole += walk(runWide(A, f), runWide(B, f), f);
+  let code = differ || whole ? 1 : 0;
+  if (!allow && (metaDiff.length || notComp.length || onlyA.length || onlyB.length)) code = 2;
+  if (same + differ === 0) code = 2;
+  return { metaDiff, same, differ, notComp, onlyA, onlyB, whole, diffs, code };
+}
+if (args.diff) {
+  const [a, b] = String(args.diff).split(',');
+  const load = (t) => JSON.parse(fs.readFileSync(path.join(outDir, t + '.json'), 'utf8'));
+  const allow = !!args['allow-meta'];
+  const { metaDiff, same, differ, notComp, onlyA, onlyB, whole, diffs, code } = diffRuns(load(a), load(b), allow);
   console.log(`camvis diff ${a} vs ${b} (timing and provenance stripped)`);
   if (metaDiff.length) {
     console.log(`${allow ? 'NOTE' : 'NOT COMPARABLE'}: the runs were made with different arguments: ${metaDiff.join(' · ')}`);
@@ -178,9 +215,6 @@ if (args.diff) {
   if (onlyA.length) console.log(`  only in ${a}: ${onlyA.slice(0, 30).join(', ')}${onlyA.length > 30 ? ' …' : ''}`);
   if (onlyB.length) console.log(`  only in ${b}: ${onlyB.slice(0, 30).join(', ')}${onlyB.length > 30 ? ' …' : ''}`);
   if (diffs.length) console.log(`differences (first ${Math.min(60, diffs.length)}):\n  ` + diffs.slice(0, 60).join('\n  '));
-  let code = differ || whole ? 1 : 0;
-  if (!allow && (metaDiff.length || notComp.length || onlyA.length || onlyB.length)) code = 2;
-  if (same + differ === 0) code = 2;
   const partial = notComp.length + onlyA.length + onlyB.length;
   if (code === 0) console.log(partial ? `identical over the ${same} rows/scripts that share a page history ONLY (${notComp.length} not comparable, ${onlyA.length + onlyB.length} in one run only)` : `identical: ${a} == ${b}`);
   process.exit(code);
@@ -191,7 +225,10 @@ const W = Number(args.w || 1600), H = Number(args.h || 1000);
 const TAG = typeof args.tag === 'string' ? args.tag : 'run';
 const MODES = String(args.mode || '1,2,3').split(',').map(Number).filter((m) => m === 1 || m === 2 || m === 3);
 const FILTER = typeof args.filter === 'string' ? args.filter : null;
-const ALL_SCRIPTS = ['a4', 'a5', 'a6', 'a7', 'a8', 'a9', 'a10', 's7', 'seed'];
+// --filter a|b: any of the substrings (a single substring, as before, when there is no '|')
+const FILTERS = FILTER ? FILTER.split('|').filter(Boolean) : null;
+const passFilter = (n) => !FILTERS || FILTERS.some((x) => n.includes(x));
+const ALL_SCRIPTS = ['a4', 'a5', 'a6', 'a7', 'a8', 'a9', 'a10', 's7', 'seed', 'a14'];
 const scriptArg = typeof args.script === 'string' ? args.script : 'all';
 const SCRIPTS = scriptArg === 'all' ? ALL_SCRIPTS : scriptArg === 'none' ? [] : scriptArg.split(',').map((s) => s.trim().toLowerCase());
 const PERF = SCRIPTS.includes('perf');
@@ -199,6 +236,13 @@ const SHOTS = typeof args.shots === 'string' ? path.resolve(root, args.shots) : 
 const PSRC = args['p-src'] === 'viewsjson' ? 'viewsjson' : 'merged';
 const PIN = typeof args.pin === 'string' ? args.pin : null;
 const SEEN = !!args.seen;
+// the A1-A14 table's cross-run rows (camera step 8): --a12 <tag> = the rerun this run is diffed against (A12);
+// --a13 <tag> = a hardware-GL perf run (--script perf --gl hw); --a13-frame <pinTag,liveTag> = the render-side
+// frame sample with the camera pinned to its pre-edit commit vs live, same world, back to back (A13)
+const A12_TAG = typeof args.a12 === 'string' ? args.a12 : null;
+const A13_TAG = typeof args.a13 === 'string' ? args.a13 : null;
+const A13_FRAME = typeof args['a13-frame'] === 'string' ? args['a13-frame'].split(',') : null;
+const A14_SHOTS = path.resolve(root, typeof args['a14-shots'] === 'string' ? args['a14-shots'] : 'renders/camvis_a14');
 const SEEN_SHUT = SEEN && !args['no-seen-shut'];
 const WHATIF = (() => {
   const a = args['what-if'];
@@ -447,9 +491,17 @@ function pageLib() {
   }
   function probe(name, v, m, src, opts = {}) {
     const t0 = performance.now();
+    // §9 rows (opts.leave): a row that starts where the last one left the visitor INSIDE (the cave, the palace, a cat
+    // interior) first walks out, so the owner's edge-triggered framing (cave.js's corridor aim, palace.js's 0.95 / 17,
+    // the cat interiors' saved params) runs again on this row's own entry — as it does in play, where nobody resets the
+    // camera's params while he stands inside. Before camera step 8, cam_cave_corridor_m2 and every cave / palace / meow
+    // row after it were framed at the harness's reset (0.64 / 31, π/4), not by their owner.
+    let left = false;
+    if (opts.leave && (cam().indoors || ctx.state.placeOverride)) { leaveInteriors(); left = true; }
     const calls = setup(v, m, { ...opts, watch: true });
     const during = watchStop();
     const out = row(name, m, v, src, calls);
+    if (left) out.leftInterior = true;
     out.a3 = a3Read();
     // right after the probe, before any screenshot: did the world do something this view did not ask for?
     const bad = contamination([...during, ...dirty()]);
@@ -521,6 +573,19 @@ function pageLib() {
     const res = { seen: total ? r(drawn / total, 3) : null, px: total };
     if (S) res.seenShut = total ? r(drawnS / total, 3) : null;
     return res;
+  }
+  /** FNV-1a over the WebGL frame's pixels, rendered now (the 3D frame alone: DOM overlays such as the interaction
+   *  prompt ease on wall-clock CSS transitions, so a page screenshot's hash is not a determinism test of the frame). */
+  function canvasHash() {
+    delete ctx.renderOverride;
+    let h = 0x811c9dc5;
+    try {
+      ctx.renderer.render(ctx.scene, C);
+      const gl = ctx.renderer.getContext(), W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+      const b = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, b);
+      for (let i = 0; i < b.length; i++) { h ^= b[i]; h = Math.imul(h, 0x01000193) >>> 0; }
+    } finally { ctx.renderOverride = NOOP; }
+    return h.toString(16).padStart(8, '0');
   }
   /** Render the current state for a screenshot (2 frames, as render.mjs renders the last two ticks). */
   function renderNow(n = 2) {
@@ -1756,7 +1821,124 @@ function pageLib() {
     }
     return out;
   }
-  window.__cv = { d7, impl, a3Read, probe, renderNow, skyBand, seenBody, sway, horizon, undo: undoSticky, dirty, watchStart, watchStop, seenStates, a4, seedHoldD, seedProbe, a5, a6, a6x, a7, a7x, a8, a9, a10, s7, s7cave,
+  // ── A14 (CAMERA_SPEC §1, §7; camera step 8): the must-not-break views, shot EXACTLY as render.mjs's shoot()
+  // shoots a --view (setTime → teleport → setCameraParams → setView → the view's calls, with render.mjs's own
+  // "view call: not a function" / "view call failed" console errors → walk → step(frames, 1/30)), from the state a
+  // fresh render.mjs process starts in (mode 1, the default params) — plus, when `m` is given, a camera.setMode(m)
+  // call ahead of the view's own (§7 "plain and with call camera.setMode 2"). The console errors themselves are
+  // counted by the node side (page.on('console')); this returns what §7's rows read off the camera.
+  function a14View(name, v, m) {
+    const c = cam(), ui = ctx.systems.ui, toast0 = ui?.toast;
+    // the reset to mode 1 is the harness's, not the view's: its toast would sit in this view's frame
+    if (toast0) ui.toast = () => null;
+    try { c.setMode(1); } finally { if (toast0) ui.toast = toast0; }
+    // a fresh process starts outdoors: leave any interior the last view entered, so an owner's edge-triggered
+    // framing (palace.js, cave.js, the cat interiors) runs again on this view's entry
+    if (c.indoors || ctx.state.placeOverride) leaveInteriors();
+    c.setParams({ azimuth: Math.PI / 4, elevation: 0.64, distance: 31, fov: 30 });
+    let upd = 0, maxOccYaw = 0, maxDens = 0;
+    const off = ctx.events.on('camera:update', () => { upd++; maxOccYaw = Math.max(maxOccYaw, Math.abs(get('occYaw') || 0)); maxDens = Math.max(maxDens, get('densityK') || 0); });
+    const calls = [];
+    let pDistWrites = 0;
+    try {
+      g.setTime(v.time ?? 12);
+      if (v.pos) g.teleport(v.pos[0], v.pos[1]);
+      if (v.az !== undefined || v.el !== undefined || v.dist !== undefined || v.fov !== undefined) {
+        const p = {}; if (v.az !== undefined) p.azimuth = v.az; if (v.el !== undefined) p.elevation = v.el; if (v.dist !== undefined) p.distance = v.dist; if (v.fov !== undefined) p.fov = v.fov; g.setCameraParams(p);
+      }
+      if (v.free) { try { if (g.world.height(v.free[0], v.free[1]) > 0.6) g.teleport(v.free[0], v.free[1]); } catch { /* as render.mjs */ } const y = v.y ?? (g.world.height(v.free[0], v.free[1]) + 2); g.setView({ target: [v.free[0], y, v.free[1]], azimuth: v.az ?? 0.78, elevation: v.el ?? 0.6, distance: v.dist ?? 120, fov: v.fov }); }
+      else g.setView(null);
+      const list = [];
+      if (m) list.push(['camera.setMode', m]);
+      if (v.call) for (const [p, a] of Object.entries(v.call)) list.push([p, a]);
+      for (const [path, args] of list) {
+        try {
+          const parts = path.split('.');
+          let o = ctx.systems;
+          for (let i = 0; i < parts.length - 1; i++) o = o?.[parts[i]];
+          const f = o?.[parts[parts.length - 1]];
+          if (typeof f === 'function') { f.apply(o, Array.isArray(args) ? args : [args]); calls.push({ path, status: 'ok' }); }
+          else { console.error('view call: not a function —', path); calls.push({ path, status: 'not a function' }); }
+        } catch (e) { console.error('view call failed', path, e.message); calls.push({ path, status: 'failed', msg: String(e.message).slice(0, 120) }); }
+      }
+      if (v.walk) g.walk({ x: v.walk.x, y: v.walk.y }, v.walk.n || 30);
+      // …and who writes params.distance during the frames (§7: the flyer never enters its fallback)
+      let last = c.params.distance;
+      const off2 = ctx.events.on('camera:update', () => { if (c.params.distance !== last) { pDistWrites++; last = c.params.distance; } });
+      try { g.step(v.frames ?? 45, 1 / 30); } finally { off2(); }
+    } finally { off(); }
+    ctx.scene.updateMatrixWorld(true);
+    const u = c.cutout?.uniforms;
+    const P = pl(), cur = c.current;
+    return {
+      view: name, mode: m || 1, modeNow: c.mode, calls, free: c.isFree(), cameraUpdates: upd,
+      cutK: num('cutK', 4), nearK: u?.uCutP?.value ? r(u.uCutP.value.z, 4) : null, windowK: u?.uCutR?.value ? r(u.uCutR.value.z, 4) : null,
+      occYaw: num('occYaw', 4), maxOccYaw: r(maxOccYaw, 4), densityK: num('densityK', 4), maxDensityK: r(maxDens, 4),
+      fov: r(C.fov, 3), pFov: r(c.params.fov, 3), el: r(cur.elevation, 4), dist: r(cur.distance, 4), pDist: r(c.params.distance, 3), pDistWrites,
+      pinned: get('pinned'), cinematic: !!c.cinematicActive, looking: num('looking', 3),
+      silhouetteOn: typeof P?.silhouetteOn === 'boolean' ? P.silhouetteOn : null,
+      flying: !!ctx.state.flying, onVehicle: !!P?.onVehicle, onFerry: !!P?.onFerry,
+      player: P?.position ? [r(P.position.x, 3), r(P.position.y, 3), r(P.position.z, 3)] : null,
+      lens: [r(C.position.x, 3), r(C.position.y, 3), r(C.position.z, 3)],
+      state: dirty(),
+    };
+  }
+  /** §7 "cinematic() target fn / array / object forms + promise.cancel": each form eases the lens toward its
+   *  target and resolves once back on the player; a cancelled shot resolves early (its way out only). */
+  async function a14Cine() {
+    const c = cam(), out = { status: 'ok', forms: [], checks: [] };
+    setup({ pos: [-140, 40], time: 12, frames: 0 }, 1, { noStep: true });
+    g.step(10, 1 / 30);
+    const P = pl().position;
+    const T = [P.x + 12, P.y + 2, P.z - 8];
+    const forms = [
+      ['function', () => [T[0], T[1], T[2]]],
+      ['array', [T[0], T[1], T[2]]],
+      ['object', { x: T[0], y: T[1], z: T[2] }],
+      ['Vector3', new THREE.Vector3(T[0], T[1], T[2])],
+    ];
+    for (const [label, target] of forms) {
+      let done = false;
+      const pr = c.cinematic({ target, distance: 20, elevation: 0.5, duration: 1.2, in: 0.3, hold: 0.6, out: 0.3 });
+      pr.then(() => { done = true; });
+      g.step(18, 1 / 30);                              // mid-hold: the lens aims at the target
+      fwd(_f); _v.set(T[0], T[1], T[2]).sub(C.position).normalize();
+      const aimErr = Math.acos(Math.max(-1, Math.min(1, _f.dot(_v))));
+      g.step(30, 1 / 30);                              // past the way out
+      await Promise.resolve(); await Promise.resolve();
+      out.forms.push({ form: label, aimErrRad: r(aimErr, 4), resolved: done, active: !!c.cinematicActive });
+      out.checks.push(chk(`cinematic target ${label}: aim error at the hold (rad)`, aimErr, '<=', 0.05));
+      out.checks.push(chk(`cinematic target ${label}: resolved, back on the player`, done && !c.cinematicActive, '==', true));
+    }
+    {
+      let done = false;
+      const pr = c.cinematic({ target: T, distance: 20, duration: 6, in: 0.3, hold: 5, out: 0.3 });
+      pr.then(() => { done = true; });
+      g.step(15, 1 / 30);
+      pr.cancel();
+      g.step(15, 1 / 30);                              // the way out (0.3 s) only, not the 5 s hold
+      await Promise.resolve(); await Promise.resolve();
+      out.cancel = { resolved: done, active: !!c.cinematicActive };
+      out.checks.push(chk('cinematic .cancel(): resolved within 0.5 s of the cancel', done && !c.cinematicActive, '==', true));
+    }
+    return out;
+  }
+  /** The mode toasts (§2, camera step 8): setMode(n) toasts exactly the spec's line (ui.toast spied, restored). */
+  function a14Toasts() {
+    const c = cam(), ui = ctx.systems.ui, out = { status: 'ok', seen: [], checks: [] };
+    if (!ui || typeof ui.toast !== 'function') return { status: 'no ui.toast', checks: [] };
+    const want = { 1: 'Camera: iso — you turn it (Q/E)', 2: 'Camera: follow — turns with you', 3: 'Camera: top — lay of the land' };
+    const orig = ui.toast;
+    const got = [];
+    ui.toast = function (t, ...rest) { got.push(String(t)); return orig.call(this, t, ...rest); };
+    try {
+      setup({ pos: [-140, 40], time: 12, frames: 0 }, 1, { noStep: true });
+      for (const m of [2, 3, 1]) { got.length = 0; c.setMode(m); out.seen.push({ mode: m, toast: got[0] ?? null }); out.checks.push(chk(`setMode(${m}) toasts "${want[m]}"`, got[0] === want[m], '==', true)); }
+      g.step(2, 1 / 30);
+    } finally { ui.toast = orig; }
+    return out;
+  }
+  window.__cv = { a14View, a14Cine, a14Toasts, canvasHash, d7, impl, a3Read, probe, renderNow, skyBand, seenBody, sway, horizon, undo: undoSticky, dirty, watchStart, watchStop, seenStates, a4, seedHoldD, seedProbe, a5, a6, a6x, a7, a7x, a8, a9, a10, s7, s7cave,
     ua: navigator.userAgent,
     gl: (() => { try { const gl = ctx.renderer.getContext(); const x = gl.getExtension('WEBGL_debug_renderer_info'); return x ? gl.getParameter(x.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); } catch { return '?'; } })() };
   return impl;
@@ -1821,12 +2003,30 @@ async function applyWhatIf(page) {
 const T0 = Date.now();
 const r3 = (x) => (typeof x === 'number' ? +x.toFixed(3) : x);
 let commit = '?'; try { commit = execSync('git rev-parse --short HEAD', { cwd: root }).toString().trim(); } catch {}
-const out = {
+let out = {
   meta: { tag: TAG, commit, date: new Date().toISOString(), protocol: 2, modes: MODES, filter: FILTER, scripts: SCRIPTS, s9: !!args.s9, pSrc: PSRC, shots: SHOTS ? path.relative(root, SHOTS) : null, frame: !args['no-frame'], w: W, h: H, pin: PIN, pinned: {}, seen: SEEN, seenShut: SEEN_SHUT, whatIf: WHATIF ? `${WHATIF.kind}: ${WHATIF.file} ${WHATIF.from} → ${WHATIF.to}` : null },
   impl: null, rows: [], s9rows: [], summary: {}, scripts: {}, frame: {}, reloads: [], errors: [], warnings: 0, whatIf: null,
   timing: { machine: `${os.hostname()} · ${os.cpus()[0]?.model} · ${os.platform()} ${os.release()}`, userAgent: null, glRenderer: null, rows: {}, scripts: {}, frameMs: {}, reloads: [] },
 };
 
+// --retable <tag>: recompute an existing run's A1-A14 table from its JSON (no browser), with this call's --a12 / --a13 /
+// --a13-frame — for when the other runs exist only after it, or the table's own rules changed. Rewrites summary.table in
+// <tag>.json and the "## Acceptance A1-A14" section of <tag>.md; nothing else in the run changes.
+if (typeof args.retable === 'string') {
+  const jf = path.join(outDir, args.retable + '.json'), mf = path.join(outDir, args.retable + '.md');
+  out = JSON.parse(fs.readFileSync(jf, 'utf8'));
+  delete out.summary.a12diff;
+  out.meta.retabled = { date: new Date().toISOString(), args: { a12: A12_TAG, a13: A13_TAG, a13Frame: A13_FRAME } };
+  out.summary.table = accTable();
+  fs.writeFileSync(jf, JSON.stringify(out, null, 1));
+  let md = fs.readFileSync(mf, 'utf8');
+  const sec = tableMd(out.summary.table).join('\n') + '\n';
+  md = /## Acceptance A1-A14[^\n]*\n[\s\S]*?\n(?=## )/.test(md) ? md.replace(/## Acceptance A1-A14[^\n]*\n[\s\S]*?\n(?=## )/, sec) : md.replace(/\n## Summary/, '\n' + sec + '\n## Summary');
+  fs.writeFileSync(mf, md);
+  for (const r of out.summary.table) console.log(`${r.id.padEnd(4)} ${r.pass === true ? 'PASS' : r.pass === false ? 'FAIL' : 'n/a '}  ${String(r.measured).slice(0, 220)}`);
+  console.log(`retabled ${path.relative(root, jf)} + .md`);
+  process.exit(0);
+}
 await acquire();
 const launchArgs = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'];
 let browser;
@@ -1838,6 +2038,17 @@ try {
     await applyPin(page, out.meta.pinned);
     await page.goto(`http://127.0.0.1:${PORT}/?camvis=perf`, { waitUntil: 'load' });
     await page.waitForFunction(() => window.game && window.game.ready, null, { timeout: 300000 });
+    // live play opens on the title card (a free hero camera) and then the opening cinematic (Contract K): dismiss the
+    // card, skip the flight, and wait until the camera is the follow camera again — before this, a perf run timed a
+    // FREE camera's update() (returns at once: no sweep, ~0 ms), which is no A13 number at all
+    await page.evaluate(() => { try { window.game.ctx.systems.ui?.skipIntro?.(); } catch { /* no title */ } });
+    await page.waitForFunction(() => { const s = window.game.ctx.systems; return !s.intro || s.intro.active || !s.camera.isFree(); }, null, { timeout: 60000 }).catch(() => {});
+    for (let i = 0; i < 20; i++) {
+      const st = await page.evaluate(() => { const s = window.game.ctx.systems; try { s.intro?.skip?.(); } catch { /* none */ } return { intro: !!s.intro?.active, free: s.camera.isFree(), locked: !!s.player?.locked }; });
+      if (!st.intro && !st.free && !st.locked) break;
+      await page.waitForTimeout(500);
+    }
+    out.timing.perfStart = await page.evaluate(() => { const s = window.game.ctx.systems; return { intro: !!s.intro?.active, free: s.camera.isFree(), locked: !!s.player?.locked, mode: s.camera.mode }; });
     const v = views.cat_residential;
     await page.evaluate((v) => {
       const g = window.game, c = g.ctx.systems.camera;
@@ -1852,11 +2063,11 @@ try {
     const p95 = (a) => { if (!a.length) return null; const q = [...a].sort((x, y) => x - y); return +q[Math.min(q.length - 1, Math.floor(0.95 * (q.length - 1) + 0.5))].toFixed(3); };
     const sw = s.ms.filter((_, i) => s.sweep[i]), ns = s.ms.filter((_, i) => !s.sweep[i]);
     const mean = (a) => a.length ? +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(3) : null;
-    const hwOk = !/swiftshader|software|llvmpipe/i.test(env.gl);
+    const hwOk = !/swiftshader|software|llvmpipe/i.test(env.gl) && sw.length > 0;   // no sweep frame = the camera never ran (free)
     out.timing.userAgent = env.ua; out.timing.glRenderer = env.gl;
     out.timing.perf = { view: 'cat_residential', frames: s.n, mean: mean(s.ms), p95: p95(s.ms), max: +Math.max(...s.ms).toFixed(3), sweepFrames: sw.length, sweepP95: p95(sw), nonSweepP95: p95(ns), hardwareGL: hwOk };
-    out.scripts.perf = { status: hwOk ? 'ok' : 'measured on software GL — not an A13 number (run with --gl hw on the M1 Pro)',
-      checks: [{ id: 'camMs p95 non-sweep ≤ 1.5 ms', value: p95(ns), pass: hwOk && p95(ns) <= 1.5 }, { id: 'camMs p95 sweep ≤ 6 ms', value: p95(sw), pass: hwOk && p95(sw) <= 6 }] };
+    out.scripts.perf = { status: hwOk ? 'ok' : !sw.length ? 'no sweep frame in the window: the camera was not running (free / title) — not an A13 number' : 'measured on software GL — not an A13 number (run with --gl hw on the M1 Pro)',
+      checks: [{ id: 'camMs p95 non-sweep ≤ 1.5 ms', value: p95(ns), op: '<=', limit: 1.5, pass: hwOk && p95(ns) <= 1.5 }, { id: 'camMs p95 sweep ≤ 6 ms', value: p95(sw), op: '<=', limit: 6, pass: hwOk && p95(sw) <= 6 }] };
     console.log('perf', JSON.stringify(out.timing.perf), env.gl);
   } else {
     browser = await chromium.launch({ args: launchArgs });
@@ -1938,7 +2149,7 @@ try {
     };
 
     // probe set P, mode-major (fewest mode switches)
-    const plist = P.filter((n) => !FILTER || n.includes(FILTER));
+    const plist = P.filter(passFilter);
     for (const m of MODES) {
       for (const name of plist) {
         const { v, src } = resolveP(name);
@@ -1961,11 +2172,11 @@ try {
     // §9 views (view-major; cam_flying last)
     if (args.s9) {
       for (const [name, v] of Object.entries(camViews)) {
-        if (FILTER && !name.includes(FILTER)) continue;
+        if (!passFilter(name)) continue;
         const own = v.call && v.call['camera.setMode'];
         const ms = [...MODES]; if (own && !ms.includes(own)) ms.push(own);
         for (const m of ms) {
-          const res = await probeRow(name, v, m, 'views/camera.json', { forceMode: true, seen: SEEN, seenShut: SEEN_SHUT });
+          const res = await probeRow(name, v, m, 'views/camera.json', { forceMode: true, leave: true, seen: SEEN, seenShut: SEEN_SHUT });
           out.s9rows.push(res.row);
           const f = await shoot(name, m);
           await page.evaluate((v) => window.__cv.undo(v), v);
@@ -2021,6 +2232,104 @@ try {
     if (SCRIPTS.includes('a7') || SCRIPTS.includes('a7x')) await run('a7x', (v) => window.__cv.a7x(v), views.occ_silhouette || null);
     // …and last of all camera step 7's own proof (it ends in the air): with a10, or alone as "--script d7"
     if (SCRIPTS.includes('a10') || SCRIPTS.includes('d7')) await run('d7', () => window.__cv.d7());
+    // A14 (camera step 8): the §7 must-not-break views, shot as render.mjs shoots them (window.__cv.a14View), on a
+    // fresh page, each rendered to --a14-shots; the console errors each one logs are counted against it (PAGEERROR,
+    // "[system X] update error", render.mjs's "view call: not a function" / "view call failed"); plus the §7 rows
+    // the camera can read off each (free = no camera:update, window + near band off; the moon hold's offsets; the
+    // interiors in both modes; the flyer's distance writes), cinematic()'s target forms + cancel, the mode toasts,
+    // and candy_arrival shot twice on two fresh pages (identical stats + PNG hash). Last on the page.
+    if (SCRIPTS.includes('a14')) {
+      const label = 'script a14';
+      await isolate(label);
+      if (pageLog.length) await reload(label, 'fresh page (a14 shoots as a fresh render.mjs process does)', []);
+      const pg = pageSig();
+      const t = Date.now();
+      const A = { status: 'ok', page: pg, dir: path.relative(root, A14_SHOTS), views: [], checks: [], s7: [] };
+      fs.mkdirSync(A14_SHOTS, { recursive: true });
+      const sha1 = (file) => crypto.createHash('sha1').update(fs.readFileSync(file)).digest('hex');
+      const ck = (id, value, op, limit) => {
+        const pass = value === null || value === undefined ? false : op === '<=' ? value <= limit : op === '>=' ? value >= limit : op === '==' ? value === limit : false;
+        return { id, value: typeof value === 'number' ? +value.toFixed(4) : value, op, limit, pass };
+      };
+      const LIST = [
+        ['candy_arrival', 0, 'A'], ['cat_residential'], ['candy_meadow'], ['cat_main_street'], ['cam_follow_street'],
+        ['world_overview'], ['palace_throne'],
+        ['candy_in_house0'], ['candy_in_house0', 2], ['cat_in_meow'], ['cat_in_meow', 2],
+        ['palace_throne_play'], ['palace_throne_play', 2], ['cave_corridor'], ['cave_corridor', 2],
+        ['@cine'], ['@toasts'],
+        ['cam_moon_moment'], ['escape_catapult'], ['escape_flyer_pad'], ['escape_canoe_cove'], ['ferry_deck'], ['ferry_crossing'], ['cam_flying'],
+        ['candy_arrival', 0, 'B'],
+      ];
+      const FREE = new Set(['world_overview', 'palace_throne', 'ferry_crossing']);
+      const INTERIOR = new Set(['candy_in_house0', 'cat_in_meow', 'palace_throne_play', 'cave_corridor']);
+      for (const [name, m, tag] of LIST) {
+        if (name === '@cine' || name === '@toasts') {
+          const e0 = out.errors.length;
+          const r = name === '@cine' ? await page.evaluate(() => window.__cv.a14Cine()) : await page.evaluate(() => window.__cv.a14Toasts());
+          await new Promise((res) => setTimeout(res, 50));
+          r.errors = out.errors.slice(e0);
+          A[name === '@cine' ? 'cinematic' : 'toasts'] = r;
+          A.s7.push(...(r.checks || []));
+          A.checks.push(ck(`${name.slice(1)}: console errors`, r.errors.length, '==', 0));
+          pageLog.push(`a14 ${name}`); lastLabel = `a14 ${name}`;
+          continue;
+        }
+        const v = views[name];
+        const lab = `a14 ${name}${m ? ' +setMode ' + m : ''}${tag ? ' ' + tag : ''}`;
+        if (!v) { A.views.push({ view: name, status: 'view missing' }); A.checks.push(ck(`${lab}: view exists`, false, '==', true)); continue; }
+        if (tag === 'B') await reload(lab, 'fresh page (§7: candy_arrival twice, as two render.mjs processes)', []);
+        else { const d = await page.evaluate(() => window.__cv.dirty()); if (d.length) await reload(lab, `left behind by ${lastLabel}`, d); }
+        const e0 = out.errors.length;
+        const row = await page.evaluate(([name, v, m]) => window.__cv.a14View(name, v, m), [name, v, m || 0]);
+        row.frameHash = await page.evaluate(() => window.__cv.canvasHash());
+        await page.evaluate(() => window.__cv.renderNow(2));
+        row.stats = await page.evaluate(() => { const s = window.game.stats(); return { calls: s.calls, triangles: s.triangles }; });
+        const file = path.join(A14_SHOTS, `${name}${m ? '_m' + m : ''}${tag === 'B' ? '_again' : ''}.png`);
+        await page.screenshot({ path: file, type: 'png', timeout: 240000 });
+        await new Promise((res) => setTimeout(res, 50));
+        const errs = out.errors.slice(e0);
+        // the page PNG's hash is wall-clock (DOM overlays ease on CSS time): it lives in the timing block, not the row
+        (out.timing.a14png || (out.timing.a14png = {}))[lab] = sha1(file);
+        Object.assign(row, { png: path.relative(root, file), errors: errs,
+          pageErrors: errs.filter((e) => e.startsWith('PAGEERROR')).length, updateErrors: errs.filter((e) => /\] update error/.test(e)).length,
+          viewCallErrors: errs.filter((e) => /^view call/.test(e)).length + row.calls.filter((c) => c.status !== 'ok').length });
+        A.views.push(row);
+        pageLog.push(lab); lastLabel = lab;
+        A.checks.push(ck(`${lab}: PAGEERROR + update error + view call error`, row.pageErrors + row.updateErrors + row.viewCallErrors, '==', 0));
+        // the §7 rows this view carries
+        if (FREE.has(name)) {
+          A.s7.push(ck(`${lab}: free camera, no camera:update during its frames`, row.free ? row.cameraUpdates : null, '==', 0));
+          A.s7.push(ck(`${lab}: free camera, window and near band off (uCutR.z + uCutP.z)`, row.free ? (row.windowK ?? 0) + (row.nearK ?? 0) : null, '==', 0));
+        }
+        if (name === 'ferry_crossing') A.s7.push(ck(`${lab}: player.silhouetteOn under the ferry's free camera`, row.silhouetteOn, '==', false));
+        if (name === 'cam_moon_moment') A.s7.push(ck(`${lab}: at the hold (cinematic on) occYaw + densityK + cutK`, row.cinematic ? Math.abs(row.occYaw) + row.densityK + row.cutK : null, '==', 0));
+        if (INTERIOR.has(name)) {
+          A.s7.push(ck(`${lab}: cam.fov == params.fov`, Math.abs(row.fov - row.pFov), '<=', 0.01));
+          A.s7.push(ck(`${lab}: occYaw + densityK`, Math.abs(row.occYaw) + row.densityK, '==', 0));
+        }
+        if (name === 'escape_canoe_cove') A.s7.push(ck(`${lab}: occYaw + densityK`, Math.abs(row.occYaw) + row.densityK, '==', 0));
+        if (name === 'cam_flying') {
+          A.s7.push(ck(`${lab}: flying`, row.flying, '==', true));
+          A.s7.push(ck(`${lab}: params.distance writes during the frames (the flyer's fallback never runs)`, row.pDistWrites, '==', 0));
+          A.s7.push(ck(`${lab}: fov 40 ± 0.5`, Math.abs(row.fov - 40), '<=', 0.5));
+        }
+      }
+      const a = A.views.find((x) => x.view === 'candy_arrival' && x.png && !x.png.includes('_again')), b = A.views.find((x) => x.view === 'candy_arrival' && x.png && x.png.includes('_again'));
+      if (a && b) {
+        A.twice = { stats: [a.stats, b.stats], frameHash: [a.frameHash, b.frameHash], lens: [a.lens, b.lens] };
+        A.s7.push(ck('candy_arrival twice (two fresh pages): identical stats (calls, triangles)', JSON.stringify(a.stats) === JSON.stringify(b.stats), '==', true));
+        A.s7.push(ck('candy_arrival twice: identical lens position', JSON.stringify(a.lens) === JSON.stringify(b.lens), '==', true));
+        A.s7.push(ck('candy_arrival twice: identical 3D frame (WebGL pixel hash)', a.frameHash === b.frameHash, '==', true));
+        // informational: the page PNG also carries the DOM overlays (the E prompt, the minimap), which ease on wall-clock CSS
+        const ph = out.timing.a14png || {};
+        out.timing.a14twicePngIdentical = ph['a14 candy_arrival A'] === ph['a14 candy_arrival B'];
+      }
+      A.checks.push(ck('console errors over the whole run so far', out.errors.length, '==', 0));
+      out.scripts.a14 = A;
+      out.timing.scripts.a14 = Date.now() - t;
+      const ok = A.checks.filter((c) => c.pass).length, ok7 = A.s7.filter((c) => c.pass).length;
+      console.log(`script a14: ${ok}/${A.checks.length} error checks pass · §7 rows ${ok7}/${A.s7.length} · frames in ${A.dir}`);
+    }
     out.impl = await page.evaluate(() => window.__cv.impl);
   }
 } catch (err) {
@@ -2070,8 +2379,129 @@ out.summary.seedCrossCheck = {
 out.summary.accept = acceptance();
 out.summary.A3 = a3Summary();
 out.summary.A11 = a11Summary();
+out.summary.table = accTable();
 out.timing.wallS = +((Date.now() - T0) / 1000).toFixed(1);
 out.errors = [...new Set(out.errors)];
+
+/**
+ * THE A1-A14 TABLE (CAMERA_SPEC §1; camera step 8): one verdict per criterion, as written, with the measured
+ * numbers — PASS / FAIL, or n/a when this run did not measure it (a --filter, a script left out, no --a13 perf run).
+ * Built from what the run already holds: acceptance() (A1, A2 mode 1), the mode summaries (A2 modes 2 / 3 / any),
+ * a3Summary() (A3), the scripts a4-a10 (A4-A10), a11Summary() (A11), s7's snap() determinism + a diff against the
+ * --a12 rerun (A12), the --a13 hardware perf run + the render-side frame sample (A13), and a14 + the run's console
+ * errors (A14). A15 is the critics' (frames), not a number. Proposed readings (A1§5.3, A2base) ride along as notes.
+ */
+/** The A1-A14 table as markdown lines (the writer and --retable). */
+function tableMd(table) {
+  const pf = (b) => (b === true ? '**PASS**' : b === false ? '**FAIL**' : 'n/a');
+  const esc = (x) => String(x || '').replace(/\|/g, '\\|');
+  const re = out.meta?.retabled ? ` · table recomputed ${out.meta.retabled.date} (--retable: ${JSON.stringify(out.meta.retabled.args)})` : '';
+  return ['## Acceptance A1-A14 (CAMERA_SPEC §1, as written)', '', `Each criterion as the spec writes it, with what this run measured. n/a = not measured by this run. Notes carry the readings proposed in steps 4-7 for the orchestrator (not the spec until it is amended). A15 is judged by the critics on the frames.${re}`, '',
+    '| criterion | verdict | measured | note |', '|---|---|---|---|', ...table.map((r) => `| ${r.id} | ${pf(r.pass)} | ${esc(r.measured)} | ${esc(r.note)} |`), ''];
+}
+function accTable() {
+  const T = [];
+  const f4 = (x) => (typeof x === 'number' ? String(+x.toFixed(4)) : x === null || x === undefined ? '–' : String(x));
+  const cks = (list) => (list || []).map((c) => `${c.pass ? '' : '**FAIL** '}${c.id} ${f4(c.value)}${c.op ? ` (${c.op} ${f4(c.limit)})` : ''}`).join(' · ');
+  const all = (list) => (list && list.length ? list.every((c) => c.pass) : null);
+  const load = (t) => { try { return JSON.parse(fs.readFileSync(path.join(outDir, t + '.json'), 'utf8')); } catch { return null; } };
+  const S = out.scripts, acc = out.summary.accept;
+  // A1
+  if (acc) T.push({ id: 'A1', pass: acc.A1.pass, measured: cks(acc.A1.checks), note: `A1§5.3 (proposed: nearBody / terrain rays count as seen) ${acc.A1_5_3.pass ? 'PASS' : 'FAIL'}` });
+  else T.push({ id: 'A1', pass: null, measured: 'needs the full P in mode 1 (no --filter)' });
+  // A2: mode 1 raw (as written) + modes 2 / 3 + no probe cut-aware < 0.8 in any mode
+  {
+    const ch = [];
+    if (acc) ch.push(...acc.A2m1.checks);
+    const m2 = out.summary.m2, m3 = out.summary.m3;
+    const rs = (m) => out.rows.filter((x) => x.mode === m && typeof x.vis === 'number');
+    if (m2 && m2.n === P.length) {
+      const minRaw2 = Math.min(...rs(2).map((x) => x.raw));
+      ch.push({ id: 'm2 cut-aware mean', value: m2.cutMean15, op: '>=', limit: 0.95, pass: m2.cutMean15 >= 0.95 - 1e-9 });
+      ch.push({ id: 'm2 raw mean', value: m2.rawMean15, op: '>=', limit: 0.75, pass: m2.rawMean15 >= 0.75 - 1e-9 });
+      ch.push({ id: `m2 lowest raw (${rs(2).filter((x) => x.raw < 0.4).map((x) => x.view).join(', ') || 'none < 0.4'})`, value: minRaw2, op: '>=', limit: 0.4, pass: minRaw2 >= 0.4 - 1e-9 });
+    }
+    if (m3 && m3.n === P.length) ch.push({ id: 'm3 cut-aware mean', value: m3.cutMean15, op: '>=', limit: 0.98, pass: m3.cutMean15 >= 0.98 - 1e-9 });
+    const any = [1, 2, 3].filter((m) => out.summary['m' + m]?.n === P.length);
+    if (any.length) {
+      const low = any.flatMap((m) => rs(m).filter((x) => x.vis < 0.8 - 1e-9).map((x) => `${x.view} m${m} ${x.vis}`));
+      ch.push({ id: `no probe cut-aware < 0.8 in modes ${any.join('/')}${low.length ? ' — ' + low.join(', ') : ''}`, value: low.length, op: '==', limit: 0, pass: !low.length });
+    }
+    T.push({ id: 'A2', pass: acc && any.length === 3 ? all(ch) : ch.length ? (all(ch) === false ? false : null) : null, measured: cks(ch) || 'needs the full P in modes 1-3',
+      note: acc?.A2m1_base ? `A2base mode 1 (proposed: the floor is baseline.json @ ${acc.A2m1_base.baseline.commit}) ${acc.A2m1_base.pass ? 'PASS' : 'FAIL'}` : '' });
+  }
+  // A3
+  const a3 = out.summary.A3;
+  T.push(a3 ? { id: 'A3', pass: a3.pass, measured: `${a3.rows} rows, every frame · lowest occDist ${Object.entries(a3.perMode).map(([k, e]) => `${k} ${f4(+e.minOccDist.toFixed(2))}`).join(' / ')} (≥ 14 outdoors, 5.5 in) · largest culled mesh ${f4(a3.culledMax)} u (≤ 18)${a3.fails.length ? ' · **FAIL** ' + a3.fails.join('; ') : ''}` } : { id: 'A3', pass: null, measured: 'no probe rows' });
+  // A4-A10: the scripts, every check
+  for (const [id, sc] of [['A4', 'a4'], ['A5', 'a5'], ['A6', 'a6'], ['A7', 'a7'], ['A8', 'a8'], ['A9', 'a9'], ['A10', 'a10']]) {
+    const s = S[sc];
+    if (!s) { T.push({ id, pass: null, measured: `script ${sc} not run` }); continue; }
+    const ch = s.checks || [];
+    T.push({ id, pass: ch.length ? all(ch) : null, measured: ch.length ? `${ch.filter((c) => c.pass).length}/${ch.length} · ${cks(ch)}` : `${s.status}${s.why ? ' (' + s.why + ')' : ''}` });
+  }
+  // A11
+  const a11 = out.summary.A11;
+  T.push(a11 ? { id: 'A11', pass: a11.pass, measured: a11.why || `${a11.references} reference comparisons (post5 @ ${a11.post5}, baseline @ ${a11.baseline}) · ${(a11.refs || []).filter((e) => e.pass).length} match${a11.fails.length ? ' · **FAIL** ' + a11.fails.join('; ') : ''}`,
+    note: a11.passExceptInherited !== undefined ? `leaving out the mismatches inherited from steps 1-5 (this row equals post5): ${a11.passExceptInherited ? 'PASS' : 'FAIL'}` : '' } : { id: 'A11', pass: null, measured: 'no mode-1 rows' });
+  // A12: snap() twice (s7 (f)) + this run against the --a12 rerun
+  {
+    const det = S.s7?.determinism?.checks || [];
+    const ch = [...det];
+    let txt = '', a12note = '';
+    if (A12_TAG) {
+      const B = load(A12_TAG);
+      if (!B) txt = `--a12 ${A12_TAG}: run not found`;
+      else {
+        const d = diffRuns(out, B, false);
+        ch.push({ id: `two camvis runs (this vs ${A12_TAG} @ ${B.meta?.commit}): rows + scripts that differ`, value: d.differ, op: '==', limit: 0, pass: d.differ === 0 && d.code !== 2 });
+        ch.push({ id: 'run-wide fields that differ (summary, frame, reloads, impl, errors)', value: d.whole, op: '==', limit: 0, pass: d.whole === 0 });
+        // which differences are RENDERED-WORLD fields (pixels / triangle counts the camera does not own: the s7 horizon's
+        // open-sky share, a14's WebGL frame hashes and draw stats, the frame sample's triangles) and which are anything else
+        const WORLD = /frameHash|\.triangles|\.sky\.|horizon\.\d+\.checks\.\d+\.value/;
+        const other = d.diffs.filter((x) => !WORLD.test(x.split(':')[0]));
+        txt = `${d.same} rows/scripts identical · ${d.differ} differ · ${d.notComp.length} not comparable · ${d.onlyA.length + d.onlyB.length} in one run only${d.metaDiff.length ? ' · arguments differ: ' + d.metaDiff.join(', ') : ''} · differing fields: ${d.diffs.length - other.length} rendered-world (pixels, triangle counts), ${other.length} other${d.diffs.length ? ' · first: ' + (other.length ? other : d.diffs).slice(0, 6).join(' | ') : ''}`;
+        out.summary.a12diff = { against: A12_TAG, commit: B.meta?.commit ?? null, same: d.same, differ: d.differ, notComparable: d.notComp, only: [...d.onlyA, ...d.onlyB], whole: d.whole, worldFields: d.diffs.length - other.length, otherFields: other, diffs: d.diffs.slice(0, 60), code: d.code };
+        a12note = other.length ? `${other.length} non-rendering field(s) differ` : 'every differing field is a rendered-world field (pixels / triangle counts); every camera number in every row and script is identical';
+      }
+    } else txt = 'second run: not given (--a12 <tag>)';
+    T.push({ id: 'A12', pass: A12_TAG && ch.length ? all(ch) : det.length && all(det) === false ? false : null, measured: `${cks(ch)}${txt ? ' · ' + txt : ''}`, note: a12note });
+  }
+  // A13: hardware GL perf (--a13) + the render-side frame sample (--a13-frame pin,live; else this run vs baseline.json)
+  {
+    const ch = [];
+    let txt = [];
+    if (A13_TAG) {
+      const J = load(A13_TAG);
+      const pf = J?.timing?.perf, s = J?.scripts?.perf;
+      if (!pf) txt.push(`--a13 ${A13_TAG}: no perf block`);
+      else {
+        ch.push(...(s?.checks || []));
+        txt.push(`${A13_TAG} @ ${J.meta?.commit}: ${pf.frames} live frames at ${pf.view} on ${J.timing.glRenderer} · hardware GL ${pf.hardwareGL} · camMs mean ${pf.mean} · p95 ${pf.p95} · max ${pf.max} · sweep frames ${pf.sweepFrames}`);
+        if (!pf.hardwareGL) ch.push({ id: 'measured on hardware GL (Chrome, not SwiftShader)', value: false, op: '==', limit: true, pass: false });
+      }
+    } else txt.push('hardware-GL perf run: not given (--a13 <tag>, a run of --script perf --gl hw)');
+    const fr = A13_FRAME ? [load(A13_FRAME[0]), load(A13_FRAME[1])] : [load('baseline'), out];
+    const frLab = A13_FRAME ? [`${A13_FRAME[0]} (camera pinned @ ${fr[0]?.meta?.pin ?? '?'})`, A13_FRAME[1]] : ['baseline.json (pre-edit, older world)', 'this run'];
+    if (fr[0] && fr[1]) for (const v of ['cat_plaza', 'candy_village']) {
+      const a = fr[0].timing?.frameMs?.[v], b = fr[1].timing?.frameMs?.[v], ca = fr[0].frame?.[v], cb = fr[1].frame?.[v];
+      if (a && b) ch.push({ id: `${v} render frameMs median, ${frLab[1]} vs ${frLab[0]} ${a.median} × 1.10`, value: b.median, op: '<=', limit: +(a.median * 1.1).toFixed(3), pass: b.median <= a.median * 1.1 + 1e-9 });
+      if (ca && cb) ch.push({ id: `${v} draw calls vs ${ca.calls}`, value: cb.calls, op: '<=', limit: ca.calls, pass: cb.calls <= ca.calls });
+    }
+    T.push({ id: 'A13', pass: A13_TAG && ch.length ? all(ch) : ch.length && all(ch) === false ? false : null, measured: `${cks(ch)}${txt.length ? ' · ' + txt.join(' · ') : ''}` });
+  }
+  // A14: the must-not-break views (a14) + no console error anywhere in the run
+  {
+    const a = S.a14;
+    const ch = [...(a?.checks || [])];
+    if (!a) ch.push({ id: 'console errors over the run', value: out.errors.length, op: '==', limit: 0, pass: out.errors.length === 0 });
+    else { const last = ch.find((c) => c.id.startsWith('console errors over the whole run')); if (last) { last.value = out.errors.length; last.pass = out.errors.length === 0; last.id = 'console errors over the whole run'; } }
+    const views = a ? a.views.filter((x) => x.png).length : 0;
+    T.push({ id: 'A14', pass: a ? all(ch) : null, measured: a ? `${views} §7 view shots (${a.dir}), ${ch.filter((c) => c.pass).length}/${ch.length} clean · PAGEERROR ${a.views.reduce((s, x) => s + (x.pageErrors || 0), 0)} · update error ${a.views.reduce((s, x) => s + (x.updateErrors || 0), 0)} · view call error ${a.views.reduce((s, x) => s + (x.viewCallErrors || 0), 0)} · console errors in the whole run ${out.errors.length}${ch.some((c) => !c.pass) ? ' · ' + cks(ch.filter((c) => !c.pass)) : ''}` : `script a14 not run · console errors ${out.errors.length}`,
+      note: a ? `§7 rows read off the same shots: ${a.s7.filter((c) => c.pass).length}/${a.s7.length}${a.s7.some((c) => !c.pass) ? ' — ' + cks(a.s7.filter((c) => !c.pass)) : ''}` : '' });
+  }
+  return T;
+}
 
 /**
  * A1 and A2's mode-1 clause (the camera step 4 proof), as written in CAMERA_SPEC §1 and as proposed for the
@@ -2217,6 +2647,7 @@ const f = (x, n = 3) => (x === null || x === undefined ? '–' : typeof x === 'n
 md.push(`# camvis · ${TAG}`, '', `commit ${commit} · ${out.meta.date} · protocol ${out.meta.protocol} · modes ${MODES.join(',')} · P from ${PSRC}${FILTER ? ' · filter ' + FILTER : ''}${args.s9 ? ' · §9' : ''} · scripts ${SCRIPTS.join(',') || 'none'} · ${W}×${H} · wall ${out.timing.wallS} s`, '');
 md.push(`Comparable row-for-row only with runs made with the same --mode, --filter, --s9, --p-src, --pin, --script and --w/--h (header, "Isolation"); \`--diff\` enforces it. Retried rows: ${out.summary.retried.length} · still contaminated: ${out.summary.contaminated.join(', ') || 'none'}.`, '');
 md.push(`impl: ${JSON.stringify(out.impl)}${PIN ? ` · camera-owned sources pinned to ${PIN}: ${JSON.stringify(out.meta.pinned)}` : ''}`, '');
+if (out.summary.table) md.push(...tableMd(out.summary.table));
 md.push('## Summary (vis = cut-aware, raw = geometric; "13" = the seed probe\'s gameplay views)', '', '| mode | n | cut mean 13 | raw mean 13 | cut mean 15 | raw mean 15 | feather 15 | at 1.0 (13/15) | min | < 0.8 |', '|---|---|---|---|---|---|---|---|---|---|');
 for (const m of MODES) { const s = out.summary['m' + m]; md.push(`| ${m} | ${s.n} | ${f(s.cutMean13)} | ${f(s.rawMean13)} | ${f(s.cutMean15)} | ${f(s.rawMean15)} | ${f(s.featherMean15)} | ${s.full13}/${s.full15} | ${f(s.min)} | ${s.below08.join(', ') || '–'} |`); }
 md.push('', `Seed cross-check: m1 raw mean 13 = ${f(out.summary.seedCrossCheck.m1RawMean13.now)} (seed 0.908) · m3 mean 13 = ${f(out.summary.seedCrossCheck.m3Mean13.now)} (seed 0.985) · hold-D ${JSON.stringify(out.summary.seedCrossCheck.holdD.now)} (seed net 2.7 / path 23.7)`, '');
@@ -2268,6 +2699,11 @@ for (const [id, s] of Object.entries(out.scripts)) {
   for (const c of s.lensElev || []) { all.push(c.check.value === null ? c.proxyCheck : c.check); }
   for (const c of s.interiors || []) all.push(...(c.checks || []));
   for (const c of s.horizon || []) all.push(...(c.checks || []));
+  if (id === 'a14') {
+    all.push(...(s.s7 || []), ...(s.cinematic?.checks || []).filter((c) => !(s.s7 || []).includes(c)), ...(s.toasts?.checks || []).filter((c) => !(s.s7 || []).includes(c)));
+    for (const x of s.views || []) md.push(`- ${x.view}${x.mode > 1 ? ' +setMode ' + x.mode : ''} → ${x.png || x.status} · errors ${x.errors ? x.errors.length : '–'}${x.errors?.length ? ' (' + x.errors.slice(0, 3).join(' | ') + ')' : ''} · calls ${(x.calls || []).map((c) => c.path + ':' + c.status).join(',') || '–'} · mode ${x.modeNow} · free ${x.free} · camera:update ${x.cameraUpdates} · cutK ${x.cutK} · occYaw ${x.occYaw} · densityK ${x.densityK} · fov ${x.fov}/${x.pFov} · el ${x.el} · dist ${x.dist}${x.cinematic ? ' · cinematic' : ''}${x.flying ? ' · flying' : ''}${x.silhouetteOn === false ? ' · silhouette off' : ''} · frame ${x.frameHash ?? '–'}`);
+    if (s.toasts?.seen) md.push(`- mode toasts: ${s.toasts.seen.map((t) => `${t.mode} "${t.toast}"`).join(' · ')}`);
+  }
   for (const c of s.horizon || []) if (c.sky) md.push(`- ${c.view} m2 last frame: band ${c.sky.bandPct}% of height · open sky ${c.sky.openPct}% of the band (${c.sky.openFramePct}% of the frame) · ${c.sky.colsOpen}/16 columns ≥ 25% open · lens ${c.end.occDist}/${c.end.goalDist} u, ${c.end.lensAboveFeet} u over the feet · vis ${c.end.vis}/5 · band filled by ${Object.entries(c.sky.by).sort((a, b) => b[1].n - a[1].n).map(([k, e]) => `${k} ×${e.n}${e.near !== null ? ' @' + e.near : ''}`).join(', ') || '—'}`);
   for (const c of all) md.push(`- ${c.pass ? 'PASS' : 'FAIL'} ${c.id}: ${f(c.value, 4)} (${c.op || ''} ${c.limit ?? ''})`);
   for (const c of s.predict || []) md.push(`- (not a gate) ${c.pass ? 'would pass' : 'would fail'} ${c.id}: ${f(c.value, 4)} (${c.op || ''} ${c.limit ?? ''})`);
