@@ -22,5 +22,7 @@
   "cam_overview_town": {"pos": [118, 0], "time": 12, "call": {"camera.setMode": 3}, "frames": 45},
   "cam_help_card": {"pos": [-110, -45], "time": 12, "call": {"ui.showHint": true, "camera.look": {"on": true, "yaw": 0.3}}, "frames": 10},
   "cam_flying": {"pos": [206.4, 6], "time": 12, "call": {"escape.routes.flyer.debugFly": [206.4, 6, 60, -1.5708, true]}, "frames": 60},
+  "cam_house0_follow": {"pos": [-152, 48], "time": 21, "az": 1.8925, "el": 0.72, "dist": 16, "call": {"camera.setMode": 2}, "frames": 60},
+  "cam_hint_q":         {"pos": [-150, 68], "time": 12, "frames": 64},
   "cam_look_flying": {"pos": [206.4, 6], "time": 12, "call": {"escape.routes.flyer.debugFly": [206.4, 6, 60, -1.5708, true], "camera.look": {"on": true, "yaw": 0.9, "pitch": 0.08}}, "frames": 30}
 }

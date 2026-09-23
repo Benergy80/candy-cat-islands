@@ -22,9 +22,25 @@
 //     update(dt)    camera sway + letters + sprinkles + press pulse
 //     leave()       the logo pops as the dip to dark starts
 //     restore()     give the world back EXACTLY: camera mode, time, fog, thermals
+//     handoff()     Contract K: stop driving the camera (nothing else) and return
+//                   { view, saved:{time,frozen,fog} } for intro.takeover()
+//     release()     after the cinematic: the thermals come back (camera, clock
+//                   and fog were the cinematic's to restore)
 //   }
 // Nothing here runs unless begin() was called: under ?shot=1 (without
 // ?intro=1) ui.js never calls it, so renders keep skipping the card.
+//
+// THE CURTAIN (real flow). begin() runs inside ui.create, while index.html's
+// loading screen still covers everything and main.js's warm-up frames render
+// underneath it. The hero view and the dusk clock are applied right there, so
+// every frame the world ever renders is already the title's; but the ENTRANCE
+// clock holds at 0 until main.js lifts the curtain (#loading.done) — it used to
+// run from ui.create, so the reveal landed on an entrance already under way. If
+// the loading screen HOLDS its own logo over ours (.ld-top, the crossfade
+// hand-off), that logo is the entrance: ours starts assembled underneath it, so
+// no letter drops in around the held one. The sky grade, the depth of field and
+// the scrim are on from the first frame (they used to ramp in over 0.8 s, which
+// re-tinted the world just as it was revealed).
 // ─────────────────────────────────────────────────────────────────────────────
 import { icon } from './glyphs.js';
 
@@ -45,6 +61,7 @@ const HERO = {
 const SWAY = { az: 0.055, azPeriod: 64, el: 0.004, elPeriod: 23 };
 const HALF_HFOV = Math.tan(34.2 * Math.PI / 180);   // the landscape framing's horizontal reach
 const TITLE_TIME = 18.2;        // golden hour (sunset is 19:30)
+const LOGO_IN = 1.7;            // s: the logo's entrance is complete by then (CAT ISLAND lands at ~1.64)
 const MOTES = 28;               // sprinkles drifting down the frame
 // The flyer's thermal columns are gameplay furniture: seen from a lens this
 // far out they read as white smears across the sky, so the card hides them
@@ -60,6 +77,8 @@ function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>>
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const backOut = (x) => { const c = 2.1; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
 const ease = (x) => x * x * (3 - 2 * x);
+/** 0→1 progress of a stage that starts at `start` and lasts `dur` on clock `tt` (module-level: no per-frame closure). */
+const kAt = (tt, start, dur) => clamp((tt - start) / dur, 0, 1);
 
 const letters = (txt, cls, fill) => [...txt].map((ch, i) => (ch === ' '
   ? '<span class="cci-ti-sp"></span>'
@@ -174,6 +193,9 @@ export function createTitle(ctx) {
 
   let t = 0, running = false, leaving = 0;
   let saved = null, ownTime = false, timeSetBusy = false;
+  let curtain = null;            // #loading while it still covers the card (real flow only)
+  let logoSkip = 0;              // s added to the logo's clock: LOGO_IN when a held loading logo is its entrance
+  let camOwned = true;           // false once handoff() gave the lens to the cinematic
   let lastW = -1, lastH = -1, fitT = 0, moteK = 1;
   let hidden = [];                                       // [{ o, vis }] thermals parked while titled
   const heroView = { target: [0, 0, 0], azimuth: 0, elevation: 0, distance: 300, fov: 46 };
@@ -231,7 +253,12 @@ export function createTitle(ctx) {
     get running() { return running; },
     begin() {
       if (running) return;
-      running = true; t = 0; leaving = 0;
+      running = true; t = 0; leaving = 0; camOwned = true;
+      const ld = (!ctx.shot && typeof document !== 'undefined') ? document.getElementById('loading') : null;
+      curtain = (ld && !ld.classList.contains('done') && ld.style.display !== 'none') ? ld : null;
+      logoSkip = (curtain && curtain.querySelector('.ld-top')) ? LOGO_IN : 0;
+      scrim.style.opacity = ''; dof.style.opacity = '';
+      for (const sk of skies) sk.style.opacity = '';
       const st = ctx.state;
       saved = { time: st.time, frozen: st.timeFrozen, fog: st.fogScale };
       st.time = TITLE_TIME; st.timeFrozen = true;
@@ -244,9 +271,11 @@ export function createTitle(ctx) {
     },
     update(dt) {
       if (!running) return;
+      // under the curtain the picture is held at its first frame (see THE CURTAIN)
+      if (curtain) { if (curtain.classList.contains('done') || curtain.style.display === 'none') curtain = null; else dt = 0; }
       t += dt;
       if (leaving > 0) leaving += dt;
-      frame();
+      if (camOwned) frame();
       // (a flyer that loads late still gets parked; a missing one costs a few lookups, then none)
       if (hidden.length < HIDE_WHILE_TITLED.length && t < 10 && (t % 0.5) < dt) hideThermals();
 
@@ -255,68 +284,64 @@ export function createTitle(ctx) {
       const W = window.innerWidth, H = window.innerHeight;
       if (W !== lastW || H !== lastH || fitT <= 0) { lastW = W; lastH = H; fitT = t < 3 ? 0.25 : 2; fit(); }
 
-      // ── entrance (0 → ~1.4 s), then idle ──────────────────────────────────
-      const k = (start, dur) => clamp((t - start) / dur, 0, 1);
+      // ── entrance (0 → ~1.6 s), then idle ──────────────────────────────────
+      // The logo runs on tl (t, or already landed when a held loading logo is
+      // its entrance); the tagline, pill and credits on t.
+      const tl = t + logoSkip;
       const out = leaving > 0 ? ease(clamp(leaving / 0.3, 0, 1)) : 0;
 
-      const kb = k(0.05, 0.4);
+      const kb = kAt(tl, 0.05, 0.4);
       brow.style.opacity = clamp(kb * 2, 0, 1).toFixed(3);
       brow.style.transform = `translateY(${((1 - backOut(kb)) * -30).toFixed(1)}px) rotate(-3deg) scale(${(0.7 + 0.3 * backOut(kb) + out * 0.08).toFixed(4)})`;
 
       for (let i = 0; i < candyL.length; i++) {
-        const e = k(0.18 + i * 0.05, 0.5);
+        const e = kAt(tl, 0.18 + i * 0.05, 0.5);
         const b = backOut(e);
-        const bob = Math.sin(t * 2.3 - i * 0.62) * 0.035;
-        const tilt = (i % 2 ? 3 : -3) + Math.sin(t * 1.7 - i * 0.8) * 2.2;
+        const bob = Math.sin(tl * 2.3 - i * 0.62) * 0.035;
+        const tilt = (i % 2 ? 3 : -3) + Math.sin(tl * 1.7 - i * 0.8) * 2.2;
         const drop = (1 - b) * -1.1;
         candyL[i].style.opacity = clamp(e * 3, 0, 1).toFixed(3);
         candyL[i].style.transform = `translateY(${(drop + bob * e - out * 0.12).toFixed(4)}em) rotate(${(tilt * e).toFixed(2)}deg) scale(${(1 + out * 0.06).toFixed(4)})`;
       }
-      const kbd = k(0.3, 0.45);
+      const kbd = kAt(tl, 0.3, 0.45);
       badge.style.opacity = clamp(kbd * 2, 0, 1).toFixed(3);
-      badge.style.transform = `translateY(${((1 - backOut(kbd)) * 0.5).toFixed(4)}em) rotate(${(-24 + Math.sin(t * 1.3) * 5).toFixed(2)}deg)`;
+      badge.style.transform = `translateY(${((1 - backOut(kbd)) * 0.5).toFixed(4)}em) rotate(${(-24 + Math.sin(tl * 1.3) * 5).toFixed(2)}deg)`;
 
-      const ka = k(0.62, 0.4);
+      const ka = kAt(tl, 0.62, 0.4);
       andEl.style.opacity = clamp(ka * 2, 0, 1).toFixed(3);
-      andEl.style.transform = `scale(${(0.4 + 0.6 * backOut(ka)).toFixed(4)}) rotate(${(-4 + Math.sin(t * 1.1) * 1.5).toFixed(2)}deg)`;
+      andEl.style.transform = `scale(${(0.4 + 0.6 * backOut(ka)).toFixed(4)}) rotate(${(-4 + Math.sin(tl * 1.1) * 1.5).toFixed(2)}deg)`;
 
       // CAT ISLAND: calmer — a slow shared breath, the ears twitch, the tail sways
       for (let i = 0; i < catL.length; i++) {
-        const e = k(0.78 + i * 0.04, 0.5);
+        const e = kAt(tl, 0.78 + i * 0.04, 0.5);
         const b = backOut(e);
-        const breath = Math.sin(t * 1.25 - i * 0.28) * 0.018;
+        const breath = Math.sin(tl * 1.25 - i * 0.28) * 0.018;
         catL[i].style.opacity = clamp(e * 3, 0, 1).toFixed(3);
         catL[i].style.transform = `translateY(${((1 - b) * 0.9 + breath * e - out * 0.1).toFixed(4)}em) scale(${(1 + out * 0.06).toFixed(4)})`;
       }
-      const tw = (t % 3.7) / 3.7;                           // an ear flick every 3.7 s
+      const tw = (tl % 3.7) / 3.7;                          // an ear flick every 3.7 s
       const flick = tw > 0.9 ? Math.sin((tw - 0.9) / 0.1 * Math.PI) : 0;
       earsEl.style.transform = `rotate(${(-flick * 9).toFixed(2)}deg)`;
-      tailEl.style.transform = `rotate(${(Math.sin(t * 1.6) * 11 + 4).toFixed(2)}deg)`;
+      tailEl.style.transform = `rotate(${(Math.sin(tl * 1.6) * 11 + 4).toFixed(2)}deg)`;
       for (let i = 0; i < sparks.length; i++) {
-        const tw2 = (t * 0.55 + i * 0.37) % 1;
+        const tw2 = (tl * 0.55 + i * 0.37) % 1;
         const s = tw2 < 0.35 ? Math.sin(tw2 / 0.35 * Math.PI) : 0;
         sparks[i].style.transform = `scale(${(s * (i === 1 ? 1.2 : 1)).toFixed(3)}) rotate(${(tw2 * 90).toFixed(1)}deg)`;
       }
 
       // ── the lower group: tagline, then the pill (fully opaque; it breathes
       //    by scale and a soft glow ring, never by fading) ────────────────────
-      const kl = k(1.1, 0.5);
+      const kl = kAt(t, 1.1, 0.5);
       lower.style.opacity = (ease(kl) * (1 - out)).toFixed(3);
-      const ks = k(1.2, 0.5);
+      const ks = kAt(t, 1.2, 0.5);
       sub.style.transform = `translateY(${((1 - ease(ks)) * 10).toFixed(1)}px)`;
-      const kp = k(1.45, 0.45);
+      const kp = kAt(t, 1.45, 0.45);
       const pulse = 0.5 + 0.5 * Math.sin((t - 1.45) * 3.2);
       pressRow.style.opacity = ease(kp).toFixed(3);
       press.style.transform = `translateY(${((1 - backOut(kp)) * 14).toFixed(2)}px) scale(${(1 + 0.035 * pulse * kp).toFixed(4)})`;
       press.style.setProperty('--ring', (pulse * kp).toFixed(3));
-      const kc = k(1.6, 0.6);
+      const kc = kAt(t, 1.6, 0.6);
       credits.style.opacity = (ease(kc) * (1 - out)).toFixed(3);
-
-      // the grades ease in so the first frame still shows the world arriving
-      const kg = ease(k(0, 0.8));
-      scrim.style.opacity = (0.5 + 0.5 * kg).toFixed(3);
-      for (const sk of skies) sk.style.opacity = kg.toFixed(3);
-      dof.style.opacity = kg.toFixed(3);
 
       // ── sprinkles ─────────────────────────────────────────────────────────
       const mh = H + 40;
@@ -327,10 +352,32 @@ export function createTitle(ctx) {
       }
     },
     leave() { if (running && !leaving) leaving = 1e-4; },
+    /**
+     * Contract K hand-off: the opening cinematic takes the LIVE world from this
+     * exact frame. Stops driving the camera at once and changes nothing else —
+     * the free view, the dusk clock and the fog stay put for the flight to ease
+     * out of. The letters keep animating their leave() pop while the card fades.
+     */
+    handoff() {
+      camOwned = false;
+      const st = ctx.state, v = heroView;
+      return {
+        view: { target: [v.target[0], v.target[1], v.target[2]], azimuth: v.azimuth, elevation: v.elevation, distance: v.distance, fov: v.fov },
+        saved: saved ? { time: saved.time, frozen: saved.frozen, fog: saved.fog } : { time: st.time, frozen: st.timeFrozen, fog: st.fogScale },
+      };
+    },
+    /** After the cinematic resolved: the thermals come back; the rest was the cinematic's to restore. */
+    release() {
+      if (!running) return;
+      running = false; camOwned = true; curtain = null;
+      for (const h of hidden) h.o.visible = h.vis;
+      hidden = [];
+      saved = null; ownTime = false;
+    },
     /** Hand the world back: the follow camera in whatever mode it was, the clock, the fog, the thermals. */
     restore() {
       if (!running) return;
-      running = false;
+      running = false; camOwned = true; curtain = null;
       const st = ctx.state;
       const cam = ctx.systems.camera;
       if (cam?.setFree) { cam.setFree(null); cam.snap?.(); }

@@ -13,6 +13,9 @@
 //   --mode 1,2,3        modes for the probe rows (default all three)
 //   --filter <substr>   only probe / §9 views whose name contains it
 //   --script <list>     a4,a5,a6,a7,a8,a9,a10,s7,seed | all | none (default all; perf only when named)
+//                       (a10 also runs d7, LAST on the page: camera step 7's own proof — the mode-2 whiskers switch,
+//                       rate, survive a walk, cancel on tap V / drag / Q, 0 in mode 1 and pinned; the pin rule; density's
+//                       forced-0 list; the terrain whisker on Frosting Peak's flank. "--script d7" runs it alone)
 //                       (sway, only when named: vegetation still sways under the window's shader patch)
 //                       (a6 also runs a6x, LAST on the page: why A6 reads what it reads — the same runs with the
 //                       lead zeroed and/or the old ladder's lens moves held off, the flat-plane edge, the ground
@@ -62,6 +65,8 @@
 //   noFade / unpatched blocker is NOT excused: occ_silhouette must still open); A2base reads the mode-1 raw
 //   floor from renders.noindex/camvis/baseline.json (this instrument's own pre-edit run) instead of the seed
 //   probe's 0.908. Both lines say "as written" / "proposed"; neither replaces the other.
+// A11 (summary.A11, "## A11" in the .md; camera step 7), whenever mode-1 rows ran: static neutrality against
+//   renders.noindex/camvis/post5.json and the baseline rows the old ladder never touched (a11Summary()).
 // A3 (summary.A3, "## A3" in the .md; camera step 5), over every probe row that ran, in any mode or filter: the
 //   ladder's occDist on EVERY frame of the row and at its end (row.a3, watched on camera:update) never under 14 u
 //   outdoors / 5.5 u inside a building (or the undollied distance − 0.5 when that is shorter), and the cull only
@@ -1585,7 +1590,173 @@ function pageLib() {
       ] };
   }
 
-  window.__cv = { impl, a3Read, probe, renderNow, skyBand, seenBody, sway, horizon, undo: undoSticky, dirty, watchStart, watchStop, seenStates, a4, seedHoldD, seedProbe, a5, a6, a6x, a7, a7x, a8, a9, a10, s7, s7cave,
+
+  /**
+   * d7 — camera step 7 (CAMERA_SPEC §4.4-4.8, §6.1): the mode-2 whiskers, the pin, density's forced-0 list and the
+   * terrain whisker, each against its own clause. Runs LAST on the page (it ends in the air), with a10 or alone.
+   *   W  (50, 24) in mode 2, facing 5π/4 (the §1 protocol): the sweep reads him blocked, one side reads clear.
+   *      W1 the whiskers commit to a side (|occYaw| ≥ 0.26 within 90 frames), never faster than 0.5 rad/s (the
+   *      nausea cap, §4.8), never past 0.52 rad, and not before 0.35 s blocked + 0.8 s better (≥ 34 frames);
+   *      W2 they survive a straight 1 s walk (path alignment never cancels them); W3 tap V cancels them with no
+   *      jump (the offset folds into the tether: ≤ 0.1 rad on the tap frame, the recentre's own 3 rad/s);
+   *      W4 a drag cancels them and moves the view by exactly the drag (0.006 rad/px); W5 Q cancels them, the
+   *      view eases (≤ 0.1 rad/frame); W6 mode 1 at the same spot: occYaw exactly 0 every frame (the Q/E hint,
+   *      if it fires, is recorded with the chip's keycap row); W7 pinned (--dist) mode 2: occYaw and densityK 0.
+   *   P  the pin (§6.1): setParams({elevation}) pins; snap() and setFree(null) keep it; a teleport clears it;
+   *      under ctx.shot walking 8 u away does not.
+   *   D  density forced 0 (§4.5): a dense spot reads dK > 0 in mode 1 (control), then 0 in mode 3, pinned, inside
+   *      Meow Donald's (owned) and flying (last).
+   *   T  the terrain whisker (§4.7) on Frosting Peak's south flank (-188, -78), mode 1: snap() settles the lift
+   *      at its goal (> 0, ≤ 0.25) and two snaps agree; the lens elevation carries it; walking uphill away, the
+   *      automatic elevation never moves faster than 0.15 rad/s (A10's cap, the shared budget).
+   */
+  function d7() {
+    const c = cam(), inp = ctx.input, out = { status: 'ok', checks: [] };
+    if (get('occYaw') === null || get('pinned') === null || get('terrainLift') === null) return NI('occYaw / pinned / terrainLift getters missing');
+    const SPOT = { pos: [50, 24], time: 12 };
+    const bearing = () => viewAE().az;
+    // W1
+    setup({ ...SPOT, frames: 0 }, 2, { noStep: true });
+    let first = -1, maxRate = 0, maxAbs = 0, prev = get('occYaw');
+    for (let i = 0; i < 90; i++) { g.step(1, 1 / 30); const y = get('occYaw'); maxRate = Math.max(maxRate, Math.abs(y - prev) * 30); prev = y; maxAbs = Math.max(maxAbs, Math.abs(y)); if (y !== 0 && first < 0) first = i; }
+    const w1 = { firstFrame: first, occYaw: r(prev, 4), goal: c.whiskerState?.goal ?? null, maxRate: r(maxRate, 4), maxAbs: r(maxAbs, 4), clear: (c.whiskerState?.clear || []).map((x) => r(x, 2)) };
+    out.W1 = w1;
+    out.checks.push(chk('W1 whiskers commit to a clear side within 90 frames (|occYaw|)', Math.abs(prev), '>=', 0.26));
+    out.checks.push(chk('W1 whisker yaw rate (rad/s)', maxRate, '<=', 0.5));
+    out.checks.push(chk('W1 |occYaw| ≤ whiskerMax', maxAbs, '<=', 0.52 + 1e-9));
+    out.checks.push(chk('W1 not before 0.35 s blocked + 0.8 s better (first frame)', first, '>=', 34));
+    // W2 — a straight walk (W, 1 s): the offset stays
+    const g0 = c.whiskerState?.goal;
+    const walkTr = hold({ x: 0, y: 1 }, 30);
+    const minAbs = Math.min(...walkTr.map((x) => Math.abs(x.occYaw)));
+    out.W2 = { goalBefore: g0, goalAfter: c.whiskerState?.goal ?? null, minAbsOccYaw: r(minAbs, 4), end: r(get('occYaw'), 4) };
+    out.checks.push(chk('W2 a straight 1 s walk keeps the whisker offset (min |occYaw|)', minAbs, '>=', 0.2));
+    // re-arm helper: back to the committed state at the spot
+    const arm = () => { setup({ ...SPOT, frames: 0 }, 2, { noStep: true }); for (let i = 0; i < 150 && Math.abs(get('occYaw')) < 0.4; i++) g.step(1, 1 / 30); g.step(10, 1 / 30); return get('occYaw'); };
+    // W3 — tap V
+    let y0 = arm(); let b0 = bearing();
+    inp.pressed.add('KeyV'); inp.keys.add('KeyV'); g.step(3, 1 / 30); inp.keys.delete('KeyV');
+    const bPre = bearing(); g.step(1, 1 / 30);
+    const bTap = bearing(), yTap = get('occYaw');
+    let maxStep = Math.abs(wrap(bTap - bPre)); let pb = bTap;
+    for (let i = 0; i < 20; i++) { g.step(1, 1 / 30); const b = bearing(); maxStep = Math.max(maxStep, Math.abs(wrap(b - pb))); pb = b; }
+    out.W3 = { armed: r(y0, 4), occYawAfterTap: r(yTap, 4), tapFrameStep: r(Math.abs(wrap(bTap - bPre)), 4), maxStep20: r(maxStep, 4), holdStep: r(Math.abs(wrap(bPre - b0)), 4) };
+    out.checks.push(chk('W3 tap V cancels the whiskers (occYaw after the tap)', Math.abs(yTap), '<=', 1e-9));
+    out.checks.push(chk('W3 no jump: lens bearing per frame through the tap and the recentre (rad)', maxStep, '<=', 0.1));
+    // W4 — a drag
+    y0 = arm(); b0 = bearing();
+    inp.pointer.orbit = true; inp.pointer.dragDX = 50; g.step(1, 1 / 30); inp.pointer.orbit = false;
+    const bDrag = bearing(), yDrag = get('occYaw');
+    out.W4 = { armed: r(y0, 4), occYawAfter: r(yDrag, 4), viewMove: r(wrap(bDrag - b0), 4), want: -0.3 };
+    out.checks.push(chk('W4 a drag cancels the whiskers (occYaw after)', Math.abs(yDrag), '<=', 1e-9));
+    out.checks.push(chk('W4 the view moves by the drag alone (|Δaz − (−0.3)|, rad)', Math.abs(wrap(bDrag - b0) + 0.3), '<=', 0.03));
+    // W5 — Q
+    y0 = arm(); pb = bearing();
+    inp.pressed.add('KeyQ'); g.step(1, 1 / 30);
+    const yQ = get('occYaw'); let qStep = 0;
+    { let b = bearing(); qStep = Math.abs(wrap(b - pb)); pb = b; }
+    for (let i = 0; i < 20; i++) { g.step(1, 1 / 30); const b = bearing(); qStep = Math.max(qStep, Math.abs(wrap(b - pb))); pb = b; }
+    out.W5 = { armed: r(y0, 4), occYawAfter: r(yQ, 4), maxStep: r(qStep, 4) };
+    out.checks.push(chk('W5 Q cancels the whiskers (occYaw after)', Math.abs(yQ), '<=', 1e-9));
+    out.checks.push(chk('W5 the view eases through Q (max step per frame, rad)', qStep, '<=', 0.1));
+    // W6 — mode 1 at the spot: never an automatic yaw; the Q/E hint instead
+    setup({ ...SPOT, frames: 0 }, 1, { noStep: true });
+    const h0 = c.hint ? c.hint.seq : null; let y1 = 0, az1 = 0, pa = bearing(), hintSeen = null, hintDom = false;
+    for (let i = 0; i < 120; i++) {
+      g.step(1, 1 / 30); y1 = Math.max(y1, Math.abs(get('occYaw'))); const b = bearing(); az1 += Math.abs(wrap(b - pa)); pa = b;
+      if (c.hint && c.hint.seq !== h0 && !hintSeen) hintSeen = { key: c.hint.key, frame: i };
+      if (hintSeen && !hintDom) { const e = ctx.uiRoot?.querySelector('.cci-cam-hint'); if (e && e.style.display !== 'none' && (e.textContent || '').includes(hintSeen.key)) hintDom = true; }
+    }
+    out.W6 = { maxAbsOccYaw: y1, yawSum: r(az1, 6), hint: hintSeen, hintKeycapShown: hintSeen ? hintDom : null };
+    out.checks.push(chk('W6 mode 1: occYaw exactly 0 (max |occYaw|)', y1, '<=', 0));
+    out.checks.push(chk('W6 mode 1: no automatic yaw (Σ|Δaz|)', az1, '<=', 1e-9));
+    if (hintSeen) out.checks.push(chk('W6 the Q/E hint shows its keycap row in the chip', hintDom, '==', true));
+    // W6b — where a 45° step does see him (Candy Village's west lane, found by search): the hint fires once he has
+    // been ≥ 3/5 blocked for 2 s, names the key, and the chip shows it (at most once a minute: HINT_GAP)
+    {
+      setup({ pos: [-150, 68], time: 12, frames: 0 }, 1, { noStep: true });
+      const s0 = c.hint ? c.hint.seq : null; let fired = null, dom = false, yawSum = 0, pa = bearing();
+      for (let i = 0; i < 90; i++) {
+        g.step(1, 1 / 30); const b = bearing(); yawSum += Math.abs(wrap(b - pa)); pa = b;
+        if (c.hint && c.hint.seq !== s0 && !fired) fired = { key: c.hint.key, frame: i, t: r(c.hint.t, 2) };
+        if (fired && !dom) { const e = ctx.uiRoot?.querySelector('.cci-cam-hint'); if (e && e.style.display !== 'none' && (e.textContent || '').includes(fired.key)) dom = true; }
+      }
+      out.W6b = { fired, keycapShown: dom, yawSum: r(yawSum, 6) };
+      out.checks.push(chk('W6b mode 1 hint fires after ≥ 2 s blocked (frame, ≥ 59)', fired ? fired.frame : null, '>=', 59));
+      out.checks.push(chk('W6b the chip shows the hinted keycap', dom, '==', true));
+      out.checks.push(chk('W6b the hint never turns the view (Σ|Δaz|)', yawSum, '<=', 1e-9));
+    }
+    // W7 — pinned in mode 2
+    setup({ ...SPOT, dist: 31, frames: 0 }, 2, { noStep: true });
+    let y7 = 0, d7k = 0;
+    for (let i = 0; i < 90; i++) { g.step(1, 1 / 30); y7 = Math.max(y7, Math.abs(get('occYaw'))); d7k = Math.max(d7k, get('densityK')); }
+    out.W7 = { pinned: get('pinned'), maxAbsOccYaw: y7, maxDensityK: d7k };
+    out.checks.push(chk('W7 pinned mode 2: whiskers and density stay 0 (max |occYaw| + max densityK)', y7 + d7k, '<=', 0));
+    // P — the pin
+    {
+      setup({ ...SPOT, frames: 0 }, 1, { noStep: true });
+      const s0 = get('pinned');
+      c.setParams({ elevation: 0.6 }); const s1 = get('pinned');
+      c.snap(); const s2 = get('pinned');
+      g.setView(null); const s3 = get('pinned');
+      const P0 = pl().position.clone();
+      g.walk({ x: 0, y: 1 }, 45); const moved = Math.hypot(pl().position.x - P0.x, pl().position.z - P0.z); const s4 = get('pinned');
+      g.teleport(SPOT.pos[0], SPOT.pos[1]); const s5 = get('pinned');
+      out.P = { afterTeleportSetup: s0, afterSetParams: s1, afterSnap: s2, afterSetFreeNull: s3, afterWalk: s4, walked: r(moved, 2), afterTeleport: s5 };
+      out.checks.push(chk('P setParams({elevation}) pins; snap() and setFree(null) keep it', !s0 && s1 && s2 && s3, '==', true));
+      out.checks.push(chk('P under ctx.shot a walk (≥ 6 u) keeps the pin; a teleport clears it', s4 === true && moved >= 6 && s5 === false, '==', true));
+      c.setParams({ elevation: 0.64 }); g.teleport(SPOT.pos[0], SPOT.pos[1]);
+    }
+    // D — density's forced-0 list (control first: a dense walk in mode 1)
+    {
+      const DENSE = { pos: [178, 48], time: 15 };
+      setup({ ...DENSE, frames: 0 }, 1, { noStep: true }); g.walk({ x: 0, y: 1 }, 45); g.step(15, 1 / 30);
+      const ctl = get('densityK');
+      c.setMode(3); g.step(1, 1 / 30); const m3 = get('densityK');
+      setup({ ...DENSE, frames: 0 }, 1, { noStep: true }); c.setParams({ distance: 31 }); g.walk({ x: 0, y: 1 }, 45); const pin = get('densityK');
+      let own = null;
+      const ca = ctx.systems.catArchitecture;
+      if (typeof ca?.enter === 'function') { setup({ pos: [129, -25], time: 12, frames: 0 }, 2, { noStep: true }); try { ca.enter('meow'); } catch { /* optional */ } g.step(30, 1 / 30); own = { densityK: get('densityK'), occYaw: get('occYaw'), indoors: get('indoors') }; leaveInteriors(); }
+      out.D = { control: r(ctl, 3), mode3: m3, pinned: pin, owned: own };
+      out.checks.push(chk('D control: a dense walk reads densityK > 0 (mode 1)', ctl, '>', 0.05));
+      out.checks.push(chk('D forced 0: mode 3, pinned (densityK sum)', m3 + pin, '<=', 0));
+      if (own) out.checks.push(chk('D forced 0 while owned (inside Meow Donald\'s, mode 2): densityK + |occYaw|', own.densityK + Math.abs(own.occYaw), '<=', 0));
+    }
+    // T — the terrain whisker
+    {
+      const HILL = { pos: [-188, -78], time: 12 };
+      setup({ ...HILL, frames: 0 }, 1, { noStep: true });
+      c.snap(); C.updateMatrixWorld(true);
+      const t1 = get('terrainLift'), m1 = [...C.matrixWorld.elements];
+      c.snap(); C.updateMatrixWorld(true);
+      const t2 = get('terrainLift'), m2 = [...C.matrixWorld.elements];
+      const ds = c.densityState || {};
+      const elNow = viewAE().el, parts = c.current.elevation + (get('tilt') || 0) + c.occLift + (ds.el || 0);
+      out.T = { terrainLift: r(t1, 4), goal: r(ds.terrainGoal, 4), twoSnaps: [r(t1, 6), r(t2, 6)], matrixDiff: maxOf(m1.map((x, i) => Math.abs(x - m2[i]))), lensEl: r(elNow, 4), elWithoutTerrain: r(parts, 4) };
+      out.checks.push(chk('T snap() settles the terrain lift at its goal (> 0 on the flank)', t1, '>', 0.02));
+      out.checks.push(chk('T terrain lift ≤ terrainLiftMax', t1, '<=', 0.25 + 1e-9));
+      out.checks.push(chk('T two snaps: terrainLift and matrixWorld equal', Math.abs(t1 - t2) + out.T.matrixDiff, '<=', 1e-9));
+      out.checks.push(chk('T the lens elevation carries it (|el − (el without it) − terrainLift|)', Math.abs(elNow - parts - t1), '<=', 0.005));
+      g.setView(null);
+      const tr = hold({ x: 0, y: 1 }, 90);
+      const er = []; for (let i = 1; i < tr.length; i++) if (!tr[i].cine && !tr[i - 1].cine) er.push(Math.abs(tr[i].el - tr[i - 1].el) * 30);
+      out.T.walkElMax = r(maxOf(er), 4); out.T.endLift = r(get('terrainLift'), 4);
+      out.checks.push(chk('T walking off the flank: automatic elevation rate (rad/s, A10)', maxOf(er), '<=', 0.15));
+    }
+    // D (flying, last: it leaves the flyer in the air)
+    {
+      const fly = resolveFn('escape.routes.flyer.debugFly');
+      if (fly) {
+        setup({ pos: [206.4, 6], time: 12, frames: 0 }, 2, { noStep: true });
+        try { fly.fn.apply(fly.o, [206.4, 6, 60, -1.5708, true]); } catch { /* reported below */ }
+        g.step(30, 1 / 30);
+        out.Dfly = { flying: !!ctx.state.flying, densityK: get('densityK'), occYaw: get('occYaw'), terrainLift: r(get('terrainLift'), 4) };
+        if (out.Dfly.flying) out.checks.push(chk('D forced 0 while flying (mode 2): densityK + |occYaw|', out.Dfly.densityK + Math.abs(out.Dfly.occYaw), '<=', 0));
+      }
+    }
+    return out;
+  }
+  window.__cv = { d7, impl, a3Read, probe, renderNow, skyBand, seenBody, sway, horizon, undo: undoSticky, dirty, watchStart, watchStop, seenStates, a4, seedHoldD, seedProbe, a5, a6, a6x, a7, a7x, a8, a9, a10, s7, s7cave,
     ua: navigator.userAgent,
     gl: (() => { try { const gl = ctx.renderer.getContext(); const x = gl.getExtension('WEBGL_debug_renderer_info'); return x ? gl.getParameter(x.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); } catch { return '?'; } })() };
   return impl;
@@ -1848,6 +2019,8 @@ try {
     if (SCRIPTS.includes('a6') || SCRIPTS.includes('a6x')) await run('a6x', () => window.__cv.a6x());
     // …and after it the look's edges (camera step 6 fix), which ends in the air
     if (SCRIPTS.includes('a7') || SCRIPTS.includes('a7x')) await run('a7x', (v) => window.__cv.a7x(v), views.occ_silhouette || null);
+    // …and last of all camera step 7's own proof (it ends in the air): with a10, or alone as "--script d7"
+    if (SCRIPTS.includes('a10') || SCRIPTS.includes('d7')) await run('d7', () => window.__cv.d7());
     out.impl = await page.evaluate(() => window.__cv.impl);
   }
 } catch (err) {
@@ -1896,6 +2069,7 @@ out.summary.seedCrossCheck = {
 };
 out.summary.accept = acceptance();
 out.summary.A3 = a3Summary();
+out.summary.A11 = a11Summary();
 out.timing.wallS = +((Date.now() - T0) / 1000).toFixed(1);
 out.errors = [...new Set(out.errors)];
 
@@ -1976,6 +2150,66 @@ function a3Summary() {
     culledMax: Math.max(0, ...rows.map((x) => x.a3.culledMax || 0)), culledRows: rows.filter((x) => (x.culledList || []).length).map((x) => `${tag(x)} ${x.culledList.join(',')}`) };
 }
 
+/**
+ * A11 static neutrality (CAMERA_SPEC §1; camera step 7), mode 1 only. References:
+ *   · post5 (renders.noindex/camvis/post5.json, recorded at camera step 5 after the ladder re-role): every P row;
+ *   · baseline (baseline.json, the pre-edit run) for the rows the old ladder never touched. baseline.json
+ *     predates the goalDistance / tilt getters, so "untouched" is read as occLift == 0 and occDist within the
+ *     idle breathing (±0.42 u, so 0.5) of the goal distance post5 records for the same view — the dolly never
+ *     moved it. That picks the spec's own three (cat_gym, sky_dawn_harbor, candy_forest) plus candy_river
+ *     (vis 0.8, so never a reference).
+ * A reference row counts when it has vis 1.0 and its view has no walk, and THIS run's row has densityK < 0.05,
+ * cutK == 0 and terrainLift < 0.01. It must match: lens position within 0.05 u, az / el within 0.002 rad, FOV
+ * within 0.01°. Rows run on a page history other than the reference's are listed apart (not comparable).
+ * A baseline comparison that fails while this row equals its post5 row (within the same tolerances) and post5
+ * itself was already that far from the baseline is marked `inherited`: steps 1-5 moved it, the step being
+ * judged did not. `pass` is A11 as written; `passExceptInherited` leaves the inherited ones out.
+ */
+function a11Summary() {
+  const m1 = out.rows.filter((x) => x.mode === 1 && typeof x.vis === 'number');
+  if (!m1.length) return null;
+  const load = (t) => { try { return JSON.parse(fs.readFileSync(path.join(outDir, t + '.json'), 'utf8')); } catch { return null; } };
+  const post5 = load('post5'), base = load('baseline');
+  if (!post5) return { pass: false, why: 'renders.noindex/camvis/post5.json missing' };
+  const byV = (j) => Object.fromEntries((j?.rows || []).filter((x) => x.mode === 1 && typeof x.vis === 'number').map((x) => [x.view, x]));
+  const R5 = byV(post5), RB = byV(base);
+  const hist = (x) => (x && x.page ? `${x.page.seq}:${x.page.sig}` : null);
+  const refs = [], skipped = [], fails = [], notComparable = [];
+  for (const x of m1) {
+    const { v } = resolveP(x.view);
+    const walk = !!(v && v.walk);
+    const gate = [];
+    if (walk) gate.push('walks');
+    if (!(typeof x.densityK === 'number' && x.densityK < 0.05)) gate.push(`densityK ${x.densityK}`);
+    if (x.cutK !== 0) gate.push(`cutK ${x.cutK}`);
+    if (!(typeof x.terrainLift === 'number' && x.terrainLift < 0.01)) gate.push(`terrainLift ${x.terrainLift}`);
+    const cands = [];
+    const r5 = R5[x.view];
+    if (r5 && r5.vis === 1) cands.push(['post5', r5]);
+    const rb = RB[x.view];
+    if (rb && rb.vis === 1 && rb.occLift === 0 && r5 && typeof r5.goalDistance === 'number' && Math.abs(rb.occDist - r5.goalDistance) <= 0.5) cands.push(['baseline', rb]);
+    if (!cands.length) { skipped.push(`${x.view}: no reference (post5 vis ${r5 ? r5.vis : '–'})`); continue; }
+    if (gate.length) { skipped.push(`${x.view}: ${gate.join(', ')}`); continue; }
+    for (const [src, ref] of cands) {
+      const dPos = Math.hypot(x.lens.pos[0] - ref.lens.pos[0], x.lens.pos[1] - ref.lens.pos[1], x.lens.pos[2] - ref.lens.pos[2]);
+      const wrap = (a) => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
+      const dAz = Math.abs(wrap(x.lens.az - ref.lens.az)), dEl = Math.abs(x.lens.el - ref.lens.el), dFov = Math.abs(x.lens.fov - ref.lens.fov);
+      const e = { view: x.view, ref: src, dPos: +dPos.toFixed(4), dAz: +dAz.toFixed(5), dEl: +dEl.toFixed(5), dFov: +dFov.toFixed(4), pass: dPos <= 0.05 && dAz <= 0.002 && dEl <= 0.002 && dFov <= 0.01 };
+      if (src === 'post5' && hist(ref) && hist(x) && hist(ref) !== hist(x)) { e.pageHistory = `${hist(x)} vs ${hist(ref)}`; notComparable.push(e); continue; }
+      if (!e.pass && src === 'baseline' && r5) {
+        const d5 = Math.hypot(x.lens.pos[0] - r5.lens.pos[0], x.lens.pos[1] - r5.lens.pos[1], x.lens.pos[2] - r5.lens.pos[2]);
+        const same5 = d5 <= 0.05 && Math.abs(wrap(x.lens.az - r5.lens.az)) <= 0.002 && Math.abs(x.lens.el - r5.lens.el) <= 0.002 && Math.abs(x.lens.fov - r5.lens.fov) <= 0.01;
+        const post5vsBase = Math.hypot(r5.lens.pos[0] - ref.lens.pos[0], r5.lens.pos[1] - ref.lens.pos[1], r5.lens.pos[2] - ref.lens.pos[2]);
+        if (same5 && post5vsBase > 0.05) { e.inherited = true; e.post5VsBaseline = +post5vsBase.toFixed(4); }
+      }
+      refs.push(e);
+      if (!e.pass) fails.push(`${x.view} vs ${src}: Δpos ${e.dPos} Δaz ${e.dAz} Δel ${e.dEl} Δfov ${e.dFov}${e.inherited ? ` (inherited: post5 is ${e.post5VsBaseline} u from the baseline too, this row equals post5)` : ''}`);
+    }
+  }
+  const own = refs.filter((e) => !e.pass && !e.inherited);
+  return { pass: refs.length > 0 && !fails.length, passExceptInherited: refs.length > 0 && !own.length, references: refs.length, refs, fails, skipped, notComparable, post5: post5.meta?.commit ?? null, baseline: base?.meta?.commit ?? null };
+}
+
 // ── write ─────────────────────────────────────────────────────────────────────
 fs.writeFileSync(path.join(outDir, TAG + '.json'), JSON.stringify(out, null, 1));
 const md = [];
@@ -2003,6 +2237,12 @@ if (out.summary.A3) {
   const a = out.summary.A3;
   md.push('## A3 — the lens (occDist every frame of every probe row; the cull)', '', `- **A3: ${a.pass ? 'PASS' : 'FAIL'}** over ${a.rows} rows · per mode ${Object.entries(a.perMode).map(([k, e]) => `${k} ${e.pass ? 'pass' : 'FAIL'} (n ${e.n}, lowest occDist ${f(e.minOccDist, 2)})`).join(' · ')} · largest culled mesh ${f(a.culledMax, 2)} u (≤ 18) · indoor rows: ${a.indoorRows.join(', ') || 'none'}`,
     `- lowest margins: ${a.lowest.join(' · ')}`, `- rows with a culled mesh: ${a.culledRows.join(' · ') || 'none'}`, ...(a.fails.length ? [`- FAILS: ${a.fails.join(' · ')}`] : []), '');
+}
+if (out.summary.A11) {
+  const a = out.summary.A11;
+  md.push('## A11 — static neutrality (mode 1; references post5 + the untouched baseline rows)', '', `- **A11 as written: ${a.pass ? 'PASS' : 'FAIL'}** over ${a.references ?? 0} reference comparisons (post5 @ ${a.post5 ?? '–'}, baseline @ ${a.baseline ?? '–'}) · leaving out inherited baseline mismatches: ${a.passExceptInherited ? 'PASS' : 'FAIL'}${a.why ? ' · ' + a.why : ''}`,
+    ...(a.refs || []).map((e) => `- ${e.pass ? 'PASS' : e.inherited ? 'FAIL (inherited)' : 'FAIL'} ${e.view} vs ${e.ref}: Δpos ${e.dPos} u · Δaz ${e.dAz} · Δel ${e.dEl} rad · Δfov ${e.dFov}°${e.inherited ? ` — post5 is ${e.post5VsBaseline} u from the baseline too` : ''}`),
+    `- not references this run: ${(a.skipped || []).join(' · ') || 'none'}`, ...(a.notComparable?.length ? [`- not comparable (page history): ${a.notComparable.map((e) => `${e.view} ${e.pageHistory}`).join(' · ')}`] : []), '');
 }
 const why = (x) => (x.cutWhy ? [x.cutWhy.sweep ? 'sweep' : '', x.cutWhy.col ? 'col' : ''].filter(Boolean).join('+') || '–' : '');
 md.push('## Rows', '', '| view | src | m | vis | raw | fth | cutK | cut why | amber | occDist | goalD | lift | tilt | pin | p.dist | cur.el | lens eff | lens y−ground | clamp | blocked | page | note |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');

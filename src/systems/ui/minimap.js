@@ -28,7 +28,8 @@
 // MAP MARKERS: other systems pin things to the chart with
 // ui.addMapMarker({ id, x, z, glyph, label }) — glyphs key · winch · star ·
 // ammo · weapon · plane · thermal (anything else is a plain dot). Quest markers
-// (key, winch) are pulsing, LABELLED pins on every map mode and ride the rim of
+// (key, winch) are LABELLED pins (a foot ring that pulses in opacity only —
+// nothing on a chart moves or scales) on every map mode and ride the rim of
 // the near map when off-frame; the numerous ones (stars, ammo) collapse to dots
 // on the wide maps so thirty ammo caches never bury the town. On the atlas,
 // weapons / ammo / stars show only where you have already been (it is a record
@@ -63,6 +64,7 @@ const SPAN_FLY = 240;                             // …and while airborne
 const SPAN_CAVE = 150;                            // world units across underground
 const INK = '#2b2442';
 const TAU = Math.PI * 2;
+const PULSE_W = TAU * 0.6;                        // marker ring breathing (rad/s): opacity only
 
 // Corner-plate sizes per mode (css px) before they are fitted to the viewport,
 // and the share of the viewport each may take ([width, height]). The near map
@@ -211,7 +213,7 @@ export function createMinimap(ctx, opts = {}) {
   // The ATLAS: a full-screen layer (scrim) holding one centred sheet. Four
   // stacked canvases, bottom to top: GROUND (chart, fog, explored land, lamp
   // glows — rebuilt only when coverage changes, and then only in the dirty
-  // rectangle), ROUTE (every frame: the dashes march), PLACES (the lit discs
+  // rectangle), ROUTE (every frame, it ends at you), PLACES (the lit discs
   // and their names — rebuilt when a place is lit), LIVE (pins, ferry, the
   // name of where you are, you).
   const atlas = document.createElement('div');
@@ -835,17 +837,17 @@ export function createMinimap(ctx, opts = {}) {
   /**
    * A map PIN (other systems' markers): a teardrop in the marker's colour
    * standing on its spot, pictogram in the head. Pins stand UP off the chart,
-   * so they never read as one more landmark disc. Quest pins pulse at the foot.
+   * so they never read as one more landmark disc. Quest pins wear a ring at the
+   * foot that pulses in OPACITY only (never size: a map you read must be still).
    * `lean` tips the needle about its foot (the head moves, the spot does not);
    * the pictogram in the head stays upright.
    */
   function pin(x, y, name, s, fill, pulse, lean = 0) {
     const d = 11.5 * s, R = 7.4 * s;
     if (pulse) {
-      const ph = ((ctx.state.elapsed || 0) * 0.9) % 1;
-      g.globalAlpha = (1 - ph) * 0.85;
+      g.globalAlpha = 0.3 + 0.55 * (0.5 + 0.5 * Math.cos((ctx.state.elapsed || 0) * PULSE_W));
       g.lineWidth = 1.8; g.strokeStyle = fill;
-      g.beginPath(); g.ellipse(x, y, (3 + 9 * ph) * s, (1.6 + 4.6 * ph) * s, 0, 0, TAU); g.stroke();
+      g.beginPath(); g.ellipse(x, y, 8 * s, 3.9 * s, 0, 0, TAU); g.stroke();
       g.globalAlpha = 1;
     }
     g.fillStyle = 'rgba(30,22,48,.32)';
@@ -873,9 +875,20 @@ export function createMinimap(ctx, opts = {}) {
     g.restore();
   }
 
-  /** Lean for a pin at (x, y) so its head clears the player arrow at (px, py). */
-  function leanFor(x, y, s, px, py) {
+  /**
+   * Lean for a pin at (x, y) so its head clears the player arrow at (px, py).
+   * `prev` (last frame's lean) is kept while it still clears, and the pin only
+   * stands back up once upright clears with room to spare — so a pin beside
+   * the arrow holds its pose instead of flicking between leans as you walk.
+   */
+  function leanFor(x, y, s, px, py, prev) {
     const d = 11.5 * s, clear = 13 + 7.4 * s + 2;
+    if (typeof prev === 'number' && prev !== 0) {
+      const ux = x - px, uy = y - d - py;
+      if (ux * ux + uy * uy >= (clear + 5) * (clear + 5)) return 0;
+      const hx = x + Math.sin(prev) * d, hy = y - Math.cos(prev) * d;
+      if ((hx - px) * (hx - px) + (hy - py) * (hy - py) >= clear * clear) return prev;
+    }
     const side = x >= px ? 1 : -1;
     for (let i = 0; i < LEANS.length; i++) {
       for (let sg2 = 0; sg2 < (LEANS[i] ? 2 : 1); sg2++) {
@@ -1060,7 +1073,8 @@ export function createMinimap(ctx, opts = {}) {
         if (st.dot || st.tier !== 2) continue;
         const x = mx(m.x), y = mz(m.z);
         if (x < -3 || x > W + 3 || y < -3 || y > H + 3) continue;
-        pin(x, y, m.glyph, 0.76, st.fill, true, leanFor(x, y, 0.76, px, py));
+        m._leanW = leanFor(x, y, 0.76, px, py, m._leanW);
+        pin(x, y, m.glyph, 0.76, st.fill, true, m._leanW);
       }
       return null;
     }
@@ -1097,7 +1111,7 @@ export function createMinimap(ctx, opts = {}) {
       if (m._as === 2) {
         const s = m.style.tier === 2 ? 0.95 : m.style.tier === 1 ? 0.8 : 0.66;
         // A head that would sit under the player arrow leans away from it.
-        const lean = leanFor(m._x, m._y, s, px, py);
+        const lean = leanFor(m._x, m._y, s, px, py, m._lean);
         const d = 11.5 * s, R = 7.4 * s;
         m._lean = lean; m._s = s;
         m._hx = m._x + Math.sin(lean) * d; m._hy = m._y - Math.cos(lean) * d;
@@ -1122,6 +1136,7 @@ export function createMinimap(ctx, opts = {}) {
     return labelM;
   }
 
+  let labOwner = null, labSlot = -1;                          // the near map's one label: who, and where it sat
   /** mode: 'local' | 'world'  (the corner plate; 'history' is the atlas) */
   function draw(mode, visitedIn, hereId) {
     if (mode === 'history') mode = 'world';
@@ -1196,19 +1211,23 @@ export function createMinimap(ctx, opts = {}) {
     // one label and the map is a word search. It goes in whichever of eight
     // slots around its marker covers the fewest other things, and a leader
     // line ties it back when it had to stand off.
+    // The label keeps last frame's slot while it names the same thing (it only
+    // moves when that slot gets genuinely worse), so it never hops as you walk.
     const near = marks && marks[0];
     if (markLabel && (!near || markLabel._d <= near.d + 30)) {
       const R = 7.4 * (markLabel._s || 1) + 1;
       measureLabel(markLabel.label, LABEL_FONT, 88, 12.5);
-      placeLabel(markLabel._hx, markLabel._hy, R, markLabel._ob);
+      placeLabel(markLabel._hx, markLabel._hy, R, markLabel._ob, labOwner === markLabel ? labSlot : -1);
+      labOwner = markLabel; labSlot = LB.slot;
       leader(markLabel._hx, markLabel._hy, R);
       labelPlate();
     } else if (near && near.lm.label && near.lm.label !== '???') {
       measureLabel(near.lm.label, LABEL_FONT, 88, 12.5);
-      placeLabel(near.x, near.y, 10.5, near.ob);
+      placeLabel(near.x, near.y, 10.5, near.ob, labOwner === near.lm ? labSlot : -1);
+      labOwner = near.lm; labSlot = LB.slot;
       leader(near.x, near.y, 10.5);
       labelPlate();
-    }
+    } else labOwner = null;
 
     frameMarks(null);
   }
@@ -1592,7 +1611,7 @@ export function createMinimap(ctx, opts = {}) {
   const RI = new Int16Array(TRAIL_MAX + 2), RB = new Uint8Array(TRAIL_MAX + 2), RC = new Float32Array(TRAIL_MAX + 2);
   /**
    * The ROUTE: the last 800 steps as one thick dashed line — an ink edge, a
-   * white road, red dashes marching towards you — older thirds a duskier red.
+   * white road, red dashes (still) — older thirds a duskier red.
    * Teleports break it; it ends at your arrow.
    */
   function drawRoute(pl) {
@@ -1612,7 +1631,6 @@ export function createMinimap(ctx, opts = {}) {
     if (n < 2) return;
     RC[0] = 0;
     for (let m = 1; m < n; m++) RC[m] = RC[m - 1] + (RB[m] ? 0 : Math.hypot(RX[m] - RX[m - 1], RY[m] - RY[m - 1]));
-    const march = (ctx.state.elapsed || 0) * 14;
     g.lineJoin = 'round'; g.lineCap = 'round';
     for (let b = 0; b < 3; b++) {
       g.beginPath();
@@ -1630,7 +1648,7 @@ export function createMinimap(ctx, opts = {}) {
       g.setLineDash(NODASH);
       g.globalAlpha = 0.6; g.lineWidth = 8.8 * w; g.strokeStyle = INK; g.stroke();
       g.globalAlpha = 1; g.lineWidth = 6.2 * w; g.strokeStyle = '#fffaf0'; g.stroke();
-      g.setLineDash(DASH); g.lineDashOffset = startC - march;
+      g.setLineDash(DASH); g.lineDashOffset = startC;          // still dashes (they used to march)
       g.lineWidth = 3.6 * w; g.strokeStyle = ROUTE_RED3[b]; g.stroke();
       g.setLineDash(NODASH); g.lineDashOffset = 0;
     }
@@ -1666,7 +1684,8 @@ export function createMinimap(ctx, opts = {}) {
       const x = amx(m.x), y = amz(m.z);
       m._in = !(x < -3 || x > aW + 3 || y < -3 || y > aH + 3);
       if (!m._in) { m._ob = -1; continue; }
-      const s = 1.08, lean = leanFor(x, y, s, px, py), d = 11.5 * s, R = 7.4 * s;
+      const s = 1.08, lean = leanFor(x, y, s, px, py, m._leanA), d = 11.5 * s, R = 7.4 * s;
+      m._leanA = lean;
       m._x = x; m._y = y; m._s = s;
       m._hx = x + Math.sin(lean) * d; m._hy = y - Math.cos(lean) * d;
       pin(x, y, m.glyph, s, st.fill, true, lean);
@@ -1677,7 +1696,8 @@ export function createMinimap(ctx, opts = {}) {
       const R = 7.4 * m._s + 1;
       measureLabel(m.label, ALABEL_FONT, 120, 15);
       LB.bw += 6;
-      placeLabel(m._hx, m._hy, R, m._ob);
+      placeLabel(m._hx, m._hy, R, m._ob, m._slotA ?? -1);
+      m._slotA = LB.slot;
       leader(m._hx, m._hy, R);
       labelPlate();
       obAdd(LB.x - LB.bw / 2, LB.y - LB.bh / 2, LB.x + LB.bw / 2, LB.y + LB.bh / 2);
@@ -1709,9 +1729,10 @@ export function createMinimap(ctx, opts = {}) {
     if (fp) drawFerry(amx(fp.x), amz(fp.z));
     if (pl) {
       const x = amx(pl.x), y = amz(pl.z);
-      const ph = ((ctx.state.elapsed || 0) * 0.8) % 1;
-      ag.globalAlpha = (1 - ph) * 0.9; ag.lineWidth = 2.6; ag.strokeStyle = '#ffc94a';
-      ag.beginPath(); ag.arc(x, y, 10 + 15 * ph, 0, TAU); ag.stroke();
+      // a still ring round you that breathes in opacity only
+      ag.globalAlpha = 0.35 + 0.55 * (0.5 + 0.5 * Math.cos((ctx.state.elapsed || 0) * PULSE_W));
+      ag.lineWidth = 2.6; ag.strokeStyle = '#ffc94a';
+      ag.beginPath(); ag.arc(x, y, 15, 0, TAU); ag.stroke();
       ag.globalAlpha = 1;
       drawPlayer(amx, amz, pl, 1.18);
     } else if (p) {

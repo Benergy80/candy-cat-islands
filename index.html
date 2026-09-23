@@ -296,7 +296,7 @@
   .ld-pop b { position: absolute; left: -2em; top: -1.4em; width: 4em; text-align: center; font: 800 22px/1 var(--fd); color: #fff8ee;
     text-shadow: 1.5px 0 0 var(--ink), -1.5px 0 0 var(--ink), 0 1.5px 0 var(--ink), 0 -1.5px 0 var(--ink), 0 3px 0 var(--ink); }
   .ld-sprinkles i.pp { visibility: hidden; }
-  .ld-score { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 12px); right: calc(env(safe-area-inset-right, 0px) + 14px);
+  .ld-score { display: none !important; /* Ben 2026-09-23: no 'click to pop sprinkles' prompt or counter */ position: absolute; top: calc(env(safe-area-inset-top, 0px) + 12px); right: calc(env(safe-area-inset-right, 0px) + 14px);
     display: flex; align-items: center; gap: .45em; padding: .34em .9em .38em .6em; white-space: nowrap;
     font: 800 15px/1.2 var(--fb); color: var(--ink2);
     background: linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%); border: 2.5px solid var(--edge); border-radius: 999px;
@@ -984,7 +984,7 @@
           { transform: 'translate(' + dx.toFixed(1) + 'px,' + (dy + reach * 0.5).toFixed(1) + 'px) rotate(' + (r + 260) + 'deg) scale(.7)', opacity: 0 }],
           { duration: 820, easing: 'cubic-bezier(.2,.75,.4,1)', fill: 'forwards' });
       }
-      var tx = document.createElement('b'); tx.textContent = '+' + n; box.appendChild(tx);
+      var tx = document.createElement('b'); tx.textContent = ''; box.appendChild(tx);   // no score text: the burst is the whole reward
       tx.animate([{ transform: 'translateY(4px) scale(.6)', opacity: 0 }, { transform: 'translateY(-14px) scale(1.1)', opacity: 1, offset: 0.25 },
         { transform: 'translateY(-44px) scale(1)', opacity: 0 }], { duration: 900, easing: 'ease-out', fill: 'forwards' });
       fx.appendChild(box);

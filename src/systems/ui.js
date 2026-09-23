@@ -47,6 +47,28 @@
 //   scale and the thermals are handed back; the controls then start as the
 //   small H chip (see HINT_NUDGE), not the full card. ?shot=1 skips it
 //   entirely unless ?intro=1; ui.skipIntro() is the same dismissal.
+// CONTRACT K (opening cinematic): when ctx.systems.intro.takeover exists, the
+//   dismissal does NOT dip to dark or hand anything back: the HUD goes to
+//   cinema (below), the card fades while the logo pops, the player stays
+//   locked, and on the second tick after it (so the key that dismissed the card is not
+//   also the cinematic's skip) ui calls intro.takeover({ view: the title's
+//   current free view, saved: { time, frozen, fog } }) and waits on its
+//   promise; then only the thermals come back (the intro restored camera,
+//   clock and fog), the player is unlocked and the HUD shown. A takeover that
+//   throws, rejects or never settles (45 s) falls back to the full restore.
+//   Without an intro system (or without takeover) the dip path is unchanged.
+//   ui.showHud(v) — false hides every HUD panel (objective, candy pill, clock,
+//   map, hotbar, camera chip, help, prompt, dialogue, banners; the toast queue
+//   and the banner clock pause) and shows a small '▸ skip' hint bottom-right.
+//   It only toggles class 'cci-cinema' on ctx.uiRoot, which is the one source
+//   of truth: another system may set the class directly to the same effect.
+//   While it is on (and while the title card is up) say() lines are DROPPED —
+//   the open line and the queue are cleared, nothing plays unseen or pops up
+//   when the HUD returns — and the dialogue box leaves every key to the
+//   cinematic. touch.js's 'turn your phone' card stays visible (it pauses the
+//   game), and the 45 s hand-off watchdog does not count paused time.
+//   The key that dismisses the title card is spent on that alone (swallowed
+//   in the capture phase): it never also reads a sign, jumps or swings.
 //
 // LIFETIMES (wave-2b): nothing on this HUD is allowed to outlive its moment.
 //   • every say() line auto-dismisses: its own duration, or one read from the
@@ -71,6 +93,11 @@ import { icon, item as itemGlyph, portrait, familyFor, familyHue } from './ui/gl
 import { createHotbar, createCandy, createCamChip } from './ui/hotbar.js';
 import { createTitle } from './ui/title.js';
 
+// The web faces are requested while main.js is still importing modules (this
+// runs at import), not at ui.create a few seconds later: the title's logo was
+// being revealed before Baloo 2 had even started to download.
+try { injectFonts(); } catch (e) { /* not a browser (node --check, tools) */ }
+
 const CPS = 58;                 // typewriter characters per second
 const BANNER_REPEAT = 150;      // seconds before a landmark can announce itself again
 const BANNER_ECHO = 3;          // a banner that only repeats the minimap footer
@@ -78,6 +105,7 @@ const HINT_LIFE = 20;           // seconds the full controls card stays up (H)
 const HINT_NUDGE = 12;          // after the title: the H chip reads 'how to holiday' and breathes this long
 const INTRO_DIP = 0.3;          // title → game: seconds down to dark...
 const INTRO_LIFT = 0.55;        // ...and back up on the follow camera
+const HANDOFF_MAX = 45;         // s: a cinematic that never settles gets the full restore
 
 // ── lifetimes ────────────────────────────────────────────────────────────────
 const SAY_ELLIPSIS = 1.2;       // '…' is a beat, not a speech
@@ -176,19 +204,28 @@ export function create(ctx) {
   };
 
   // ── animated panel helper (dt-driven; no CSS transitions) ──────────────────
+  // p eases TOWARD want and stops there. (It used to step "down unless below
+  // want", so a shown panel at p = 1 fell to ~0.89 and climbed back every other
+  // frame — backOut turned that into a 0.3 px / 0.16% scale shimmer on every
+  // plate, which is what made the map canvases bounce and blur.) A settled
+  // panel writes no style at all until p, want or its base transform change.
+  // back: false = no overshoot (the maps: a sheet you read must not wobble).
   function panel(el, opt = {}) {
     const o = { rise: 0.2, fall: 0.15, y: 16, s: 0.9, base: '', back: true, ...opt };
     el.style.display = 'none';
     const a = {
-      el, o, p: 0, want: 0,
+      el, o, p: 0, want: 0, drawn: -1, drawnBase: null,
       show(pop = false) { if (pop) a.p = 0; a.want = 1; },
       hide() { a.want = 0; },
       get visible() { return a.want === 1 || a.p > 0; },
       step(dt) {
-        a.p = clamp(a.p + (a.want > a.p ? dt / o.rise : -dt / o.fall), 0, 1);
+        if (a.p === a.want && a.p === a.drawn && o.base === a.drawnBase) return;
+        if (a.want > a.p) a.p = Math.min(a.want, a.p + dt / o.rise);
+        else if (a.want < a.p) a.p = Math.max(a.want, a.p - dt / o.fall);
+        a.drawn = a.p; a.drawnBase = o.base;
         if (a.p <= 0) { if (el.style.display !== 'none') el.style.display = 'none'; return; }
         if (el.style.display === 'none') el.style.display = '';
-        const e = o.back ? backOut(a.p) : a.p;
+        const e = o.back ? backOut(a.p) : 1 - (1 - a.p) * (1 - a.p) * (1 - a.p);
         el.style.opacity = clamp(a.p * 1.8, 0, 1).toFixed(3);
         el.style.transform = `${o.base} translateY(${((1 - e) * o.y).toFixed(2)}px) scale(${(o.s + (1 - o.s) * e).toFixed(4)})`;
       },
@@ -252,12 +289,13 @@ export function create(ctx) {
   root.appendChild(map.el);
   root.appendChild(map.chip);
   root.appendChild(map.atlas);
-  const mapAnim = panel(map.el, { y: 14, s: 0.92 });
+  // (no overshoot on anything that carries the chart: it eases in once and is still)
+  const mapAnim = panel(map.el, { y: 10, s: 0.96, back: false });
   const mapChipAnim = panel(map.chip, { y: 10, s: 0.9 });
   // The explored map is not the corner plate: it is a big centred sheet (the
   // ATLAS) over a scrim, above toasts / banner / dialogue, so nothing transient
   // can sit on top of it — on a phone least of all.
-  const atlasAnim = panel(map.atlasPlate, { rise: 0.24, fall: 0.16, y: 18, s: 0.94 });
+  const atlasAnim = panel(map.atlasPlate, { rise: 0.24, fall: 0.16, y: 12, s: 0.97, back: false });
   let atlasShown = false, scrimOp = -1;
   mapAnim.show();
   let mapOn = true, mapMode = 'local';
@@ -370,18 +408,38 @@ export function create(ctx) {
   const sayAnim = panel(sayEl, { rise: 0.2, fall: 0.14, y: 20, s: 0.92, base: 'translateX(-50%)' });
   const sayQueue = [];
   let current = null, reveal = 0, hold = 0;
+  /** The HUD is hidden (cinema, or the title card is up): the dialogue box is not spoken to. */
+  const hushed = () => root.classList.contains('cci-cinema') || root.classList.contains('cci-titling');
   sayPanel.addEventListener('pointerdown', (e) => { e.stopPropagation(); advance(); });
   // While a line is on screen, E / Enter / X belong to the dialogue box: swallow
   // them in the capture phase so the same press doesn't also re-trigger the
   // interactable we're talking to (or fire the held item at it). Space is NOT
   // swallowed — input contract v2 gives Space to the jump, and hopping about
   // during a conversation is a feature.
+  // A window CAPTURE listener runs ahead of input.js (bubble) and of intro.js
+  // (capture, added later), so it also routes the two moments where a key must
+  // not reach the game as usual:
+  //   • the title card: the key that dismisses it is spent on that and nothing
+  //     else — input.js never sees it, so Enter / E beside the Sugar Pier sign
+  //     can't also read the sign, and Space can't also jump. (Held keys come
+  //     back through their auto-repeat once the player is free.)
+  //   • cinema (#ui.cci-cinema): the cinematic owns EVERY key — intro.js's own
+  //     capture listener takes them as its skip; the hidden dialogue box never
+  //     swallows Enter / E / X out from under it.
   const ADVANCE_KEYS = new Set(['KeyE', 'Enter', 'KeyX']);
   window.addEventListener('keydown', (e) => {
+    if (introState === 'up') {
+      e.stopImmediatePropagation();
+      if (NO_SCROLL.has(e.code)) e.preventDefault();
+      if (!e.repeat) dismissIntro();
+      return;
+    }
+    if (root.classList.contains('cci-cinema')) return;
     if (!current || e.repeat || !ADVANCE_KEYS.has(e.code)) return;
     e.preventDefault(); e.stopImmediatePropagation();
     advance();
   }, true);
+  const NO_SCROLL = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
   // ── modal card ─────────────────────────────────────────────────────────────
   const cardWrap = add('cci cci-cardwrap',
@@ -391,6 +449,10 @@ export function create(ctx) {
   const cardBtns = cardWrap.querySelector('.cci-card-btns');
   const cardAnim = panel(cardWrap, { rise: 0.22, fall: 0.16, y: 22, s: 0.84 });
   let cardOpen = null;
+
+  // ── cinema: the '▸ skip' hint, the only furniture while the HUD is hidden ──
+  const skipEl = add('cci cci-plate muted cci-skip', `<span class="cci-skip-ico">${icon('chevr', { w: 3.4 })}</span><em>skip</em>`);
+  const skipAnim = panel(skipEl, { rise: 0.35, fall: 0.2, y: 6, s: 0.96, back: false });
 
   // ── fade ───────────────────────────────────────────────────────────────────
   const fadeEl = add('cci cci-fade');
@@ -413,6 +475,8 @@ export function create(ctx) {
   const forceIntro = ctx.params?.get('intro') === '1';
   let introState = (ctx.shot && !forceIntro) ? 'skip' : 'up';
   let lockedByIntro = false, introOutT = 0;
+  // Contract K hand-off bookkeeping
+  let handoffT = 0, handoffTicks = 0, handedOff = false, handoffResult = '';   // result: '' pending · 'ok' resolved · 'fail' threw / rejected
   if (introState === 'up') {
     introAnim.p = 1; introAnim.want = 1;
     introEl.style.display = ''; introEl.style.opacity = '1'; introEl.style.transform = 'scale(1)';
@@ -421,16 +485,52 @@ export function create(ctx) {
   }
   const dismissIntro = () => {
     if (introState !== 'up') return;
-    introState = 'out';
     titleDo(() => title.leave());
-    fadeTo = 1; fadeRate = 1 / INTRO_DIP;       // dip to dark; the world swaps back under it
     hintMode = 'chip'; hintTimer = 0; chipNudge = HINT_NUDGE;
+    if (typeof ctx.systems.intro?.takeover === 'function') {
+      // Contract K: the cinematic flies out of this very frame — no dip. The
+      // HUD goes straight from 'titling' to 'cinema' (never shown in between).
+      introState = 'handoff';
+      handoffT = 0; handoffTicks = 0; handedOff = false; handoffResult = '';
+      root.classList.add('cci-cinema');
+      root.classList.remove('cci-titling');
+      introAnim.hide();                          // the card fades while the camera starts to move
+    } else {
+      introState = 'out';
+      fadeTo = 1; fadeRate = 1 / INTRO_DIP;     // dip to dark; the world swaps back under it
+    }
     ctx.events.emit('ui:intro:done');
   };
-  if (introState === 'up') {
-    window.addEventListener('keydown', dismissIntro);
-    window.addEventListener('pointerdown', dismissIntro);
+  /** Contract K: call intro.takeover once, with the title's live view and what it parked. */
+  function startTakeover() {
+    handedOff = true;
+    let h = null;
+    titleDo(() => { h = title.handoff(); });
+    if (!h) { handoffResult = 'fail'; return; }
+    try {
+      Promise.resolve(ctx.systems.intro.takeover(h)).then(
+        () => { if (!handoffResult) handoffResult = 'ok'; },
+        (err) => { console.error('[ui] intro.takeover rejected — handing the world back', err); if (!handoffResult) handoffResult = 'fail'; });
+    } catch (err) {
+      console.error('[ui] intro.takeover threw — handing the world back', err);
+      handoffResult = 'fail';
+    }
   }
+  /** After the cinematic (or instead of it): thermals, lock, HUD, card. */
+  function finishTakeover() {
+    if (handoffResult === 'ok') titleDo(() => title.release());
+    else {
+      if (!handoffResult) console.warn(`[ui] intro.takeover did not settle in ${HANDOFF_MAX} s — handing the world back`);
+      titleDo(() => title.restore());            // camera, clock (if still ours), fog, thermals
+    }
+    if (lockedByIntro && ctx.systems.player) ctx.systems.player.locked = false;
+    lockedByIntro = false;
+    root.classList.remove('cci-cinema', 'cci-titling');
+    introAnim.p = 0; introAnim.want = 0; introEl.style.display = 'none';
+    introState = 'done';
+  }
+  // (keys dismiss through the capture listener above, which also spends them)
+  if (introState === 'up') window.addEventListener('pointerdown', dismissIntro);
 
   // ── dialogue helpers ───────────────────────────────────────────────────────
   const playerXZ = () => { const p = ctx.systems.player?.position; return p ? { x: p.x, z: p.z } : null; };
@@ -736,6 +836,11 @@ export function create(ctx) {
     sayQueue,
     say(text, o = {}) {
       const entry = { text: String(text), ...o };
+      // Nothing is said to a hidden HUD: under a cinematic (or the title card)
+      // the line is dropped, not queued — a flight past chattering kids would
+      // otherwise play their small talk unseen, or land on a backlog of it.
+      // Same rule as the flyer's airborne hush; no 'ui:say' — nobody heard it.
+      if (hushed()) { entry.dropped = true; return entry; }
       entry.queuedAt = ctx.state.elapsed;
       entry.queuedFrom = playerXZ();
       if (current) {
@@ -844,6 +949,13 @@ export function create(ctx) {
     /** Highlight a camera mode without waiting for the camera's event. */
     setCameraMode(m) { camChip.set(m); return camChip.mode; },
     skipIntro: dismissIntro,
+    /**
+     * Contract K: false hides every HUD panel (a small '▸ skip' hint stays
+     * bottom-right; toasts queue and the banner clock pause), true brings it
+     * back. It toggles class 'cci-cinema' on ctx.uiRoot — the one source of truth.
+     */
+    showHud(v = true) { root.classList.toggle('cci-cinema', !v); return !!v; },
+    get hudShown() { return !root.classList.contains('cci-cinema'); },
     get here() { return hereId; },
     get mapMode() { return mapOn ? mapMode : 'off'; },
 
@@ -889,13 +1001,31 @@ export function create(ctx) {
           fadeTo = 0; fadeRate = 1 / INTRO_LIFT;
           introState = 'done';
         }
+      } else if (introState === 'handoff') {
+        // Contract K: the cinematic takes over on the SECOND tick in this state —
+        // the first one still carries the dismissing key in ctx.input.pressed
+        // (input clears it at that tick's end), and it must not also be a skip.
+        if (!handedOff && ++handoffTicks >= 2) startTakeover();
+        if (introAnim.visible) titleDo(() => title.update(dt));
+        // the watchdog counts the cinematic's time, not the wall's: a pause (the
+        // phone turned to portrait) stops the flight's clock, so it stops this too
+        if (!st.paused) handoffT += dt;
+        if (handoffResult || handoffT > HANDOFF_MAX) finishTakeover();
       } else if (introState === 'skip') {
         introState = 'done';
         ctx.events.emit('ui:intro:done');
       }
+      // cinema (ui.showHud(false), or anyone setting the class): the HUD is hidden by CSS
+      const cinema = root.classList.contains('cci-cinema');
+      const hudHidden = cinema || introState === 'up' || introState === 'out';
+      if (cinema) skipAnim.show(); else skipAnim.hide();
 
-      // dialogue — a line closes on its own clock, or when its moment ends
-      if (current && outOfRange(current)) nextLine();
+      // dialogue — a line closes on its own clock, or when its moment ends.
+      // Under a cinematic / the title the box is hidden, so whatever was open or
+      // waiting goes (it would otherwise run on unseen and pop up as the HUD
+      // came back); say() drops new lines until the HUD returns.
+      if (hushed()) { if (current || sayQueue.length) { sayQueue.length = 0; current = null; sayAnim.hide(); } }
+      else if (current && outOfRange(current)) nextLine();
       if (current) {
         const len = current.text.length;
         if (reveal < len) {
@@ -1009,7 +1139,7 @@ export function create(ctx) {
         const place = placeName(hereId);
         if (place !== lastPlace) { lastPlace = place; map.setPlace(place, !!hereId || !!st.placeOverride); }
       }
-      if (banTimer > 0 && (banTimer -= dt) <= 0) banAnim.hide();
+      if (banTimer > 0 && !cinema && (banTimer -= dt) <= 0) banAnim.hide();   // (a banner waits out a cinematic)
 
       // The top-left 30% of the frame belongs to the WORLD (Meow Donald's
       // 'BILLIONS SERVED' band lives up there). Toasts and the banner dock
@@ -1023,13 +1153,16 @@ export function create(ctx) {
       }
 
       // toasts — one on screen; the queue feeds the next as this one clears
-      for (let i = toasts.length - 1; i >= 0; i--) {
-        const t = toasts[i];
-        if (t.life > 0 && (t.life -= dt) <= 0) t.anim.hide();
-        t.anim.step(dt);
-        if (t.life <= 0 && t.anim.p <= 0) { t.el.remove(); toasts.splice(i, 1); }
+      // (paused under a cinematic: nothing is said to a hidden HUD)
+      if (!cinema) {
+        for (let i = toasts.length - 1; i >= 0; i--) {
+          const t = toasts[i];
+          if (t.life > 0 && (t.life -= dt) <= 0) t.anim.hide();
+          t.anim.step(dt);
+          if (t.life <= 0 && t.anim.p <= 0) { t.el.remove(); toasts.splice(i, 1); }
+        }
+        pumpToasts();
       }
-      pumpToasts();
 
       // the first weapon you hold earns ONE line of teaching under the objective
       if (!weaponHinted && ctx.systems.inventory) checkFirstWeapon();
@@ -1096,8 +1229,11 @@ export function create(ctx) {
       if (hereId && !visited.has(hereId)) visited.add(hereId);
       map.tick(dt);
       if (mapOn) {
-        if (mapMode === 'history') map.drawAtlas(visited, hereId);
-        else map.draw(mapMode, visited, hereId);
+        // (a chart nobody can see is not redrawn: the title, a dip, a cinematic)
+        if (!hudHidden) {
+          if (mapMode === 'history') map.drawAtlas(visited, hereId);
+          else map.draw(mapMode, visited, hereId);
+        }
         mapChipAnim.hide();
       } else if (introState === 'done' || introState === 'skip') mapChipAnim.show();
       // the atlas layer (scrim + sheet) exists only while its sheet is showing
@@ -1119,7 +1255,7 @@ export function create(ctx) {
       // panel animation
       sayAnim.step(dt); promptAnim.step(dt); banAnim.step(dt); objAnim.step(dt);
       dialAnim.step(dt); mapAnim.step(dt); mapChipAnim.step(dt); atlasAnim.step(dt); hintAnim.step(dt); chipAnim.step(dt);
-      cardAnim.step(dt); introAnim.step(dt);
+      cardAnim.step(dt); introAnim.step(dt); skipAnim.step(dt);
     },
   };
 

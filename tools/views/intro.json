@@ -1,0 +1,8 @@
+{
+  "intro_1_palace":  { "time": 18.2, "frames": 45, "call": { "intro.play": 6.8 } },
+  "intro_2_cupcake": { "time": 18.2, "frames": 45, "call": { "intro.play": 11.2 } },
+  "intro_3_village": { "time": 18.2, "frames": 45, "call": { "intro.play": 15.0 } },
+  "intro_4_find":    { "time": 8.7,  "frames": 45, "call": { "intro.play": 19.2 } },
+  "intro_5_orbit":   { "time": 9.3,  "frames": 45, "call": { "intro.play": 25.5 } },
+  "intro_6_hello":   { "time": 9.5,  "frames": 45, "call": { "intro.play": 27.95 } }
+}

@@ -43,6 +43,20 @@
 //                (0.7 as deep as it is wide), tighter the faster you go
 //   reveal       stepping into a named landmark eases the lens out to ~40 for
 //                2.5 s, so you see the whole silhouette of the thing you arrived at
+//   density      (CAMERA_SPEC §4.5, camera/density.js) a 4 Hz sight fan over the collider circles
+//                (r ≥ 0.75) behind him: in a thick prop band the lens tips up (+0.14·dK, mode 2
+//                +0.20, × (1 − zoneK)) and back (×(1 + 0.10·dK), mode 2 0.08), ≤ 0.12 rad/s /
+//                2.5 u/s; off in mode 3, owned, flying, under a shot, pinned
+//   terrain      (§4.7) 8 ground samples lens → chest every frame: a rise in the sight line lifts
+//                the lens (≤ 0.25 rad, λ3 up / λ1.5 down); the terrain lift, density's elevation
+//                and the occlusion tilt share one ≤ 0.14 rad/s budget (A10)
+//   whiskers     (§4.4) mode 2 only: blocked ≥ 2/5 for 0.35 s, the lens tries yaw offsets
+//                {0, ±0.26, ±0.52} (three sight lines each against the local collider list) and
+//                commits to a clearer side (≤ 0.5 rad/s); a manual orbit or tap V cancels it, a
+//                straight walk does not. Mode 1 gets a hint instead: the chip pulses Q or E
+//   pin          (§6.1) setParams({elevation | distance}) — a view's --el/--dist, an owner's
+//                framing — holds density, whiskers and path alignment off until a teleport (or,
+//                in live play, until he has walked 6 u); snap() and setFree(null) keep it
 //
 // THE NIGHT SKY MOMENT. The sky system hangs a big cartoon moon 36-52° above the
 // horizon all night, and the gameplay lens (elevation 0.64, fov 30) looks DOWN:
@@ -105,7 +119,10 @@
 //              carry the rest.
 //              Dolly and tilt run only while the window is shut (cutK < 0.5 and
 //              not opening): once it carries the frame the lens releases to the
-//              stop (λ3.5) and the tilt unwinds. The per-frame collider pass
+//              stop (λ3.5) and the tilt unwinds — except a dolly the sweep holds
+//              in front of an UNPATCHED blocker, which the window cannot open
+//              (a noCut wall behind a patched lollipop keeps its dolly while the
+//              window opens on the lollipop). The per-frame collider pass
 //              (occlude(): a guess — colliders carry no mesh and mostly no
 //              height) tilts ≤ colLiftMax (0.06) and dollies only alongside a
 //              dolly / tilt the sweep is already running; mostly it opens the
@@ -179,7 +196,9 @@
 //           cut, cutRy, cutRx, cutGrow, cutHold, cutRise, cutFall, nearMin, nearMax,
 //           lookHold, lookTapPx, lookYawK, lookElK, lookPan, lookPanRun, lookLeash,
 //           lookLeashIn, lookTaper, lookElevLook, lookFovLook, lookFovVeh, lookIn,
-//           lookOut, lookReturnRate, lookEndT, lookZoomMin, lookZoomMax, recentreRate}
+//           lookOut, lookReturnRate, lookEndT, lookZoomMin, lookZoomMax, recentreRate,
+//           densityElev1, densityElev2, densityDist1, densityDist2, densityRate, terrainLiftMax,
+//           whiskerSteps, whiskerRate, whiskerMax, whiskerHold, whiskerGap}
 //           (followLambda / followRecentre are gone: the mode-2 tether has no
 //           timed recentre, CAMERA_SPEC §2; the V look's framing lift is lookElevLook,
 //           not the spec's `lookElev`, which is hold-L's 0.15 and stays so)
@@ -201,6 +220,10 @@
 //                  occBlocked · occMs · blockerCount · sweepCount · current · target
 //                  controlAzimuth (the movement basis) · tilt (tiltFor(baseDistance))
 //                  · baseDistance · goalDistance · lead {x, z} (the aim's lead, §4.1)
+//                  occYaw (the mode-2 whisker yaw) · densityK · terrainLift · pinned
+//                  · hint {key 'Q'|'E'|null, t, seq} (mode 1's keycap hint; emits 'camera:hint')
+//                  · densityState · whiskerState (QA, allocate) · density (the collider sensors:
+//                    top(c), the local list, the fan — camera/density.js)
 //                  occDebug({fromStop}?) — one unbudgeted sweep, reported not applied
 //                    (fromStop: cast from the last sweep's undollied stop, as update() does)
 //                  bodyVisibility() — five rays, whole scene (instances too),
@@ -213,6 +236,7 @@
 import * as THREE from 'three';
 import { damp, clamp, lerp, smoothstep } from '../core/util.js';
 import { createCutout } from './camera/cutout.js';
+import { createDensity, LOCAL_EVERY } from './camera/density.js';
 
 const STEP = Math.PI / 4;
 // The window reads the sweep's three AXIAL rays only (hat, chest, knees: bits 0-2). The two offset rays sit
@@ -262,6 +286,19 @@ const LOOK_END_KEYS = ['Space', 'KeyC', 'KeyR', 'KeyX', 'Enter', 'NumpadEnter', 
 const LOOK_END_KEYS_VEH = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'];
 // a movement key going down while V is still pending means "pan": the look starts at once
 const LOOK_MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+// DENSITY / WHISKERS / TERRAIN (CAMERA_SPEC §4.4-4.8)
+const DENS_EVERY = 0.25;      // s: the density sight fan runs at 4 Hz
+const DENS_HOLD = 0.12;       // the held density goal moves only when the fan's reading differs by more than this
+const DENS_EL_RATE = 0.12;    // rad/s: density's elevation response, capped (§4.8)
+const DENS_DIST_RATE = 2.5;   // u/s: …and its distance response
+const PIN_WALK = 6;           // u: in live play a pin (setParams el/dist) lets go once he is this far from where it was set
+const WHISK_BLOCK = 0.35;     // s: the sweep's raw count ≥ 2/5 this long arms the whiskers (§4.4)
+const WHISK_MANUAL = 2.5;     // s: …and never within this of a manual camera input
+const WHISK_CLEAR = 1.5;      // s: candidate 0 clear this long unwinds the offset (λ0.8)
+const WHISK_BEAT = 0.25;      // a candidate must beat the current one by this…
+const TERRAIN_N = 8;          // world.height samples along lens → chest, every frame (§4.7)
+const TERRAIN_M = 0.3;        // u: …the sight line keeps this clear of the ground
+const HINT_BLOCK = 2, HINT_SHOW = 2, HINT_GAP = 60;   // mode 1's Q/E hint (§4.4): blocked ≥ 3/5 this long, pulse, once per
 
 export function create(ctx) {
   const cam = ctx.camera;
@@ -374,6 +411,15 @@ export function create(ctx) {
     lookLeash: 40, lookLeashIn: 10, lookTaper: 8, lookElevLook: 0.12, lookFovLook: 40, lookFovVeh: 48,
     lookIn: 9, lookOut: 8, lookReturnRate: 2.5, lookEndT: 0.25, lookZoomMin: 0.7, lookZoomMax: 1.6,
     recentreRate: 3,
+    // DENSITY (§4.5, §2 density row): a sight fan over the collider circles tips the lens up and back in
+    // thick prop bands — el +densityElev·dK·(1 − zoneK), distance ×(1 + densityDist·dK) (1: modes 1, 2: mode 2
+    // proper; off in mode 3), dK damped at λ densityRate
+    densityElev1: 0.14, densityElev2: 0.20, densityDist1: 0.10, densityDist2: 0.08, densityRate: 0.8,
+    // TERRAIN WHISKER (§4.7): the extra elevation that clears a rise between the lens and him, capped
+    terrainLiftMax: 0.25,
+    // CLEAR-SIDE WHISKERS (§4.4), mode 2 only: candidate yaw offsets {0, ±steps}, eased at λ1.5 ≤ whiskerRate,
+    // |offset| ≤ whiskerMax; a switch needs a better candidate for whiskerHold s and whiskerGap s since the last
+    whiskerSteps: [0.26, 0.52], whiskerRate: 0.5, whiskerMax: 0.52, whiskerHold: 0.8, whiskerGap: 2.0,
   };
   // lookAhead is gone (§6.1): kept as a deprecated alias of leadAway
   Object.defineProperty(p, 'lookAhead', { enumerable: false, configurable: true, get: () => p.leadAway, set: (v) => { p.leadAway = v; } });
@@ -400,7 +446,7 @@ export function create(ctx) {
   // MOVEMENT BASIS (§4.3): WASD reads ctrlAz, which chases the lens at basisRate
   // while a movement key is held and equals it when idle.
   let ctrlAz = p.azimuth;
-  let occYaw = 0;                                // clear-side whisker yaw (§4.4, a later step): 0 for now
+  let occYaw = 0;                                // clear-side whisker yaw (§4.4): mode 2 proper only, else 0
   let modeFov = p.fov, pitchBase = 0;            // eased per-mode FOV (§2) and pitch (m2Pitch)
   let tiltNow = 0, baseDistNow = p.distance;     // tiltFor(baseDist) as last applied
   // ownership / flight / indoors flags, refreshed by status() (update, snap, setMode, setFree, setParams)
@@ -487,6 +533,31 @@ export function create(ctx) {
   let moonTick = 0.6;           // seconds until the next cheap window check
   let moonToastT = -1, moonToastText = '';
   const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), cineTgt = new THREE.Vector3();
+  // ── THE COLLIDER SENSORS (§4.4-4.7; camera/density.js): the local list, top(c), the density fan ──
+  const dens = createDensity(ctx);
+  let localT = 0;               // s until the next local-list refresh (LOCAL_EVERY; snap() refreshes at once)
+  // THE PIN (§6.1): a setParams carrying elevation or distance (a view's --el/--dist, an owner's framing) mutes
+  // density, the whiskers and path alignment. It survives snap() and setFree(null); the 'player:teleport' event
+  // clears it, and so does walking PIN_WALK u from where it was set — in live play only, never under ctx.shot.
+  let pinned = false, pinX = NaN, pinZ = NaN;
+  // DENSITY (§4.5): dK the reading (damped λ densityRate toward the held goal dKheld, which the 4 Hz fan moves
+  // only by more than DENS_HOLD); densEl / densDist its applied responses (rad / u), rate-capped (§4.8)
+  let dK = 0, dKheld = 0, densT = 0, densOcc = 0, densEl = 0, densDist = 0;
+  // TERRAIN WHISKER (§4.7): the applied lift and this frame's goal
+  let terrainLift = 0, terrainGoal = 0;
+  let elBasePrev = NaN;         // last frame's base elevation (cur.elevation + tilt + breathing): A10's net budget
+  const terrV = new THREE.Vector3();
+  // CLEAR-SIDE WHISKERS (§4.4): candidate offsets [0, +s0, −s0, +s1, −s1] about the tether yaw, each one's last
+  // clear share (3 sight lines against the local list; NaN = not yet read), evaluated one per frame round robin
+  const wOff = new Float64Array(5), wClr = new Float64Array(5).fill(NaN);
+  let wIdx = 0, wGoal = 0, wBlkT = 0, wBetT = 0, wBetK = -1, wSwT = 99, wZeroT = 0, wOn = false;
+  // candidate 0's sweep reading (1 − raw blocked) taken while the lens stood on it, and where he was: it holds
+  // while the lens is off to a side (the collider lines alone cannot see a merged district), until he walks 3 u
+  let w0Sweep = 1, w0X = NaN, w0Z = NaN;
+  let tetherAuto = 0;           // this frame's automatic tether yaw (swing + alignment / flight), rad
+  let cineW = 0;                // this frame's cinematic weight (occYaw and density fade out under a shot)
+  // mode 1's Q/E hint (§4.4): the key to pulse ('Q' / 'E' / null), how long it shows, the cooldown, the timer
+  let hintKey = null, hintT = 0, hintCool = 0, hintBlkT = 0, hintSeq = 0;
   cam.fov = p.fov; cam.updateProjectionMatrix();
 
   const wrap = (a) => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; };
@@ -641,7 +712,8 @@ export function create(ctx) {
     const sp = v ? Math.hypot(v.x, v.z) : 0;
     const pure = axNow.y > 0 && Math.abs(axNow.x) < 0.25 * axNow.y;
     // pathHit: this frame's pathAt(), run once by update() before the tether (the lead reads it too)
-    if (!(pure && sp > 1.5 && pathHit.on)) { fwdT = 0; alignK = 0; return NaN; }
+    // (off while pinned, §6.1: a view's --az / --el / --dist, an owner's framing)
+    if (!(pure && sp > 1.5 && pathHit.on) || pinned) { fwdT = 0; alignK = 0; return NaN; }
     fwdT += dt;
     if (fwdT < p.pathDelay || manualT < ORBIT_WAIT) { alignK = 0; return NaN; }
     alignK = Math.min(1, alignK + dt / ALIGN_RAMP);
@@ -689,6 +761,7 @@ export function create(ctx) {
       if (want === want) step = clamp(wrap(want - az) * (1 - Math.exp(-ALIGN_L * dt)) * alignK, -p.pathRate * dt, p.pathRate * dt);
     }
     step = clamp(step, -AUTO_YAW * dt - swing, AUTO_YAW * dt - swing);
+    tetherAuto = swing + step;                     // the automatic share (the whiskers stay inside AUTO_YAW with it)
     az = wrap(az + step);
     anchor.x = P.x + Math.sin(az) * Rh; anchor.z = P.z + Math.cos(az) * Rh;
     return az;
@@ -720,6 +793,188 @@ export function create(ctx) {
     const half = cam.fov * Math.PI / 360;
     return clamp(Math.max(pitchBase, half * p.m2PitchCap) + half - skyTop(half) - el, 0, liftCap);
   }
+  /** The same horizon guard's whole room (rad) over a lens at `el` in mode 2 proper (Infinity when the guard is
+   *  off): the occlusion tilt takes its share first (liftMaxNow), then the terrain lift, and density's
+   *  elevation gets what is left — so density never tips the sky band out of the follow frame either. */
+  function skyRoom(el) {
+    if (!(p.m2SkyMin > 0) || !follow() || !(pitchBase > 1e-4)) return Infinity;
+    const half = cam.fov * Math.PI / 360;
+    return Math.max(pitchBase, half * p.m2PitchCap) + half - skyTop(half) - el;
+  }
+  /** One step of an automatic elevation source (§4.8, A10): its move `want` limited so that the frame's net
+   *  automatic elevation change `net` (the other sources, signed) never grows past max(R, |net|) — it may
+   *  always move the way that reduces it. Returns the step taken. */
+  function elStep(want, net, R) {
+    const M = Math.max(R, Math.abs(net));
+    return clamp(want, -M - net, M - net);
+  }
+  // ── clear-side whiskers (§4.4), mode 2 only ─────────────────────────────
+  /** Forget the whiskers' reading (a cut, a manual orbit, tap V, a change of owner / mode). occYaw is not touched. */
+  function whReset() { wGoal = 0; wBlkT = 0; wBetT = 0; wBetK = -1; wSwT = 99; wZeroT = 0; wIdx = 0; wClr.fill(NaN); w0Sweep = 1; w0X = NaN; w0Z = NaN; }
+  /**
+   * The whisker offset is cancelled (a manual orbit or tap V, §4.4) or muted (owned, flying, pinned, another mode):
+   * on the tether it is folded into the tether's own bearing (A re-seeds there), so the lens does not move and
+   * the manual input acts from what you see; anything else just drops it (the mode-1 framing reads p.azimuth).
+   */
+  function whiskerBake() {
+    if (occYaw !== 0) {
+      if (tetherOn()) { cur.azimuth = wrap(cur.azimuth + occYaw); anchor.ok = false; }
+      occYaw = 0;
+    }
+    whReset();
+  }
+  /** The candidate offsets from whiskerSteps: [0, +s0, −s0, +s1, −s1]. */
+  function whOffsets() {
+    const st = p.whiskerSteps || [0.26, 0.52];
+    const s0 = Math.abs(Number(st[0]) || 0.26), s1 = Math.abs(Number(st[1]) || 0.52);
+    wOff[0] = 0; wOff[1] = s0; wOff[2] = -s0; wOff[3] = s1; wOff[4] = -s1;
+  }
+  const W_LINES = [1.6, 1.05, 0.5];              // hat, chest, knees (§4.4)
+  /** Candidate k's clear share (0..1): three sight lines body → candidate lens against the local list; the
+   *  candidate the lens is on now also takes min(·, 1 − the sweep's raw blocked share). */
+  function whEval(k, P, el, dist, aim) {
+    lensAt(cur.azimuth + wOff[k], el, dist, aim, terrV);
+    let clear = 0;
+    for (let i = 0; i < W_LINES.length; i++) {
+      if (!dens.lineBlocked(P.x, P.y + W_LINES[i], P.z, terrV.x, terrV.y, terrV.z)) clear++;
+    }
+    let c = clear / W_LINES.length;
+    // the candidate the lens stands on takes the sweep's reading too (§4.4: "candidate 0 also takes min(·, 1 − rawBlocked)");
+    // candidate 0 keeps the one it last had while the lens is off to a side, until he has walked 3 u from there
+    if (Math.abs(wOff[k] - occYaw) < 0.05) {
+      c = Math.min(c, 1 - occBlocked);
+      if (k === 0) { w0Sweep = 1 - occBlocked; w0X = P.x; w0Z = P.z; }
+    } else if (k === 0 && w0X === w0X) {
+      if (Math.hypot(P.x - w0X, P.z - w0Z) <= 3) c = Math.min(c, w0Sweep); else { w0Sweep = 1; w0X = NaN; w0Z = NaN; }
+    }
+    wClr[k] = c;
+    return c;
+  }
+  const whScore = (k, curK) => wClr[k] - 0.30 * Math.abs(wOff[k]) / Math.max(1e-6, Math.abs(wOff[4])) - (k === curK ? 0 : 0.25);
+  function whCurIdx() { let b = 0; for (let k = 1; k < 5; k++) if (Math.abs(wOff[k] - wGoal) < Math.abs(wOff[b] - wGoal)) b = k; return b; }
+  /**
+   * One frame of the whiskers (mode 2 proper, on foot, not pinned, not looking). Armed while the last sweep's
+   * raw blocked count is ≥ 2/5 for WHISK_BLOCK s, with no drag and WHISK_MANUAL s since any manual camera
+   * input. One candidate per frame (a full cycle every 5 frames). A switch needs the best to beat the current
+   * one by WHISK_BEAT for whiskerHold s, and whiskerGap s since the last switch; the offset unwinds (λ0.8) once
+   * candidate 0 has been clear for WHISK_CLEAR s. occYaw eases at λ1.5, ≤ whiskerRate rad/s, and together with
+   * the tether's automatic yaw never over AUTO_YAW (A10).
+   */
+  function whiskerStep(dt, P, el, dist, aim, dragNow) {
+    whOffsets();
+    wSwT += dt;
+    const blocked = occBlocked * 5 >= 2 - 1e-6;
+    wBlkT = blocked ? wBlkT + dt : 0;
+    const armed = wBlkT >= WHISK_BLOCK && !dragNow && manualT >= WHISK_MANUAL;
+    wOn = armed || occYaw !== 0 || wGoal !== 0;
+    if (wOn) {
+      whEval(wIdx, P, el, dist, aim);
+      wIdx = (wIdx + 1) % 5;
+      const ck = whCurIdx();
+      let all = true;
+      for (let k = 0; k < 5; k++) if (wClr[k] !== wClr[k]) { all = false; break; }
+      let best = ck;
+      if (all) for (let k = 0; k < 5; k++) if (whScore(k, ck) > whScore(best, ck) + 1e-9) best = k;
+      if (armed && all && best !== ck && whScore(best, ck) >= whScore(ck, ck) + WHISK_BEAT) {
+        if (wBetK === best) wBetT += dt; else { wBetK = best; wBetT = dt; }
+      } else { wBetK = -1; wBetT = 0; }
+      if (wBetK >= 0 && wBetT >= p.whiskerHold && wSwT >= p.whiskerGap) { wGoal = wOff[wBetK]; wSwT = 0; wBetK = -1; wBetT = 0; wZeroT = 0; }
+      if (wGoal !== 0) {
+        wZeroT = wClr[0] >= 1 - 1e-9 ? wZeroT + dt : 0;
+        if (wZeroT >= WHISK_CLEAR) { wGoal = 0; wZeroT = 0; }
+      }
+    } else if (wBetK !== -1 || wBetT || wZeroT || wClr[0] === wClr[0]) {
+      // idle: forget the readings, so the next arming reads a fresh cycle from where he is then
+      wBetK = -1; wBetT = 0; wZeroT = 0; wIdx = 0; wClr.fill(NaN);
+    }
+    wGoal = clamp(wGoal, -p.whiskerMax, p.whiskerMax);
+    if (occYaw !== wGoal) {
+      const lam = wGoal === 0 ? 0.8 : 1.5;
+      const cap = Math.min(p.whiskerRate * 0.999 * dt, Math.max(0, AUTO_YAW * 0.999 * dt - Math.abs(tetherAuto)));
+      occYaw += clamp((wGoal - occYaw) * (1 - Math.exp(-lam * dt)), -cap, cap);
+      if (Math.abs(occYaw - wGoal) < 1e-4) occYaw = wGoal;
+      occYaw = clamp(occYaw, -p.whiskerMax, p.whiskerMax);
+    }
+  }
+
+  // ── mode 1's hint (§4.4): not a yaw — when the sweep has read ≥ 3/5 body rays blocked for HINT_BLOCK s and a
+  // ±45° step would see him clear (the whiskers' three sight lines), the chip pulses the Q or E keycap for
+  // HINT_SHOW s, at most once per HINT_GAP s. E only when nothing is in reach (E is also "interact").
+  const hintOut = { key: null, t: 0, seq: 0 };
+  function hintStep(dt, pl, busyE) {
+    hintCool = Math.max(0, hintCool - dt);
+    if (hintT > 0) { hintT = Math.max(0, hintT - dt); if (hintT === 0) hintKey = null; }
+    const P = pl?.position;
+    if (mode !== 1 || ownNow || flyNow || lookLive || cine || !P) hintBlkT = 0;
+    else {
+      hintBlkT = occBlocked * 5 >= 3 - 1e-6 ? hintBlkT + dt : 0;
+      if (hintBlkT >= HINT_BLOCK && hintCool <= 0) {
+        hintBlkT = 0;
+        const el = cur.elevation + tiltNow + densEl + occLift + terrainLift, dist = Math.min(cur.distance + densDist, occDist);
+        for (let s = 0; s < 2; s++) {
+          const d = s === 0 ? STEP : -STEP;          // Q turns +45°, E −45°
+          if (d < 0 && busyE) continue;
+          lensAt(cur.azimuth + d, el, dist, target, terrV);
+          let clear = true;
+          for (let i = 0; i < W_LINES.length && clear; i++) if (dens.lineBlocked(P.x, P.y + W_LINES[i], P.z, terrV.x, terrV.y, terrV.z)) clear = false;
+          if (clear) {
+            hintKey = d > 0 ? 'Q' : 'E'; hintT = HINT_SHOW; hintCool = HINT_GAP; hintSeq++;
+            hintOut.key = hintKey; hintOut.t = hintT; hintOut.seq = hintSeq;
+            ctx.events.emit('camera:hint', hintOut);
+            break;
+          }
+        }
+      }
+    }
+    hintOut.key = hintKey; hintOut.t = hintT; hintOut.seq = hintSeq;
+  }
+
+  // ── density (§4.5) ─────────────────────────────────────────────────────
+  /** Density is forced to 0 in mode 3, while owned, flying, under a cinematic, or pinned (free: no update at all). */
+  const densOff = () => mode === 3 || ownNow || flyNow || !!cine || pinned;
+  /** The fan's reading → the held goal, which moves only when the reading differs from it by more than
+   *  DENS_HOLD (so a lone 2/15 reading, goal 0.025, never moves a lens that holds 0). */
+  function densRead() {
+    const P = ctx.systems.player?.position;
+    if (!P) { densOcc = 0; return; }
+    dens.maybeRebuild();
+    densOcc = dens.fan(P.x, P.y + 1.05, P.z, cur.azimuth + occYaw, cur.elevation + tiltNow);
+    const g = smoothstep(0.10, 0.45, densOcc);
+    if (Math.abs(g - dKheld) > DENS_HOLD) dKheld = g;
+  }
+  /** Density's responses for the current dK: the elevation (rad, × (1 − zoneK)) and the extra distance (u). */
+  const densElGoal = () => dK * (follow() ? p.densityElev2 : p.densityElev1) * (1 - zoneK);
+  const densDistGoal = () => dK * (follow() ? p.densityDist2 : p.densityDist1) * cur.distance;
+  /** Refresh the local collider list around him: LOCAL_R, or as far as the lens itself reaches. */
+  function refreshLocal() {
+    const P = ctx.systems.player?.position;
+    if (!P) return;
+    const reach = (flyNow ? p.flyDist : cur.distance + densDist) * Math.cos(clamp(cur.elevation, 0, 1.5)) + 12;
+    dens.refreshLocal(P.x, P.z, reach);
+  }
+
+  // ── terrain whisker (§4.7) ─────────────────────────────────────────────
+  /**
+   * The extra elevation (rad, 0..terrainLiftMax) the sight line lens → chest needs to pass TERRAIN_M over the
+   * ground: TERRAIN_N world.height samples along it (the lens as it would stand without the terrain lift); where
+   * the ground rises above the line − TERRAIN_M, the line from the chest would have to climb atan((h + margin −
+   * chestY) / s) instead of its own angle. Terrain only (the window never opens it; decks and props are geometry).
+   */
+  function terrainNeed(P, lens) {
+    const cy = P.y + 1.05;
+    const lx = lens.x - P.x, lz = lens.z - P.z, ly = lens.y - cy;
+    const Hl = Math.hypot(lx, lz);
+    if (Hl < 1e-3) return 0;
+    const eLine = Math.atan2(ly, Hl);
+    let need = 0;
+    for (let i = 0; i < TERRAIN_N; i++) {
+      const t = (i + 0.5) / TERRAIN_N;
+      const hT = world.height(P.x + lx * t, P.z + lz * t);
+      if (hT > cy + ly * t - TERRAIN_M) need = Math.max(need, Math.atan2(hT + TERRAIN_M - cy, Hl * t) - eLine);
+    }
+    return clamp(need, 0, p.terrainLiftMax);
+  }
+
   /** Rotate the tether by d radians, eased over azDur (Q/E in mode 2). */
   function turnTether(d) { turnTotal = turnTotal * (1 - turnDone) + d; turnDone = 0; turnT = 0; }
   function resetTether() { turnTotal = 0; turnDone = 1; turnT = 1; orbitNow = 0; fwdT = 0; alignK = 0; recOn = false; }
@@ -1028,6 +1283,7 @@ export function create(ctx) {
       if (m === mode) return mode;
       status();
       if (follow()) handYawBack();                 // leaving the tether (not while owned / flying)
+      occYaw = 0; whReset();
       mode = m;
       azFrom = azTo = p.azimuth; azT = 1;
       anchor.ok = false;                           // the next tether frame seeds A at cur.azimuth
@@ -1052,6 +1308,7 @@ export function create(ctx) {
       // a landing snapped before the next update: keep the lens behind the machine
       if (wasFlying && !flyNow && !follow()) handYawBack();
       wasOwned = ownNow; wasFlying = flyNow;
+      occYaw = 0; whReset();                       // a cut starts with no whisker offset (§6.4)
       const pl0 = ctx.systems.player?.position;
       zoneK = pl0 ? zoneAt(pl0.x, pl0.z) : 0;    // settled, not damped: a screenshot gets one frame
       revealT = 0; revealK = 0;
@@ -1073,6 +1330,16 @@ export function create(ctx) {
       // so swallow the banner that follows it (and keeps --view renders exact)
       revealMute = 0.8; lastHere = ctx.systems.ui?.here ?? null;
       azFrom = azTo = p.azimuth; azT = 1; cine = null; shakeAmp = 0; idle = 1;
+      // the collider sensors settle at once (§4.5, §4.6, §6.4): density at its goal, then the local list
+      // (the held goal restarts from 0, so a snap reads the same wherever the lens was before it: A12)
+      dKheld = 0;
+      if (densOff()) { dK = 0; densOcc = 0; } else { densRead(); dK = dKheld; }
+      densT = DENS_EVERY;
+      densDist = densDistGoal();
+      const elB = cur.elevation + tiltNow;         // the framing's base elevation (no lift, no density)
+      densEl = Math.max(0, Math.min(densElGoal(), skyRoom(elB)));
+      refreshLocal(); localT = LOCAL_EVERY;
+      const d0 = cur.distance + densDist;          // the framing's distance, density's response included
       // a cut starts on the body (§6.4): no lead, and no hop damping (the feet count as grounded)
       lead.x = 0; lead.z = 0; hopRef = pl0 ? pl0.y : NaN;
       desiredTarget(target);
@@ -1080,28 +1347,29 @@ export function create(ctx) {
       cutHits.clear(); plainHits.clear(); shellBy = null; shellDolly = Infinity; colRun = 0; colSweeps = 0;
       instC = 0; instJ = 0; instAccCut = 0; instAccPlain = 0; instPrevCut = 0; instPrevPlain = 0;
       cutTally(0, 0);                              // no reading from before the cut leaks into its first pass
-      sweepLift = 0; sweepDolly = Infinity; lastDolly = Infinity; occLift = 0; occDist = cur.distance;
+      sweepLift = 0; sweepDolly = Infinity; lastDolly = Infinity; occLift = 0; occDist = d0;
       clearRun = 0; liftMaxRun = 0; giveUp = false; liftCap = p.occLiftMax; liftAnchor.set(NaN, 0, 0); giveUpAt.set(NaN, 0, 0);
+      terrainLift = 0; terrainGoal = 0; elBasePrev = NaN;
       ctx.scene.updateMatrixWorld(true);
       refreshCandidates(); candT = 0; sweepT = 0;
-      const el0 = cur.elevation + tiltNow;
+      const el0 = elB + densEl;
       // Settle the sweep in one go, so a single-frame screenshot is right. Each
       // pass re-measures from the lens the previous pass asked for; inside a
       // snap the tilt only climbs, so ten passes always converge (and leave two
       // spare for the give-up latch to fire when the tilt is not working).
       const passes = free ? 1 : 10;
       for (let i = 0; i <= passes; i++) {
-        const oc = occlude(target, cur.azimuth, cur.elevation, cur.distance, Math.min(cur.distance, occDist));
+        const oc = occlude(target, cur.azimuth, cur.elevation + densEl, d0, Math.min(d0, occDist));
         colRun = oc.trig ? colRun + 1 : 0;
         // §5.2: the window settles open in a snap wherever it is needed (cutK is set directly below), and
         // then the ladder holds still: the lens stays at the stop, no tilt
         winCarry = p.cut !== 0 && !cutSweepClear && (cutNeedA || colTrigger());
         const colOk = colAssist();
-        occLift = winCarry ? 0 : clamp(Math.max(oc.lift, sweepLift), 0, liftMaxNow(el0));
-        occDist = winCarry ? cur.distance : Math.max(6, Math.min(cur.distance, colOk ? oc.dist : cur.distance, sweepDolly, shellDolly));
-        place(cur.azimuth, el0 + occLift, Math.min(cur.distance, occDist), target);
+        occLift = winCarry ? 0 : clamp(Math.max(oc.lift, sweepLift), 0, liftMaxNow(elB));
+        occDist = Math.max(6, winCarry ? Math.min(d0, sweepDolly, shellDolly) : Math.min(d0, colOk ? oc.dist : d0, sweepDolly, shellDolly));
+        place(cur.azimuth, el0 + occLift, Math.min(d0, occDist), target);
         if (free || i === passes) break;
-        lensAt(cur.azimuth, el0 + occLift, cur.distance, target, idealPos);
+        lensAt(cur.azimuth, el0 + occLift, d0, target, idealPos);
         lastSweepFrom.copy(idealPos); sweepAim.copy(target);
         // first pass looks at everything (a screenshot gets no second chance);
         // the rest only have to confirm the tilt, so they take a wide budget
@@ -1109,6 +1377,16 @@ export function create(ctx) {
         sweepOcclusion(idealPos, cam.position, i === 0 ? Infinity : p.occBudget * 3);
         applyCull();
         if (colRun) colSweeps++;
+      }
+      if (!free && pl0) {
+        // the terrain lift settles at its goal (§4.7: so --el on a slope is exact), from the lens the ladder settled
+        lensAt(cur.azimuth, el0 + occLift, Math.min(d0, occDist), target, terrV);
+        terrainGoal = terrainNeed(pl0, terrV); terrainLift = terrainGoal;
+        // density's elevation keeps to the sky room the settled lifts leave (mode 2 proper)
+        const dRoom = Math.max(0, Math.min(densEl, skyRoom(elB) - occLift - terrainLift));
+        if (terrainLift > 0 || dRoom !== densEl) { densEl = dRoom; place(cur.azimuth, elB + densEl + occLift + terrainLift, Math.min(d0, occDist), target); }
+        // one deterministic whisker reading (§6.4): every candidate, from the settled framing; no switch
+        if (follow() && !pinned) { whOffsets(); for (let k = 0; k < 5; k++) whEval(k, pl0, elB + densEl + occLift + terrainLift, Math.min(d0, occDist), target); }
       }
       if (!free) {
         fadeBlockers(1, cam.position, target);
@@ -1149,6 +1427,7 @@ export function create(ctx) {
         cam.fov = modeFov; cam.updateProjectionMatrix();
         anchor.ok = false; resetTether();          // the tether resumes from cur.azimuth
         lead.x = 0; lead.z = 0;
+        occYaw = 0; whReset();                     // …with no whisker offset (§6.4); the pin stays (§6.1)
         ctrlAz = wrap(cur.azimuth + occYaw);
         wasOwned = ownNow; wasFlying = flyNow;
         candT = 0; sweepT = 0; sweepLift = 0; sweepDolly = Infinity; lastDolly = Infinity; shellDolly = Infinity; clearRun = 0; liftMaxRun = 0; giveUp = false; liftCap = p.occLiftMax; liftAnchor.set(NaN, 0, 0); giveUpAt.set(NaN, 0, 0);
@@ -1157,6 +1436,12 @@ export function create(ctx) {
     },
     setParams(np) {
       Object.assign(p, np);
+      // THE PIN (§6.1): an explicit elevation or distance mutes density, the whiskers and path alignment
+      if (np.elevation !== undefined || np.distance !== undefined) {
+        const P = ctx.systems.player?.position;
+        pinned = true; pinX = P ? P.x : NaN; pinZ = P ? P.z : NaN;
+        if (occYaw !== 0 || wGoal !== 0) { status(); whiskerBake(); }
+      }
       if (np.azimuth !== undefined) { azFrom = azTo = np.azimuth; azT = 1; azExt = true; }
       // the "no extra tilt" reference follows an explicit distance, except while a
       // vehicle or the flight owns the distance (§2)
@@ -1203,6 +1488,24 @@ export function create(ctx) {
     get occMs() { return occMs; },
     /** The see-through window's strength this frame, 0..1 (§5.1; 0 off screen, free, cut 0, in a noTilt hold). */
     get cutK() { return cutEff; },
+    /** The clear-side whisker yaw (rad, §4.4) on top of the tether: mode 2 proper only, 0 everywhere else. */
+    get occYaw() { return occYaw; },
+    /** Density (§4.5), 0..1: forced 0 in mode 3, owned, flying, under a shot, pinned; frozen while looking. */
+    get densityK() { return dK; },
+    /** The terrain whisker's lift (rad, §4.7, ≤ terrainLiftMax). */
+    get terrainLift() { return terrainLift; },
+    /** A setParams elevation / distance holds density, the whiskers and path alignment off (§6.1). */
+    get pinned() { return pinned; },
+    /** QA (allocates): density's fan reading, held goal, k, its applied el / dist, and the collider sensors. */
+    get densityState() { return { occ: densOcc, held: dKheld, k: dK, el: densEl, dist: densDist, off: densOff(), terrainGoal, ...dens.stats }; },
+    /** QA (allocates): the whiskers' state (§4.4). */
+    get whiskerState() {
+      return { on: wOn, goal: wGoal, yaw: occYaw, offsets: [...wOff], clear: [...wClr], blockT: wBlkT, betterT: wBetT, better: wBetK, sinceSwitch: wSwT, zeroClearT: wZeroT };
+    },
+    /** Mode 1's Q/E hint (§4.4): { key: 'Q' | 'E' | null, t: s left, seq } — shared object, read it, do not keep it. */
+    get hint() { return hintOut; },
+    /** The collider sensors (camera/density.js): top(c), the local list, the fan — for QA and tools. */
+    get density() { return dens; },
     /** The window's inputs, for QA: need (a) from the sweep, the collider run (b), rays, grow, hold. */
     get cutState() {
       // by / plainBy: what the window's reading holds (mesh name → body-ray bits; '[inst]' = the instance clouds)
@@ -1441,7 +1744,7 @@ export function create(ctx) {
       const f = ctx.systems.player?.facing;
       if (free || flyNow || !Number.isFinite(f)) return false;
       fwdT = 0; alignK = 0; manualT = 0;
-      if (mode === 2 && !ownNow) { recOn = true; turnT = 1; turnTotal = 0; turnDone = 1; return true; }
+      if (mode === 2 && !ownNow) { whiskerBake(); recOn = true; turnT = 1; turnTotal = 0; turnDone = 1; return true; }
       snapTo(Math.round((f + Math.PI) / STEP) * STEP);
       return true;
     },
@@ -1519,6 +1822,7 @@ export function create(ctx) {
       const ownerAz = azExt || p.azimuth !== lastPAz;
       if (ownNow && !wasOwned && mode === 2 && !flyNow) {
         if (!ownerAz) handYawBack();
+        occYaw = 0; whReset();                     // owned: no whiskers (§2); the owner's aim, or the bearing kept above
         if (snapFresh && !cine) api.snap();
         else {
           modeFov = fovGoalMode(); pitchBase = 0;
@@ -1530,6 +1834,11 @@ export function create(ctx) {
       // instead of whipping back to the pre-flight azimuth.
       if (wasFlying && !flyNow && !follow()) handYawBack();
       wasOwned = ownNow; wasFlying = flyNow;
+      // the pin lets go once he has walked PIN_WALK u from where it was set (live play only, §6.1)
+      if (pinned && !ctx.shot && pl?.position && Math.hypot(pl.position.x - pinX, pl.position.z - pinZ) >= PIN_WALK) pinned = false;
+      // the local collider list (§4.6): occlude() and the whiskers read it; every LOCAL_EVERY s
+      localT -= dt;
+      if (localT <= 0) { localT = LOCAL_EVERY; refreshLocal(); }
       manualT += dt;
       readAxis(inp);
       // the path under his feet, once a frame: path alignment (tether) and the lead's anticipation read it
@@ -1540,7 +1849,8 @@ export function create(ctx) {
       const busyE = !!ctx.systems.interaction?.nearest?.();
       // V (§3): tap = recentre, hold = look. While the look is on it owns the mouse, Q/E, the wheel and WASD.
       const looking = lookInput(dt, inp, pl, busyE);
-      const turn = (d) => { if (tOn) { turnTether(d); manualT = 0; alignK = 0; recOn = false; } else startSnap(d); };
+      // a manual orbit cancels the whiskers (§4.4): their offset folds into the tether, then the orbit acts
+      const turn = (d) => { if (tOn) { whiskerBake(); turnTether(d); manualT = 0; alignK = 0; recOn = false; } else startSnap(d); };
       if (!looking) {
         if (inp.pressed.has('KeyQ')) turn(+STEP);
         if (inp.pressed.has('KeyE') && !busyE) turn(-STEP);
@@ -1549,7 +1859,7 @@ export function create(ctx) {
         // set pointer.orbit (input contract v3, CAMERA_SPEC §6.2); touch writes either.
         const orbiting = inp.pointer.down || inp.pointer.orbit;
         if (orbiting && inp.pointer.dragDX) {
-          if (tOn) { orbitNow -= inp.pointer.dragDX * 0.006; manualT = 0; alignK = 0; recOn = false; }
+          if (tOn) { whiskerBake(); orbitNow -= inp.pointer.dragDX * 0.006; manualT = 0; alignK = 0; recOn = false; }
           else { p.azimuth -= inp.pointer.dragDX * 0.006; azFrom = azTo = p.azimuth; azT = 1; }
         }
         if (orbiting && inp.pointer.dragDY) { p.elevation = clamp(p.elevation - inp.pointer.dragDY * 0.004, p.minElev, p.maxElev); if (tOn) { manualT = 0; alignK = 0; } }
@@ -1572,6 +1882,7 @@ export function create(ctx) {
       // ── azimuth ─────────────────────────────────────────────────────────
       // FOLLOW / flying: the tether (§4.2). It never writes p.azimuth — that
       // re-tripped cave.js's manual-turn detector every frame.
+      tetherAuto = 0;
       if (tOn) cur.azimuth = tether(dt, pl);
       else if (azT < 1) {
         // eased 45° snap (falls back to damping for drag / external setParams)
@@ -1579,6 +1890,29 @@ export function create(ctx) {
       } else cur.azimuth = lerpAngle(cur.azimuth, p.azimuth, 1 - Math.exp(-7 * dt));
       cur.elevation = damp(cur.elevation, goalElev(), 6, dt);
       cur.distance = damp(cur.distance, goalDistNow(), 5, dt);
+
+      // ── clear-side whiskers (§4.4): mode 2 proper, on foot, not pinned; frozen while looking ──
+      // (read against last frame's aim and lens: the sweep's reading they arm on is last frame's too)
+      if (!(follow() && !pinned && pl?.position)) { if (occYaw !== 0 || wGoal !== 0 || wOn) whiskerBake(); wOn = false; }
+      else if (!lookLive) {
+        const held = vPend || ((inp.pointer.down || inp.pointer.orbit) && !!(inp.pointer.dragDX || inp.pointer.dragDY));
+        whiskerStep(dt, pl.position, cur.elevation + tiltNow + densEl + occLift + terrainLift, Math.min(cur.distance + densDist, occDist), target, held);
+      }
+      // mode 1 gets a hint instead (§4.4): the chip pulses the Q or E keycap
+      hintStep(dt, pl, busyE);
+
+      // ── density (§4.5): the 4 Hz sight fan → dK; forced 0 in mode 3, owned, flying, under a shot, pinned;
+      // frozen while looking. The distance response is here (≤ 2.5 u/s); the elevation one shares the
+      // automatic-elevation budget with the occlusion tilt and the terrain lift, after the ladder (A10).
+      if (!lookLive) {
+        if (densOff()) { dK = 0; dKheld = 0; densT = 0; }
+        else {
+          densT -= dt;
+          if (densT <= 0) { densT = DENS_EVERY; densRead(); }
+          dK = damp(dK, dKheld, p.densityRate, dt);
+        }
+        densDist += clamp(densDistGoal() - densDist, -DENS_DIST_RATE * dt, DENS_DIST_RATE * dt);
+      }
 
       // ── movement basis (§4.3) ───────────────────────────────────────────
       // While a movement key (or the stick) is held, controlAzimuth chases the
@@ -1643,7 +1977,7 @@ export function create(ctx) {
       // ── compose final view (+ look-up, + cinematic blend) ───────────────
       // The mode's pitch goes in BEFORE the blends, so the look-up and a shot
       // lerp it toward their own pitch exactly as they do the rest.
-      let az = cur.azimuth + occYaw, el = cur.elevation + brEl + tiltNow, dist = cur.distance + brDist;
+      let az = cur.azimuth + occYaw, el = cur.elevation + brEl + tiltNow, dist = cur.distance + densDist + brDist;
       let fovGoal = modeFov, pitch = pitchBase, holdAng = 0, keepM = 1;   // keepM: the mode pitch's share after the blends
       tmp.copy(target);
       const az0 = az, el0 = el, dist0 = dist;     // the gameplay framing, before any look offset
@@ -1670,6 +2004,7 @@ export function create(ctx) {
         fovGoal = lerp(fovGoal, p.lookFov, lookK);
         pitch = lerp(pitch, p.lookPitch, lookK); keepM *= 1 - lookK;
       }
+      cineW = 0;
       if (cine) {
         cine.t += dt;
         let w;
@@ -1680,6 +2015,8 @@ export function create(ctx) {
         if (cine) {
           const o = cine.o;
           toVec(o.target ?? tmp, cineTgt);
+          cineW = w;
+          az -= occYaw * w;                        // the whisker offset fades out under a shot (§4.4)
           az = lerpAngle(az, o.azimuth ?? az, w);
           el = lerp(el, (o.elevation ?? el), w);
           dist = lerp(dist, o.distance ?? dist, w);
@@ -1707,9 +2044,11 @@ export function create(ctx) {
       // On the way home the collider pass and the sweep read the framing the look returns to (az0/el0/dist0 on
       // the target), not the half-returned lens: that is the framing the ladder and the window serve.
       const ladHold = lookLive, lookBack = lookLive && !lookOn;
+      // (density's elevation is part of the framing's elevation, §2: the collider pass measures from it)
+      const elD = densEl * (1 - cineW);
       const want = lookOn ? occOut
-        : lookBack ? occlude(target, az0, el0, dist0, Math.min(dist0, occDist))
-          : occlude(tmp, az, el, dist, Math.min(dist, occDist));   // occDist: where the lens stood last frame
+        : lookBack ? occlude(target, az0, el0 + elD, dist0, Math.min(dist0, occDist))
+          : occlude(tmp, az, el + elD, dist, Math.min(dist, occDist));   // occDist: where the lens stood last frame
       if (lookOn) { occOut.dist = dist; occOut.lift = 0; occOut.trig = false; }
       colRun = want.trig ? colRun + 1 : 0;       // the window's collider trigger needs two frames running
       if (!colRun) colSweeps = 0;
@@ -1731,7 +2070,7 @@ export function create(ctx) {
         if (!ladHeld) { ladHoldR = dist0 > 1e-6 ? Math.min(1, occDist / dist0) : 1; if (!lookOn) ladRelR = ladHoldR; }
         if (lookOn) ladHoldR = damp(ladHoldR, 1, 3.5, dt);
         else {
-          const dg = winCarry ? dist0 : Math.min(colOk ? want.dist : dist0, sweepDolly, shellDolly);
+          const dg = winCarry ? Math.min(dist0, sweepDolly, shellDolly) : Math.min(colOk ? want.dist : dist0, sweepDolly, shellDolly);
           const gR = dist0 > 1e-6 ? clamp(dg / dist0, 0, 1) : 1;
           ladBackG = ladBackG === ladBackG ? damp(ladBackG, gR, gR < ladBackG ? 16 : 3.5, dt) : gR;
           const w = ladRelK > 1e-4 ? clamp(vLookK / ladRelK, 0, 1) : 0;
@@ -1739,10 +2078,13 @@ export function create(ctx) {
         }
         occDist = dist * ladHoldR;
       } else {
-        const dollyGoal = winCarry ? dist : Math.min(colOk ? want.dist : dist, sweepDolly, shellDolly);
+        // while the window carries the frame the collider pass's guess lets go, but a dolly the sweep holds for an
+        // UNPATCHED blocker (sweepDolly / shellDolly: patched hits never dolly) stays — the window cannot open that one
+        const dollyGoal = winCarry ? Math.min(dist, sweepDolly, shellDolly) : Math.min(colOk ? want.dist : dist, sweepDolly, shellDolly);
         occDist = dollyGoal < occDist ? damp(occDist, dollyGoal, 16, dt) : damp(occDist, dollyGoal, 3.5, dt);
       }
       ladHeld = ladHold;
+      const ol0 = occLift;
       if (!ladHold) {
         const liftGoal = winCarry ? 0 : clamp(Math.max(want.lift, sweepLift), 0, liftMaxNow(el));
         // λ5 up / λ2.5 down (§4.8), and never faster than occLiftRate: a fresh 0.06 collider tilt at λ5 alone
@@ -1755,7 +2097,28 @@ export function create(ctx) {
       // The DOLLY still runs — pulling the lens in front of a blocker changes
       // nothing angular, and it is the only thing that keeps a merged district
       // out of the shot.
-      place(az, el + occLift * (1 - holdAng), Math.min(dist, occDist), tmp);
+      // AUTOMATIC ELEVATION (A10: ≤ 0.15 rad/s together): the occlusion tilt moves first (its own occLiftRate cap),
+      // then the terrain lift (§4.7: λ3 up / λ1.5 down, ≤ terrainLiftMax) and density's elevation (≤ 0.12 rad/s)
+      // share what is left of the same occLiftRate budget. Both hold still while looking, as the ladder does.
+      // (net: this frame's signed automatic change so far — the occlusion tilt and the base framing's own
+      // automatic ease, e.g. the landmark reveal's tilt or the zone pitch)
+      const elBase = cur.elevation + tiltNow + brEl;
+      if (!ladHold) {
+        const R = p.occLiftRate * dt;
+        let net = (occLift - ol0) + (elBasePrev === elBasePrev ? elBase - elBasePrev : 0);
+        lensAt(az, el + densEl * (1 - cineW) + occLift * (1 - holdAng), Math.min(dist, occDist), tmp, terrV);
+        terrainGoal = pl?.position ? terrainNeed(pl.position, terrV) : 0;
+        const nt = damp(terrainLift, terrainGoal, terrainGoal > terrainLift ? 3 : 1.5, dt);
+        const dT = elStep(nt - terrainLift, net, R);
+        terrainLift += dT; net += dT;
+        // density's elevation, inside the mode-2 sky room the occlusion tilt and the terrain lift leave; a drop
+        // the sky room forces may run as fast as the lifts that forced it rise (the net change stays in budget)
+        const gD = Math.max(0, Math.min(densElGoal(), skyRoom(el) - occLift - terrainLift));
+        const cDown = DENS_EL_RATE * dt + Math.max(0, occLift - ol0) + Math.max(0, dT);
+        densEl += elStep(clamp(gD - densEl, -cDown, DENS_EL_RATE * dt), net, R);
+      }
+      elBasePrev = elBase;
+      place(az, el + densEl * (1 - cineW) + (occLift + terrainLift) * (1 - holdAng), Math.min(dist, occDist), tmp);
 
       // ── shake ───────────────────────────────────────────────────────────
       if (shakeT > 0) {
@@ -1781,8 +2144,9 @@ export function create(ctx) {
         // Measure from the UNDOLLIED stop: if the sweep looked from where the
         // dolly already put the lens, the blocker would read as gone and the
         // lens would spring back out, one frame on, one frame off.
-        if (lookBack) { lensAt(az0, el0 + occLift, dist0, target, idealPos); sweepAim.copy(target); }
-        else { lensAt(az, el + occLift, dist, tmp, idealPos); sweepAim.copy(tmp); }
+        // (…with every automatic lift the lens carries: the occlusion tilt, the terrain lift, density's elevation)
+        if (lookBack) { lensAt(az0, el0 + densEl * (1 - cineW) + occLift + terrainLift, dist0, target, idealPos); sweepAim.copy(target); }
+        else { lensAt(az, el + densEl * (1 - cineW) + occLift + terrainLift, dist, tmp, idealPos); sweepAim.copy(tmp); }
         lastSweepFrom.copy(idealPos);
         // the look lens's sweeps must not move the ladder's latches (on the way home they read the real framing)
         if (lookOn) ladderSave();
@@ -1838,7 +2202,8 @@ export function create(ctx) {
    */
   const occOut = { dist: 0, lift: 0, trig: false };
   function occlude(tgt, az, el, dist, lensD = dist) {
-    const cols = ctx.colliders;
+    // the LOCAL list (§4.6: everything within 40 u of him, refreshed every 0.5 s) — same math, ~10× fewer tests
+    const cols = dens.local;
     const out = occOut;
     out.dist = dist; out.lift = 0; out.trig = false;
     // the trigger reads the REAL lens: a collider the old dolly has already put the lens in front of is
@@ -1849,16 +2214,14 @@ export function create(ctx) {
     const dx = Math.sin(az) * ce, dz = Math.cos(az) * ce, dy = Math.sin(el);
     const a = dx * dx + dz * dz;
     if (a < 1e-5) return out;
-    // Nobody publishes a collider height, so the two fixes assume different
-    // things — and that is the whole trick:
-    //   · DOLLY, for a mass sitting right in front of the lens. Giant candy is
-    //     20-35 units tall, so up there we must NOT assume props are short.
-    //     The lens may only come in to `floor` (dollyFloor(): 62% of the goal,
-    //     never under 14 u outdoors, §5.2), which is what keeps it from diving
-    //     into the candy forest to dodge a lollipop stick.
-    //   · TILT, for a mass near the player, which the lens can never get in
-    //     front of. Here we assume ~6 units (village props, posts, benches);
-    //     guessing tall would tip the camera up in every dense street.
+    // A collider's height is top(c) (camera/density.js, CAMERA_SPEC §4.5 — the one rule density, the
+    // whiskers and this pass share): Contract-A relative h, a legacy absolute top read conservatively,
+    // or a guess (6 u a circle, 8 u a box) where nobody published one. Compared in world y with the sight
+    // line, which climbs dy per unit from the aim point (tgt.y). Two fixes:
+    //   · DOLLY, for a mass sitting right in front of the lens. The lens may only come in to `floor`
+    //     (dollyFloor(): 62% of the goal, never under 14 u outdoors, §5.2), which is what keeps it from
+    //     diving into the candy forest to dodge a lollipop stick.
+    //   · TILT, for a mass near the player, which the lens can never get in front of (≤ colLiftMax).
     // Dollying is only safe on a steep sight line: near the horizontal, the gap
     // between the player and a blocker is as likely to be the inside of a cat
     // house (walls are geometry, colliders are a few circles) as it is open air.
@@ -1897,19 +2260,19 @@ export function create(ctx) {
         if (disc <= 0) continue;
         t0 = (-bb - Math.sqrt(disc)) / (2 * a);    // where the sight line enters it
       }
+      const trigOk = !trig && r >= 1.2 && t0 > 1.2 && t0 < trigFar;
+      if (!trigOk && (t0 <= 1.2 || t0 >= best)) continue;
+      const rise = dy * t0;                           // sight-line height at the blocker, over the aim point
+      const topRel = dens.top(c) - tgt.y;             // the collider's top, over the aim point
       // the window's collider trigger (b): walls and trunks, never lamp posts or bollards
-      if (!trig && r >= 1.2 && t0 > 1.2 && t0 < trigFar && dy * t0 < (c.h ?? 14) - 1.0) trig = true;
+      if (trigOk && rise < topRel) trig = true;
       if (t0 <= 1.2 || t0 >= best) continue;
-      const rise = dy * t0;                           // sight-line height at the blocker
       if (mayDolly && r >= 1.2 && t0 - 0.5 >= floor) {
-        if (rise < (c.h ?? 14) - 1.0) best = t0 - 0.5;
+        if (rise < topRel) best = t0 - 0.5;
       } else if (t0 > 2.0 && r >= 1.5) {
-        // A mass we cannot get in front of. Nobody publishes collider heights,
-        // so this guess is wrong as often as it is right — which is exactly why
-        // the tilt is capped at 7°: a false positive costs a slightly steeper
-        // frame, never the authored composition.
-        const top = (c.h ?? 6) - 1.0;
-        if (rise < top) lift = Math.max(lift, clamp(Math.asin(clamp(top / t0, -1, 1)) - el, 0, p.colLiftMax));
+        // A mass we cannot get in front of. Its height is often a guess — which is exactly why the tilt is
+        // capped at colLiftMax: a false positive costs a slightly steeper frame, never the composition.
+        if (rise < topRel) lift = Math.max(lift, clamp(Math.asin(clamp(topRel / t0, -1, 1)) - el, 0, p.colLiftMax));
       }
     }
     out.dist = Math.max(floor, best); out.lift = lift; out.trig = trig;
@@ -2854,7 +3217,8 @@ export function create(ctx) {
   // otherwise the poll on ctx.systems.ui.here in update() does the same job.
   ctx.events.on('ui:banner', () => { if (revealMute <= 0) api.reveal(); });
   // a teleport ends a look at once (§3), whoever moved him (debug.teleport also snaps)
-  ctx.events.on('player:teleport', () => { lookReset(); recOn = false; });
+  // …and clears the pin (§6.1: render.mjs / camvis re-pin exactly the views that carry --el / --dist)
+  ctx.events.on('player:teleport', () => { lookReset(); recOn = false; pinned = false; });
 
   api.snap();
   return api;

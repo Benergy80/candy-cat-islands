@@ -9,8 +9,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Google Fonts (rounded, friendly). Degrades to Trebuchet/system fonts offline. */
+// The faces the title card and the HUD letter with. Requested the moment the
+// stylesheet lands (not when text first lays out in them), so the title's logo
+// is never revealed in the fallback face and then swapped.
+const FACES = ['800 1em "Baloo 2"', '700 1em "Baloo 2"', '900 1em "Nunito"', '700 1em "Nunito"', '600 1em "Nunito"', 'italic 700 1em "Nunito"'];
 export function injectFonts() {
-  if (document.getElementById('cci-fonts')) return;
+  if (typeof document === 'undefined' || !document.head || document.getElementById('cci-fonts')) return;
   const pre1 = document.createElement('link');
   pre1.rel = 'preconnect'; pre1.href = 'https://fonts.googleapis.com';
   const pre2 = document.createElement('link');
@@ -18,6 +22,9 @@ export function injectFonts() {
   const css = document.createElement('link');
   css.id = 'cci-fonts'; css.rel = 'stylesheet';
   css.href = 'https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:ital,wght@0,600;0,700;0,900;1,700&display=swap';
+  css.addEventListener('load', () => {
+    try { for (const f of FACES) document.fonts?.load?.(f)?.catch?.(() => {}); } catch (e) { /* no FontFaceSet: the swap still happens */ }
+  }, { once: true });
   document.head.append(pre1, pre2, css);
 }
 
@@ -558,6 +565,18 @@ body.cci-touch #ui .cci-atlas-close em.t { display: inline; }
 }
 /* the HUD waits underneath while the title is up */
 #ui.cci-titling > .cci:not(.cci-intro):not(.cci-fade):not(.cci-nvig):not(.cci-vig) { visibility: hidden !important; }
+/* CONTRACT K — the opening cinematic (ui.showHud(false) / #ui.cci-cinema): EVERY
+   panel goes, ours and other systems' (touch controls, pills, the flyer HUD),
+   except the fading title card, the fade, the night overlays, the skip hint
+   and touch.js's 'turn your phone' card — it PAUSES the game (the flight too),
+   so hiding it would leave a frozen frame with nothing to say why */
+#ui.cci-cinema > :not(.cci-intro):not(.cci-fade):not(.cci-nvig):not(.cci-vig):not(.cci-skip):not(.tch-rot):not(style) { visibility: hidden !important; }
+#ui .cci-skip {
+  right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(18px + env(safe-area-inset-bottom, 0px)); z-index: 60;
+  display: flex; align-items: center; gap: 5px; padding: 5px 13px 6px 8px; border-radius: 999px;
+}
+#ui .cci-skip-ico { width: 13px; height: 13px; color: var(--ink); flex: 0 0 auto; }
+#ui .cci-skip em { font: 800 11px/1 var(--fbody); font-style: normal; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-soft); }
 #ui .cci-ti-sr { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 #ui .cci-ti-sky {
   position: absolute; left: 0; right: 0; top: 0; height: 60vh; pointer-events: none;

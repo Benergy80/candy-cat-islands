@@ -201,6 +201,11 @@ export function createCandy(ctx, panel) {
 // under ctx.shot, a teach toast when the camera keeps losing him (raw body rays
 // ≥ 3/5 blocked for 2 s, or the density sensor over 0.6 for 5 s). This file
 // injects its own <style> for these (style.js belongs to the map-history owner).
+//
+// THE Q/E HINT (CAMERA_SPEC §4.4, §6.3). Mode 1 never turns itself; when the
+// camera has lost him behind something for 2 s and a 45° step would see him
+// clear, camera.hint names the key ('Q' or 'E', with its seq and seconds left):
+// the chip shows a keycap row that pulses for those 2 s (at most once a minute).
 const CAM_MODES = [[1, 'iso'], [2, 'follow'], [3, 'top']];
 const CAM_REVEAL = 4;
 const CAM_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3', 'KeyV'];
@@ -222,6 +227,13 @@ const LOOK_CSS = `
 #ui .cci-cam-cap .cci-key { min-width: 17px; height: 17px; border-width: 2px; border-radius: 6px; box-shadow: 0 2px 0 var(--edge); font-size: 9.5px; padding: 0 4px; }
 #ui .cci-cam-cap .cci-key.gold { background: linear-gradient(180deg, #ffe9a8, var(--gold)); }
 #ui .cci-cam-pan { display: contents; }
+#ui .cci-cam-hint {
+  position: absolute; left: 0; bottom: calc(100% + 7px); display: flex; align-items: center; gap: 6px;
+  padding: 5px 11px 6px 9px; border-radius: 999px; white-space: nowrap;
+}
+#ui .cci-cam-hint em { font: 800 9.5px/1 var(--fbody); font-style: normal; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
+#ui .cci-cam-hint .cci-key { min-width: 17px; height: 17px; border-width: 2px; border-radius: 6px; box-shadow: 0 2px 0 var(--edge); font-size: 9.5px; padding: 0 4px;
+  background: linear-gradient(180deg, #ffe9a8, var(--gold)); will-change: transform; }
 #ui .cci-cam-v { margin-left: 2px; padding-left: 9px; border-left: 2px solid rgba(43,36,66,.16); }
 /* over the dialogue box (30), the hotbar (20) and the star pill (22); under the banner (40), cards and fades */
 #ui .cci-you { left: 0; top: 0; width: 0; height: 0; z-index: 32; }
@@ -269,12 +281,16 @@ export function createCamChip(ctx, panel) {
     .join('')
     + '<span class="cci-cam-seg cci-cam-v" data-m="v"><span class="cci-key">V</span><em>look</em></span>'
     + '<div class="cci-cam-cap cci-plate"><b>Looking</b><i>·</i><span class="cci-cam-pan"><span class="cci-key">WASD</span><em>pan</em><i>·</i></span>'
-    + '<em>mouse orbit</em><i>·</i><em>wheel zoom</em><i>·</i><em>release</em><span class="cci-key gold">V</span></div>';
+    + '<em>mouse orbit</em><i>·</i><em>wheel zoom</em><i>·</i><em>release</em><span class="cci-key gold">V</span></div>'
+    + '<div class="cci-cam-hint cci-plate"><span class="cci-key">Q</span><em>turn the view</em></div>';
   const segs = [...el.querySelectorAll('.cci-cam-seg:not(.cci-cam-v)')];
   const vSeg = el.querySelector('.cci-cam-v');
   const cap = el.querySelector('.cci-cam-cap');
   const capPan = el.querySelector('.cci-cam-pan');   // "WASD pan": not on a vehicle / flying (that look only orbits, §3)
   cap.style.display = 'none';
+  const hintEl = el.querySelector('.cci-cam-hint'), hintKeyEl = hintEl.querySelector('.cci-key');
+  hintEl.style.display = 'none';
+  let hintSeq = Number(ctx.systems?.camera?.hint?.seq) || 0, hintLeft = 0, hintShown = false, hintPh = 0;
   const anim = panel(el, { rise: 0.2, fall: 0.16, y: 10, s: 0.9 });
   let mode = 0, pop = 0, reveal = 0;
   let vLit = false, vPop = 0, capK = 0, capShown = false, capVeh = false;
@@ -377,6 +393,16 @@ export function createCamChip(ctx, panel) {
         cap.style.opacity = Math.min(1, capK * 1.6).toFixed(3);
         cap.style.transform = `translateY(${((1 - capK) * 6).toFixed(2)}px)`;
       }
+      // the Q/E hint (§4.4): a new camera.hint shows the keycap row for its seconds, pulsing; a look takes the slot
+      const h = cam?.hint;
+      if (h && Number(h.seq) !== hintSeq) {
+        hintSeq = Number(h.seq) || 0;
+        if (h.key === 'Q' || h.key === 'E') { hintKeyEl.textContent = h.key; hintLeft = Number(h.t) > 0 ? Number(h.t) : 2; hintPh = 0; reveal = Math.max(reveal, hintLeft + 0.4); }
+      }
+      if (hintLeft > 0) hintLeft = Math.max(0, hintLeft - dt);
+      const hintOn = hintLeft > 0 && !looking && capK <= 0;
+      if (hintOn !== hintShown) { hintShown = hintOn; hintEl.style.display = hintOn ? '' : 'none'; if (!hintOn) hintKeyEl.style.transform = ''; }
+      if (hintOn) { hintPh += dt; hintKeyEl.style.transform = `scale(${(1 + 0.22 * Math.abs(Math.sin(hintPh * Math.PI * 1.5))).toFixed(3)})`; }
       placeYou(cam, lk);
       teach(dt, cam, lk);
       anim.step(dt);
