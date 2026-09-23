@@ -1,0 +1,14 @@
+{
+ "planes_biplane_game": {"pos": [-169, -68.5], "time": 10, "frames": 110, "dist": 31, "el": 0.64, "fov": 30, "call": {"planes.debugPose": [{"biplane": 0.6}, true], "planes.debugLookUp": ["biplane"]}},
+ "planes_drop_game": {"pos": [-176.2, 44.3], "time": 11, "frames": 110, "az": 0.78, "dist": 31, "el": 0.64, "fov": 30, "call": {"planes.debugPose": [{"biplane": 0.2}, true], "planes.debugDrop": [-172.5, 47.5, 0.68]}},
+ "planes_shadow_game": {"pos": [-80, 32.6], "time": 12, "frames": 60, "az": 0.78, "dist": 31, "el": 0.64, "fov": 30, "call": {"planes.debugPose": [{"biplane": 0.04}, true]}},
+ "planes_close_biplane": {"pos": [-100, 62], "time": 10, "frames": 110, "call": {"planes.debugPose": [{"biplane": 0.1}, true], "planes.debugFrame": ["biplane", {"rel": 0.9, "el": 0.1, "dist": 17, "fov": 40}]}},
+ "planes_close_blimp": {"pos": [108, -6], "time": 10, "frames": 110, "call": {"planes.debugPose": [{"blimp": 0.5}, true], "planes.debugFrame": ["blimp", {"rel": 2.2, "el": -0.05, "dist": 44, "fov": 40, "dy": -2.5}]}},
+ "planes_close_jet": {"pos": [150, 5], "time": 10, "frames": 110, "call": {"planes.debugPose": [{"jet": [150, 5], "jetLane": 1}, true], "planes.debugFrame": ["jet", {"rel": 1.6, "el": 0.78, "dist": 34, "fov": 40}]}},
+ "planes_paper_game": {"pos": [106, 22], "time": 10, "frames": 110, "dist": 31, "el": 0.64, "fov": 30, "call": {"planes.debugPose": [{"paper": 0.71}, true], "planes.debugLookUp": ["paper"]}},
+ "planes_close_paper": {"pos": [78, 18], "time": 10, "frames": 110, "call": {"planes.debugPose": [{"paper": 0.7}, true], "planes.debugFrame": ["paper", {"az": 0.78, "el": 0.72, "dist": 36, "fov": 46, "dy": -6}]}},
+ "planes_overview": {"pos": [-42, 22], "free": [17.8, -7.9], "y": 43.5, "az": 1.05, "el": 0.1, "dist": 125, "fov": 56, "time": 10, "frames": 60, "call": {"planes.debugPose": [{"biplane": 0.98, "blimp": 0.95, "jet": [-60, -40], "paper": 0.35, "jetLane": 1}, true]}},
+ "planes_night_game": {"pos": [-169, -68.5], "time": 1.5, "frames": 110, "dist": 31, "el": 0.64, "fov": 30, "call": {"planes.debugPose": [{"biplane": 0.6}, true], "planes.debugLookUp": ["biplane"]}},
+ "planes_night_blimp": {"pos": [-42, 22], "time": 1.5, "frames": 60, "call": {"planes.debugPose": [{"blimp": 0.5, "biplane": 0.76, "paper": 0.2}, true], "planes.debugFrame": ["blimp", {"rel": 1.85, "el": 0.06, "dist": 70, "fov": 40}]}},
+ "planes_night_jet": {"pos": [-42, 22], "time": 1.5, "frames": 60, "call": {"planes.debugPose": [{"jet": [-90, 10], "jetLane": 1}, true], "planes.debugFrame": ["jet", {"rel": 1.45, "el": 0.3, "dist": 42, "fov": 40}]}}
+}

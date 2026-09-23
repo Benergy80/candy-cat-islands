@@ -65,6 +65,56 @@ export class SignAtlas {
     return this.cell(Math.min(760, worldW * dpu), Math.min(760, worldH * dpu), draw);
   }
   commit() { for (const p of this.pages) p.tex.needsUpdate = true; }
+  /**
+   * Mobile tier only (docs/BRIEF.md Contract I): after commit(), resample every
+   * page to half size (2048² → 1024²), cap anisotropy and release the 2048
+   * canvases (iOS caps total canvas memory). Cell UVs are normalised, so every
+   * sign still maps exactly; nothing may be drawn into the atlas afterwards.
+   */
+  halve(maxAniso = 4) {
+    for (const p of this.pages) {
+      const src = p.cv, w = Math.max(1, src.width >> 1), h = Math.max(1, src.height >> 1);
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      const g = cv.getContext('2d');
+      g.imageSmoothingEnabled = true; try { g.imageSmoothingQuality = 'high'; } catch (e) { /* older canvas */ }
+      g.drawImage(src, 0, 0, w, h);
+      src.width = 0; src.height = 0;
+      p.cv = cv; p.g = g;
+      p.tex.image = cv;
+      p.tex.anisotropy = Math.min(p.tex.anisotropy, maxAniso);
+      p.tex.needsUpdate = true;
+    }
+  }
+  /**
+   * Mobile tier only, after halve(): draw every page into ONE canvas (up to
+   * four 1024² pages on a 2 × 2 grid → 2048², still ≤ 2048) so every sign in
+   * town shares one `sign0` and one `signglow0` material — the town pools and
+   * each shell then cost one sign call instead of one per page. Returns the
+   * grid { C, R } for Kit.remapPages (a page-p UV (u, v) lands at
+   * ((col + u) / C, (R − 1 − row + v) / R)), or null when there is one page.
+   * Nothing may be drawn into the atlas afterwards.
+   */
+  combine() {
+    const n = this.pages.length;
+    if (n <= 1) return null;
+    const C = 2, R = Math.ceil(n / C);
+    const ps = this.pages[0].cv.width;
+    const cv = document.createElement('canvas'); cv.width = ps * C; cv.height = ps * R;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#f3ece0'; g.fillRect(0, 0, cv.width, cv.height);
+    let aniso = 4;
+    this.pages.forEach((p, i) => {
+      g.drawImage(p.cv, (i % C) * ps, Math.floor(i / C) * ps);
+      aniso = Math.min(aniso, p.tex.anisotropy);
+      p.cv.width = 0; p.cv.height = 0; p.tex.dispose();
+    });
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = aniso;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    this.pages = [{ cv, g, tex, x: 0, y: 0, shelf: 0 }];
+    return { C, R };
+  }
 }
 
 // ── drawing helpers ──────────────────────────────────────────────────────────

@@ -52,7 +52,16 @@ function puffBlob(r, puffs) {
   return out;
 }
 
-export function createClouds() {
+/**
+ * @param {object} [opts]
+ * @param {number} [opts.keep=1] fraction of the cloud field to actually draw
+ *   (the mobile tier passes ~0.55). The FULL field is still generated from the
+ *   same seed — every puff shape and every flock position is identical to the
+ *   desktop sky — and an evenly spaced subset is kept, so a phone sees the
+ *   same clouds in the same places, just fewer of them.
+ */
+export function createClouds(opts = {}) {
+  const keep = Math.min(1, Math.max(0.05, opts.keep ?? 1));
   const r = rng(hash('sky-clouds'));
   const uniforms = {
     uLit: { value: new THREE.Vector3(1, 1, 1) },
@@ -145,7 +154,6 @@ export function createClouds() {
   const batches = [];
   for (let v = 0; v < 2; v++) {
     const geo = puffBlob(r, v === 0 ? 6 : 5);
-    const mesh = new THREE.InstancedMesh(geo, material, PER_VARIANT);
     const seeds = new Float32Array(PER_VARIANT);
     const inst = [];
     // clouds come in loose flocks, not an even scatter
@@ -166,11 +174,21 @@ export function createClouds() {
         bobP: r.range(0, 6.28),
       });
     }
-    geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
+    // subset AFTER generation (the rng stream above is untouched by `keep`)
+    let kSeeds = seeds, kInst = inst;
+    if (keep < 1) {
+      kInst = []; const ks = [];
+      for (let i = 0; i < PER_VARIANT; i++) {
+        if (Math.floor((i + 1) * keep) > Math.floor(i * keep)) { kInst.push(inst[i]); ks.push(seeds[i]); }
+      }
+      kSeeds = new Float32Array(ks);
+    }
+    const mesh = new THREE.InstancedMesh(geo, material, kInst.length);
+    geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(kSeeds, 1));
     mesh.frustumCulled = false;
     mesh.castShadow = false; mesh.receiveShadow = false;
     group.add(mesh);
-    batches.push({ mesh, inst });
+    batches.push({ mesh, inst: kInst });
   }
 
   const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _m = new THREE.Matrix4();
@@ -199,5 +217,5 @@ export function createClouds() {
   }
 
   update(0);
-  return { group, uniforms, material, update, count: PER_VARIANT * 2 };
+  return { group, uniforms, material, update, count: batches[0].inst.length + batches[1].inst.length };
 }

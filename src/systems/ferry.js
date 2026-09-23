@@ -71,6 +71,66 @@ export function create(ctx) {
   const gull = buildSeagull();
   scene.add(gull.group);
 
+  // ── MOBILE TIER (ctx.state.mobile, read once here; BRIEF Contract I) ──────
+  // • shadows: only her body (hull + deck) and the captain cast — eyes, tail,
+  //   gangway, gate, bell, flag and the gull are too small to earn a shadow-pass
+  //   draw each on a phone (11 → 4 shadow draws at sea);
+  // • no PointLights: two lanterns joining the light count at dusk recompile
+  //   every lit program in the scene. The lantern shades (emissive) and the
+  //   lampFx halos + water smears carry the glow instead, a touch brighter;
+  // • her own water (hull foam, bow moustache, wake): Lambert instead of
+  //   Standard — all three are roughness 1, so the GGX term was buying nothing
+  //   but per-pixel cost over a lot of transparent sea.
+  const MOBILE = !!ctx.state.mobile;
+  const LAMPFX_GAIN = 1.3;               // mobile only: the halos stand in for the lights
+  // mobile only: the warm pool each lantern throws on the planks (what the
+  // PointLight painted on desktop) as ONE instanced pair of flat additive glows
+  // parented to the deck — one draw call, near the ferry, after dark.
+  let deckPools = null;
+  const POOL_GAIN = 0.58;
+  if (MOBILE) {
+    const keep = new Set([W.hull, W.deck]);
+    cap.group.traverse((n) => { if (n.isMesh) keep.add(n); });
+    for (const root of [W.group, gull.group]) {
+      root.traverse((n) => { if ((n.isMesh || n.isInstancedMesh) && n.castShadow && !keep.has(n)) n.castShadow = false; });
+    }
+    for (const l of W.lights) { if (l.parent) l.parent.remove(l); l.dispose?.(); }
+    W.lights.length = 0;
+    for (const m of [W.foam, W.bow, W.wake]) {
+      const std = m.material;
+      m.material = new THREE.MeshLambertMaterial({
+        color: std.color, map: std.map, vertexColors: std.vertexColors,
+        transparent: std.transparent, opacity: std.opacity,
+        emissive: std.emissive, emissiveIntensity: std.emissiveIntensity,
+        depthWrite: std.depthWrite, side: std.side,
+      });
+      std.dispose();
+    }
+    const pg = new THREE.PlaneGeometry(1, 1);
+    pg.rotateX(-Math.PI / 2);
+    pg.computeBoundingBox(); pg.computeBoundingSphere();   // the camera's blocker pass reads these
+    deckPools = new THREE.InstancedMesh(pg, new THREE.MeshBasicMaterial({
+      map: W.lampFx.material.map, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      color: 0xffc178, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    }), W.lampSpots.length);
+    deckPools.name = 'sugarfin-deckpools';
+    deckPools.castShadow = false; deckPools.receiveShadow = false;
+    deckPools.renderOrder = 6;
+    const D = W.DECK, po = new THREE.Object3D(), white = new THREE.Color(0, 0, 0);
+    for (let i = 0; i < W.lampSpots.length; i++) {
+      const [lx, , lz] = W.lampSpots[i];
+      // pulled inboard so the glow lands on the planks, not on the air past the rail
+      po.position.set(Math.sign(lx) * (D.halfX - 1.2), D.top + 0.05, clamp(lz, D.aft + 1.7, D.fore - 1.7));
+      po.scale.set(3.8, 1, 3.8);
+      po.updateMatrix();
+      deckPools.setMatrixAt(i, po.matrix);
+      deckPools.setColorAt(i, white);
+    }
+    deckPools.computeBoundingSphere();
+    deckPools.visible = false;
+    W.deck.add(deckPools);
+  }
+
   const DECK = W.DECK;
   const POSE = {
     wheel: { x: 0.0, y: DECK.top, z: 5.0, ry: -0.5, rx: 0 },
@@ -785,7 +845,7 @@ export function create(ctx) {
       const cam = ctx.camera.position;
       for (let i = 0; i < W.lampPivots.length; i++) {
         W.lampPivots[i].getWorldPosition(v1);
-        const k = night * (i ? 2 - flick : flick);
+        const k = MOBILE ? night * (i ? 2 - flick : flick) * LAMPFX_GAIN : night * (i ? 2 - flick : flick);
         const ang = Math.atan2(v1.x - cam.x, v1.z - cam.z);
         // halo, facing the lens
         glowD.position.copy(v1); glowD.position.y -= 0.55;
@@ -807,6 +867,17 @@ export function create(ctx) {
       }
       W.lampFx.instanceMatrix.needsUpdate = true;
       if (W.lampFx.instanceColor) W.lampFx.instanceColor.needsUpdate = true;
+    }
+    if (deckPools) {
+      deckPools.visible = night > 0.04;
+      if (deckPools.visible) {
+        for (let i = 0; i < W.lampSpots.length; i++) {
+          const k = night * (i ? 2 - flick : flick) * POOL_GAIN;
+          glowC.setRGB(k, k, k);
+          deckPools.setColorAt(i, glowC);
+        }
+        deckPools.instanceColor.needsUpdate = true;
+      }
     }
     // a warm ember drifts off each lamp every so often
     if (night > 0.35) {

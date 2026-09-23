@@ -116,7 +116,9 @@ export const SCENES = [
       { key: 'jogger', x: 111.4, z: 2.6, pose: 'stand', faceAt: [116.3, 2.9], look: 'pip' },
       { key: 'silas', x: 113.9, z: 5.7, pose: 'chat', faceAt: [116.3, 2.9], look: 'pip' },
       { key: 'velvet', x: 121.9, z: 3.8, pose: 'point', faceAt: [123.5, 6.0] },
-      { key: 'persimmon', x: 120.9, z: -5.3, pose: 'queue', faceAt: [119.3, -4.9], look: 'reginald' },
+      // (wave 3: the potted cone tree at 120.5,−4.8 took the old third place in
+      //  the queue; persimmon now waits at its shoulder, on the street side)
+      { key: 'persimmon', x: 120.2, z: -3.2, pose: 'queue', faceAt: [119.3, -4.9], look: 'reginald' },
     ],
   },
 
@@ -186,7 +188,9 @@ export const SCENES = [
     slots: [
       { key: 'mayor', x: 155.4, z: 12.6, pose: 'wave', face: 0.85, look: 'bramble', raised: 1 },
       { key: 'bramble', x: 152.6, z: 15.0, pose: 'point', faceAt: [155.4, 12.6], look: 'mayor', raised: 1 },
-      { key: 'quillby', x: 158.2, z: 11.4, pose: 'work', face: -0.35, raised: 1 },
+      // (the clerk takes the minutes from the Mayor's far side, turned to him —
+      //  stood behind him facing the same way, three cats read as a queue)
+      { key: 'quillby', x: 158.9, z: 12.9, pose: 'work', faceAt: [155.4, 12.6], raised: 1, mill: 1 },
     ],
   },
   // two on the square bench: one keeping watch, one out cold
@@ -204,17 +208,22 @@ export const SCENES = [
   // knots the way a set dresser would: a queue, an argument, a huddle round the
   // monument, three loaves cooking on the warm stone, and a pastry cart.
 
-  // A QUEUE OF SIX curving in from the east and climbing the steps. Each cat
-  // faces the back of the next one up the line, so the whole queue reads in
-  // three-quarter profile from the game camera instead of as six backs.
+  // A QUEUE OF SIX curving in from the east and climbing the steps. Not a
+  // train: the gaps are uneven (a queue bunches and stretches), nobody stands
+  // on the line exactly, the pair in the middle has turned to talk, one has
+  // sat down to wash about it and the back of the queue is leaning out to see
+  // what the hold-up is. The `mill` ones also look round and shuffle now and
+  // then (makeStageFn), so the knot is never a still life.
   {
     id: 'square_queue', hours: [7.8, 19.5],
+    // (the back half hooks round to the east: laid out straight, the line ran
+    //  exactly along the default lens's line of sight and read as a column)
     slots: [
-      { key: 'bobbin', x: 159.0, z: 3.6, pose: 'queue', faceAt: [157.6, 2.6], look: 'tilly', nudge: 1 },
-      { key: 'tilly', x: 157.6, z: 2.6, pose: 'sit', faceAt: [156.3, 1.6], nudge: 1 },
-      { key: 'barnaby', x: 156.3, z: 1.6, pose: 'queue', faceAt: [155.1, 0.5], look: 'oats', nudge: 1 },
-      { key: 'oats', x: 155.1, z: 0.5, pose: 'chat', faceAt: [156.3, 1.6], look: 'barnaby', nudge: 1 },
-      { key: 'maribel', x: 153.9, z: -0.6, pose: 'queue', faceAt: [152.6, -1.6], nudge: 1 },
+      { key: 'bobbin', x: 158.6, z: -0.1, pose: 'point', faceAt: [153.8, -0.9], nudge: 1, mill: 1 },
+      { key: 'tilly', x: 156.9, z: 0.7, pose: 'groom', faceAt: [152, 12.8], nudge: 1 },
+      { key: 'barnaby', x: 156.3, z: -1.05, pose: 'chat', faceAt: [155.2, -0.15], look: 'oats', nudge: 1, mill: 1 },
+      { key: 'oats', x: 155.2, z: -0.15, pose: 'gossip', faceAt: [156.3, -1.05], look: 'barnaby', nudge: 1 },
+      { key: 'maribel', x: 153.8, z: -0.9, pose: 'queue', faceAt: [152.6, -1.6], look: 'hugo', nudge: 1, mill: 1 },
       { key: 'hugo', x: 152.6, z: -1.6, pose: 'point', faceAt: [152, -6.5], y: SQUARE_STEP },
     ],
   },
@@ -227,7 +236,7 @@ export const SCENES = [
       { key: 'clementine', x: 157.0, z: 15.1, pose: 'point', faceAt: [152, 12.8] },
       { key: 'dexter', x: 157.2, z: 10.3, pose: 'chat', faceAt: [155.0, 13.2], look: 'clementine' },
       { key: 'peony', x: 152.9, z: 7.6, pose: 'sit', faceAt: [152, 12.8], look: 'dexter' },
-      { key: 'wallace', x: 147.2, z: 10.6, pose: 'stand', faceAt: [152, 12.8] },
+      { key: 'wallace', x: 147.2, z: 10.6, pose: 'stand', faceAt: [152, 12.8], mill: 1 },
     ],
   },
 
@@ -258,7 +267,7 @@ export const SCENES = [
     id: 'square_vendor', hours: [7.8, 19.5],
     slots: [
       { key: 'florentine', x: 142.6, z: -0.9, pose: 'work', faceAt: [143.5, 0.7], look: 'bertie', nudge: 1 },
-      { key: 'bertie', x: 143.5, z: 0.7, pose: 'queue', faceAt: [142.6, -0.9], look: 'florentine', nudge: 1 },
+      { key: 'bertie', x: 143.5, z: 0.7, pose: 'queue', faceAt: [142.6, -0.9], look: 'florentine', nudge: 1, mill: 1 },
     ],
   },
 
@@ -270,8 +279,12 @@ export const SCENES = [
   {
     id: 'street_bench', hours: [7.5, 19.4],
     slots: [
-      { key: 'nutmeg', x: 122.32, z: -5.05, pose: 'gossip', face: 0, look: 'olive', seat: 1 },
-      { key: 'olive', x: 123.68, z: -5.05, pose: 'sit', face: 0, look: 'nutmeg', seat: 1 },
+      // Wave 3: the street's potted shrub now stands ON the middle of this bench
+      // (box 2.1 × 2.1 at 122.85,−5.47), and nutmeg was sitting inside it. Olive
+      // keeps the free east end of the slat; nutmeg stands on the pavement in
+      // front of her, leaning in with the gossip.
+      { key: 'nutmeg', x: 124.75, z: -3.75, pose: 'chat', faceAt: [124.3, -5.05], look: 'olive' },
+      { key: 'olive', x: 124.3, z: -5.05, pose: 'sit', faceAt: [124.75, -3.75], look: 'nutmeg', seat: 1 },
     ],
   },
   {
@@ -327,14 +340,26 @@ const inWindow = (h, h0, h1) => (h0 <= h1 ? h >= h0 && h < h1 : h >= h0 || h < h
  * and hold the authored pose and facing.
  */
 export function makeStageFn(index) {
-  return function stage(cat, h) {
+  return function stage(cat, h, el = 0) {
     const list = index.get(cat.key);
     if (!list) return null;
     for (const e of list) {
       if (!inWindow(h, e.h0, e.h1)) continue;
       const s = e.slot;
+      let x = s.x, z = s.z, face = s.face, pose = s.pose;
+      // MILL (`mill: 1`, standing marks only): once every 10–18 s a cat looks
+      // round over one shoulder, or shuffles half a pace aside and back, or
+      // (in a queue) washes a paw about the wait — seeded per cat, so a knot
+      // of six never turns in step
+      if (s.mill && s.y === undefined && face !== undefined) {
+        const sd = cat.seed || 0, P = 10 + sd * 8, t = el + sd * 97;
+        const ph = (t % P) / P, sg = ((Math.floor(t / P) + Math.floor(sd * 10)) & 1) ? 1 : -1;
+        if (ph < 0.2) { face += sg * (0.6 + sd * 0.5); if (pose === 'queue' || pose === 'work') pose = 'stand'; }
+        else if (ph < 0.3) { const a = face + sg * 1.57; x += Math.sin(a) * 0.55; z += Math.cos(a) * 0.55; }
+        else if (ph < 0.4 && pose === 'queue') pose = 'groom';
+      }
       return {
-        act: 'post', x: s.x, z: s.z, pose: s.pose, face: s.face,
+        act: 'post', x, z, pose, face,
         speed: s.speed ?? 1.8, glide: 1,
         // `raised` forbids the pose from dropping the body below the surface —
         // right for a bench slat, wrong for a squat, which is entirely body-drop.

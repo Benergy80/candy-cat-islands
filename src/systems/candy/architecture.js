@@ -36,7 +36,32 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 import { rng, hash, damp, clamp } from '../../core/util.js';
-import { createMaterials, createBuilder, makeSignAtlas, C, SPRINKLE, softGlow } from './architecture/kit.js';
+import { createMaterials, createBuilder, makeSignAtlas, C, SPRINKLE, softGlow, halveCanvasTexture, setKitTier } from './architecture/kit.js';
+import { createInstanceCuller, triangleTiles } from '../terrain/instcull.js';
+import { getLampPool } from '../terrain/lamppool.js';
+
+// ── MOBILE TIER (docs/BRIEF.md Contract I) ───────────────────────────────────
+// Same authored town on both tiers; on ctx.state.mobile only the PACKAGING
+// changes:
+//   · the main builder keeps the SAME island-wide merges as desktop (one mesh
+//     per material), but each one is tiled on a 32 u grid and drawn through
+//     the index runs of the tiles in view (terrain/instcull.js addIndexed).
+//     One draw call per material at most — never more than desktop, in any
+//     view — and a fraction of the triangles at the game camera. A casting
+//     merge also keeps the tiles inside the key light's shadow frustum, so an
+//     off-screen building still throws its shadow into the frame. (An 8-way
+//     district split was tried first: fewer triangles, but up to 8× the calls
+//     in wide and flying views and +24 shadow calls over the strait.)
+//     Sub-builder groups (enterable houses, landmarks) are frustum-culled;
+//   · sprinkles / jelly beans / sugar grains are packed per frame to what the
+//     camera sees (terrain/instcull.js), and the small trim (those three,
+//     spinners, bunting) casts no shadow — buildings and landmarks still do;
+//   · the sign atlas is halved to 1024 × 1280 (textures ≤ 2048, iOS canvas cap);
+//   · the five lamps + the room light become anchors of the shared constant
+//     LAMP POOL (terrain/lamppool.js) instead of six PointLights.
+const MOBILE_TILE = 32;
+const NO_CAST_MOBILE = { sprinkles: 1, jellybeans: 1, sugargrains: 1, spinners: 1, bunting: 1 };
+const CULL_MOBILE = { sprinkles: 1, jellybeans: 1, sugargrains: 1 };   // static instances only
 import { SIGNS, signEntries } from './architecture/signs.js';
 import { buildPier } from './architecture/pier.js';
 import { buildVillage } from './architecture/village.js';
@@ -49,9 +74,23 @@ import { buildProps } from './architecture/props.js';
 export function create(ctx) {
   const { scene, world } = ctx;
   const group = new THREE.Group(); group.name = 'candyArchitecture'; scene.add(group);
+  const MOBILE = !!ctx.state?.mobile;
+  setKitTier(MOBILE);   // before any createBuilder / makeSignAtlas (escape's too)
+  // mobile: every builder here culls its merged meshes (desktop: null → never)
+  const builderOpts = MOBILE ? { cull: true } : null;
+  const culler = MOBILE ? createInstanceCuller(ctx, { cell: 32 }) : null;
+  const lampPool = MOBILE ? getLampPool(ctx, 3) : null;
 
   const mats = createMaterials();
-  const atlas = makeSignAtlas(signEntries());
+  const atlas = makeSignAtlas(signEntries());   // mobile: already 1024 × 1280 (kit tier)
+  if (MOBILE) {
+    halveCanvasTexture(atlas.tex, 4);            // no-op once the tier has halved it
+    // transparent DoubleSide draws twice (back faces, then front) — for an
+    // additive decal the order cannot matter, and a thin liquid sheet does not
+    // read the difference on a phone: one pass each (clones inherit it)
+    mats.haloDisc.forceSinglePass = true;
+    mats.flow.forceSinglePass = true;
+  }
   mats.sign = new THREE.MeshStandardMaterial({
     map: atlas.tex, emissiveMap: atlas.tex, emissive: 0xffffff, emissiveIntensity: 0,
     roughness: 0.7, metalness: 0, side: THREE.DoubleSide,
@@ -59,7 +98,7 @@ export function create(ctx) {
     // polygonOffset keeps it from z-fighting when the board is slightly domed
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
-  const B = createBuilder(mats, atlas.uv);
+  const B = createBuilder(mats, atlas.uv, null, MOBILE ? { cull: true } : null);
 
   ctx.colliders = ctx.colliders || [];
   ctx.walkables = ctx.walkables || [];
@@ -102,7 +141,7 @@ export function create(ctx) {
     // still collapses onto the one matte.
     let keys = SUB_KEYS;
     if (o.gloss) { m.gloss = mats.gloss.clone(); keys = { ...SUB_KEYS, gloss: 'gloss' }; }
-    const b = createBuilder(m, atlas.uv, keys);
+    const b = createBuilder(m, atlas.uv, keys, MOBILE ? { cull: true, forward: { haloDisc: B } } : null);
     return {
       B: b, group: g, mats: m,
       finish() {
@@ -117,7 +156,7 @@ export function create(ctx) {
   }
 
   const A = {
-    THREE, B, world, ctx, C, SPRINKLE, mats, signUV: atlas.uv,
+    THREE, B, world, ctx, C, SPRINKLE, mats, signUV: atlas.uv, builderOpts, lampPool,
     rng: (name) => rng(hash('candyArch:' + name)),
     gy: (x, z) => world.height(x, z),
     group,
@@ -257,6 +296,11 @@ export function create(ctx) {
       });
     },
     light(x, y, z, color, dist, intensity) {
+      if (lampPool) {
+        // mobile: an anchor of the shared constant pool, not a PointLight
+        lights.push({ light: null, anchor: lampPool.add({ x, y, z, color, dist, decay: 2 }), base: intensity });
+        return null;
+      }
       const l = new THREE.PointLight(color, 0, dist);
       l.position.set(x, y, z); group.add(l);
       lights.push({ light: l, base: intensity });
@@ -367,6 +411,13 @@ export function create(ctx) {
 
   const myEnd = ctx.colliders.length;     // [myColliderBase, myEnd) is ours
   const meshes = B.finish(group);
+  // mobile: every island-wide merge is drawn through the index runs of the
+  // tiles in view (+ its shadow's tiles when it casts) — see the header
+  if (MOBILE) for (const k in meshes) {
+    const m = meshes[k];
+    try { culler.addIndexed(m, triangleTiles(m.geometry, MOBILE_TILE)); }
+    catch (e) { console.warn('[candy arch] tile cull skipped', m.name, e.message); }
+  }
 
   // ── instanced extras (one draw call each) ──────────────────────────────────
   const instanced = [];
@@ -375,6 +426,7 @@ export function create(ctx) {
     const m = new THREE.InstancedMesh(geo, material, list.length);
     m.name = 'candyArch_' + name;
     m.castShadow = name !== 'bunting'; m.receiveShadow = true;
+    if (MOBILE && NO_CAST_MOBILE[name]) m.castShadow = false;
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     const mx = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), s = new THREE.Vector3();
     const col = new THREE.Color();
@@ -385,6 +437,13 @@ export function create(ctx) {
     });
     m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
     m.frustumCulled = false;
+    if (MOBILE) {
+      // bounds from the placed instances (+ room for the spin / flutter), culled
+      m.computeBoundingSphere();
+      if (m.boundingSphere) m.boundingSphere.radius += 1.5;
+      m.frustumCulled = true;
+      if (CULL_MOBILE[name]) culler.add(m, { pad: 0.5 });
+    }
     group.add(m); instanced.push(m);
     return m;
   }
@@ -421,6 +480,15 @@ export function create(ctx) {
     doorMesh.castShadow = true; doorMesh.receiveShadow = true;
     doorMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     doorMesh.frustumCulled = false;
+    if (MOBILE) {
+      // the leaves' matrices are only written on the first update, so the
+      // bounds come from the hinges: every door within its own leaf + swing
+      const bb = new THREE.Box3();
+      for (const d of doorList) bb.expandByPoint(new THREE.Vector3(d.x, d.y, d.z));
+      doorMesh.boundingSphere = bb.getBoundingSphere(new THREE.Sphere());
+      doorMesh.boundingSphere.radius += 4;
+      doorMesh.frustumCulled = true;
+    }
     const col = new THREE.Color();
     doorList.forEach((d, i) => doorMesh.setColorAt(i, col.set(d.color)));
     if (doorMesh.instanceColor) doorMesh.instanceColor.needsUpdate = true;
@@ -431,8 +499,11 @@ export function create(ctx) {
   // The island budget is 8 real lights and architecture already spends 6, so
   // this one borrows: while it is on, the architecture lamp FARTHEST from the
   // player is switched off. Net simultaneous lights: unchanged.
-  const roomLight = new THREE.PointLight(0xffc98a, 0, 13, 2);
-  roomLight.visible = false; group.add(roomLight);
+  // Mobile: the room light is the pool's PRIORITY anchor (always gets a slot
+  // while it is lit), so entering a room never changes the light count.
+  const roomLight = MOBILE ? null : new THREE.PointLight(0xffc98a, 0, 13, 2);
+  if (roomLight) { roomLight.visible = false; group.add(roomLight); }
+  const roomAnchor = lampPool ? lampPool.add({ x: 0, y: -500, z: 0, color: 0xffc98a, dist: 13, decay: 2, priority: true }) : null;
 
   // ── budget report ──────────────────────────────────────────────────────────
   {
@@ -698,7 +769,16 @@ export function create(ctx) {
       if (r.inside) active = r;
     }
     // the shared room light (see the comment where it is created)
-    if (active && active.lamp && p) {
+    if (roomAnchor) {
+      if (active && active.lamp && p) {
+        roomAnchor.x = active.lamp.x; roomAnchor.y = active.lamp.y; roomAnchor.z = active.lamp.z;
+        roomAnchor.color.set(active.lamp.color);
+        roomAnchor.level = damp(roomAnchor.level, 16 + night * 20, 6, dt);
+      } else {
+        roomAnchor.level = damp(roomAnchor.level, 0, 8, dt);
+        if (roomAnchor.level < 0.4) roomAnchor.level = 0;
+      }
+    } else if (active && active.lamp && p) {
       roomLight.visible = true;
       roomLight.position.set(active.lamp.x, active.lamp.y, active.lamp.z);
       roomLight.color.set(active.lamp.color);
@@ -843,8 +923,10 @@ export function create(ctx) {
       mats.windowPink.emissiveIntensity = 0.04 + night * 1.15;
       mats.glowSour.emissiveIntensity = 0.10 + night * 2.2 + Math.sin(t * 1.7) * 0.1 * night;
       mats.sign.emissiveIntensity = night * 0.10;
-      for (const L of lights) L.light.intensity = L.base * night;
+      if (lampPool) for (const L of lights) L.anchor.level = L.base * night;
+      else for (const L of lights) L.light.intensity = L.base * night;
       updateRooms(dt, ctx, night);
+      if (lampPool) lampPool.update(dt);
       mats.flow.map.offset.y = (mats.flow.map.offset.y - dt * 0.85) % 1;
 
       // bunting flutter

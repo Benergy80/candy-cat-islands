@@ -38,6 +38,38 @@ import {
 import {
   Occupancy, scatter, clusterScatter, alongPath, trim, falloff, band, smoothstep, field, TAU,
 } from './vegetation/placement.js';
+import { createInstanceCuller, withNearField, NEAR } from '../terrain/instcull.js';
+import { createBlobShadows } from '../terrain/blobs.js';
+
+// ── MOBILE TIER (docs/BRIEF.md Contract I) ───────────────────────────────────
+// ctx.state.mobile is decided by main.js before any system exists. On the
+// mobile tier the placement below runs EXACTLY as on desktop (same seeds, same
+// order, same positions, same instance count) and only three things change at
+// emit():
+//   · NEAR FIELD, NOT A COUNT — ground cover and small understory keep ALL of
+//     their instances, each tagged with a rank (a position hash, never the rng
+//     stream; −1 for anything owning a collider, so the world you bump into is
+//     always drawn). terrain/instcull.js + the vertex shader then draw 100% of
+//     them within 28 u of the VISITOR, 60% out to 60 u, 25% beyond and none
+//     past 130 u, each instance growing in over 3 u (no popping). The first
+//     tier pass thinned by count everywhere, which left the ground right in
+//     front of the lens bald — the critic's biggest mobile gap.
+//   · SHADOWS FROM TREES ONLY, NEAR ONLY — gummy bears, lollipops and pines cast
+//     again, but only within NEAR.SHADOW (40 u) of the visitor (their depth
+//     material shrinks the caster over the last 6 u). Logs, cream, marsh and
+//     the authored furniture do not cast (the bitten pop is a hero beat and
+//     keeps its shadow). Past 34–40 u a soft contact blob fades in under each
+//     trunk instead, so a far tree never floats.
+//   · CULL — every species is packed per frame to the grid cells the camera
+//     can see (terrain/instcull.js): one draw call, a fraction of the triangles.
+const MOBILE_NEAR = new Set(['grass', 'mat', 'gumdrop', 'cotton', 'mint', 'cane', 'reed', 'lily', 'crystal', 'bean']);
+const MOBILE_TREES = new Set(['gummy_sap', 'gummy_mid', 'gummy_gran', 'lolli', 'pine']);
+// the far-field contact blob under each trunk (radius × the canopy half-width)
+const MOBILE_BLOB = { gummy_sap: 1.35, gummy_mid: 1.35, gummy_gran: 1.2, lolli: 0.9, pine: 1.1 };
+function keepHash(x, z, salt) {
+  const h = Math.sin(x * 127.1 + z * 311.7 + salt * 74.7) * 43758.5453;
+  return h - Math.floor(h);
+}
 
 export function create(ctx) {
   const { scene, world } = ctx;
@@ -47,8 +79,20 @@ export function create(ctx) {
   group.name = 'candyVegetation';
   scene.add(group);
   ctx.colliders = ctx.colliders || [];
+  const MOBILE = !!ctx.state?.mobile;
+  const culler = MOBILE ? createInstanceCuller(ctx, { cell: 24 }) : null;
 
   const collBase = ctx.colliders.length;       // everything I push lives above this
+  // (mobile) positions that own one of MY colliders — never thinned
+  const colliderKeys = new Set();
+  let colliderScan = collBase;
+  function ownsCollider(x, z) {
+    for (; colliderScan < ctx.colliders.length; colliderScan++) {
+      const c = ctx.colliders[colliderScan];
+      if (c) colliderKeys.add(c.x + ',' + c.z);
+    }
+    return colliderKeys.has(x + ',' + z);
+  }
   const swirlTex = makeSwirlTexture(1024);     // giant lollipops magnify this hard
   const stripeTex = makeStripeTexture(256);
   const mintTex = makePeppermintTexture(128);
@@ -194,7 +238,16 @@ export function create(ctx) {
 
   function emit(id, geo, material, items, o = {}) {
     if (!items.length) return null;
-    const { castShadow = false, receiveShadow = true } = o;
+    let { castShadow = false, receiveShadow = true } = o;
+    let rank = null;
+    if (MOBILE) {
+      castShadow = castShadow && MOBILE_TREES.has(id);
+      if (MOBILE_NEAR.has(id)) {
+        let salt = 0; for (let i = 0; i < id.length; i++) salt += id.charCodeAt(i) * (i + 1);
+        rank = new Float32Array(items.length);
+        for (let i = 0; i < items.length; i++) rank[i] = ownsCollider(items[i].x, items[i].z) ? -1 : keepHash(items[i].x, items[i].z, salt);
+      }
+    }
     const n = items.length;
     const mesh = new THREE.InstancedMesh(geo, material, n);
     const phase = new Float32Array(n);
@@ -221,15 +274,33 @@ export function create(ctx) {
     geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1));
     geo.setAttribute('aExtra', new THREE.InstancedBufferAttribute(extra, 1));
     geo.setAttribute('aTint', new THREE.InstancedBufferAttribute(tint, 3));
+    if (rank) { geo.setAttribute('aRank', new THREE.InstancedBufferAttribute(rank, 1)); withNearField(material, 'density'); }
     mesh.instanceMatrix.needsUpdate = true;
     mesh.castShadow = castShadow; mesh.receiveShadow = receiveShadow;
     if (castShadow && o.depth) mesh.customDepthMaterial = vegDepthMat(id, o.depth);
+    // mobile trees: the caster shrinks away past NEAR.SHADOW (pine has no
+    // displacement of its own, so it gets a plain depth material to carry it)
+    if (MOBILE && castShadow) {
+      mesh.customDepthMaterial = withNearField(mesh.customDepthMaterial || new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), 'shadow');
+    }
     mesh.name = 'candyveg_' + id;
     mesh.computeBoundingSphere();
     if (mesh.boundingSphere) mesh.boundingSphere.radius += 4;   // headroom for shader sway
     group.add(mesh);
     const tris = (geo.index.count / 3) * n;
-    meshes.push({ id, mesh, n, tris, castShadow });
+    const rec = { id, mesh, n, tris, castShadow };
+    meshes.push(rec);
+    if (culler) {
+      // The culler repacks the live buffers. Anything that reads a species'
+      // instances AFTER the first frame (particles/ambient.js's bush glints)
+      // gets the full, stable set through a read-only stand-in, and the live
+      // mesh stays reachable as rec.live.
+      culler.add(mesh, {
+        pad: 4,                                                  // = the mesh's own sway headroom
+        density: !!rank, shadowNear: castShadow ? NEAR.SHADOW : 0,
+        onSnapshot: (arr, count) => { rec.live = mesh; rec.mesh = { isInstanceSnapshot: true, name: mesh.name, instanceMatrix: { array: arr }, count }; },
+      });
+    }
     totalInstances += n; totalTris += tris; if (castShadow) shadowTris += tris;
     return mesh;
   }
@@ -1244,6 +1315,8 @@ export function create(ctx) {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = 'candyveg_' + id;
     mesh.castShadow = o.castShadow !== false; mesh.receiveShadow = true;
+    // mobile: props do not cast; the bitten pop is a hero beat and keeps its shadow
+    if (MOBILE && !/^bitten$/.test(id)) mesh.castShadow = false;
     if (o.position) mesh.position.set(...o.position);
     if (o.rotationY) mesh.rotation.y = o.rotationY;
     group.add(mesh);
@@ -1568,6 +1641,27 @@ export function create(ctx) {
     console.warn(`[candyVegetation] clearance pass: ${culled} instances blanked inside ${nf} foreign props`);
   });
 
+  // ── mobile: far-field contact blobs under the trees (after the clearance pass) ─
+  if (MOBILE) ctx.events.on('world:ready', () => {
+    const pts = [];
+    const m4 = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+    for (const rec of meshes) {
+      const k = MOBILE_BLOB[rec.id]; if (!k) continue;
+      const mesh = rec.live || rec.mesh, g = mesh.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      const half = Math.max(g.boundingBox.max.x - g.boundingBox.min.x, g.boundingBox.max.z - g.boundingBox.min.z) / 2;
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, m4); m4.decompose(p, q, sc);
+        if (!(sc.x > 1e-4)) continue;
+        pts.push({ x: p.x, z: p.z, r: clamp(half * sc.x * k, 0.9, 7) });
+      }
+    }
+    const blobs = createBlobShadows(ctx, pts, { name: 'candyveg_blobs', opacity: 0.34, culler });
+    // every candy blob sits under a tree that casts for real within NEAR.SHADOW:
+    // the blob only grows in where that shadow shrinks away
+    if (blobs) { withNearField(blobs.material, 'blob'); group.add(blobs); }
+  });
+
   // ── authored beats: a few named plants worth walking to ───────────────────
   const api = { group, meshes, trunks, notable: landmarksOfNote, grandmothers: api_grandmothers };
   ctx.events.on('world:ready', () => {
@@ -1638,6 +1732,7 @@ export function create(ctx) {
         grandmothers: api_grandmothers.length, clearings: CLEARINGS.length,
         tris: Math.round(totalTris), trisWithShadow: Math.round(totalTris + shadowTris),
         byId: meshes.map((m) => `${m.id}:${m.n}`).join(' ') + ' · ' + extras.map((e) => `${e.id}:${Math.round(e.tris)}t`).join(' '),
+        ...(culler ? { tier: 'mobile', cull: culler.stats() } : {}),
       };
     },
     update(dt, ctx) {

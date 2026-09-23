@@ -3,6 +3,7 @@
 //   node tools/render.mjs --view candy_village            # named view from tools/views.json
 //   node tools/render.mjs --all [--filter candy] [--outdir renders/tour]   # every named view, one browser session
 //   node tools/render.mjs --free -175,-62 --az 0.8 --el 0.5 --dist 160 --out renders/overview.png   # free camera aimed at a point
+//   node tools/render.mjs --view candy_village --q mobile   # quality tier (adds &q=mobile|high to the URL; default: none = auto)
 // The page is opened with ?shot=1 so the RAF loop is off; frames are stepped deterministically.
 import { chromium } from 'playwright';
 import fs from 'node:fs'; import path from 'node:path';
@@ -77,7 +78,7 @@ const page = await browser.newPage({ viewport: { width: W, height: H }, deviceSc
 const errors = [];
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(m.text().slice(0, 300)); });
 page.on('pageerror', (e) => errors.push('PAGEERROR ' + e.message));
-await page.goto(`http://127.0.0.1:${PORT}/?shot=1`, { waitUntil: 'load' });
+await page.goto(`http://127.0.0.1:${PORT}/?shot=1${args.q && args.q !== true ? '&q=' + encodeURIComponent(args.q) : ''}`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.game && window.game.ready, null, { timeout: 300000 });
 
 let results = [];

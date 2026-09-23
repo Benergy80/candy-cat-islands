@@ -16,11 +16,37 @@
 //   ui.card({ title, body, glyph|image, buttons:[{label,onClick,primary}] }) → { close() }
 //   ui.fade(toBlack, duration) → Promise
 //   ui.showMinimap(v) / ui.showHint(v) / ui.cycleMap() / ui.showHotbar(v|null)
+// WAVE 3 (map history, Contract G):
+//   ui.cycleMap()                    near → world → world+HISTORY → off; returns
+//                                    'local' | 'world' | 'history' | 'off'.
+//                                    near/world are the corner plate; HISTORY
+//                                    is the ATLAS, a big centred sheet (z 58,
+//                                    over toasts, banner and dialogue).
+//   ui.setMapMode(m)                 'local'|'near' · 'world' · 'history' · 'off'
+//   ui.mapMode                       the same four strings (read-only)
+//   ui.addMapMarker({ id, x, z, glyph, label }) → id   glyphs: key · winch ·
+//                                    star · ammo · weapon · plane (else a dot);
+//                                    same id again = move/update in place
+//   ui.removeMapMarker(id) → bool    ui.mapMarkers → [{id,x,z,glyph,label}]
+//   ui.resetHistory()                wipe explored cells, trail, visited lamps
+//                                    and localStorage 'cci.explored.v1'
+//   ui.explored() → { candy, cat, cells, landCells, trail, landmarks, grid }
+//   The map plate (and the MAP chip shown while it is off) take taps.
 // WAVE 2: the hotbar (held weapons/tools, ammo + fuel counts, F/click/X hints),
 //   the candy-currency pill and the 1/2/3 camera chip all read their systems
 //   defensively — ctx.systems.inventory / .weapons / .camera may not exist.
 //   Listens for: inventory:pickup, inventory:held, weapon:use, camera:mode.
 // EVENTS: emits 'ui:say' (per line) and 'ui:intro:done' (title card dismissed).
+// TITLE SCREEN (wave 3): ui/title.js draws "ESCAPE FROM CANDYLAND AND CAT
+//   ISLAND" + credits over the LIVE world — while it is up the camera is a free
+//   golden-hour hero shot from the sea (camera.setFree; the logo sits in the
+//   sky, the islands are a band below it), the clock is parked at 18:12, the
+//   flyer's thermal columns are hidden and the HUD is hidden (#ui.cci-titling).
+//   Any key / tap dips to dark, and under the dark the camera (setFree(null) +
+//   snap, mode kept), the clock (only if nobody else set it meanwhile), the fog
+//   scale and the thermals are handed back; the controls then start as the
+//   small H chip (see HINT_NUDGE), not the full card. ?shot=1 skips it
+//   entirely unless ?intro=1; ui.skipIntro() is the same dismissal.
 //
 // LIFETIMES (wave-2b): nothing on this HUD is allowed to outlive its moment.
 //   • every say() line auto-dismisses: its own duration, or one read from the
@@ -43,11 +69,15 @@ import { createMinimap } from './ui/minimap.js';
 import { createDial } from './ui/dial.js';
 import { icon, item as itemGlyph, portrait, familyFor, familyHue } from './ui/glyphs.js';
 import { createHotbar, createCandy, createCamChip } from './ui/hotbar.js';
+import { createTitle } from './ui/title.js';
 
 const CPS = 58;                 // typewriter characters per second
 const BANNER_REPEAT = 150;      // seconds before a landmark can announce itself again
 const BANNER_ECHO = 3;          // a banner that only repeats the minimap footer
-const HINT_LIFE = 20;           // seconds the full controls card stays up
+const HINT_LIFE = 20;           // seconds the full controls card stays up (H)
+const HINT_NUDGE = 12;          // after the title: the H chip reads 'how to holiday' and breathes this long
+const INTRO_DIP = 0.3;          // title → game: seconds down to dark...
+const INTRO_LIFT = 0.55;        // ...and back up on the follow camera
 
 // ── lifetimes ────────────────────────────────────────────────────────────────
 const SAY_ELLIPSIS = 1.2;       // '…' is a beat, not a speech
@@ -60,6 +90,9 @@ const TOAST_QUEUE = 4;          // waiting toasts kept (oldest chatter dropped)
 const TOAST_TTL = 14;           // a toast that waited this long is no longer news
 const WEAPON_HINT_LIFE = 14;    // seconds the 'first weapon' sub-line stays up
 const PROMPT_NEAR = 40;         // px: the prompt never sits further from its object
+
+// What an ellipsis-only line ('...') shows instead of three dots in a speech box.
+const BEATS = ['stares at you.', 'says nothing. Loudly.', 'just watches you.', 'looks you up and down.'];
 
 const OBJ_DAY = 'Explore Candyland. Be home before dark.';
 const OBJ_NIGHT = 'It is dark. They are hungry. Get to the pier.';
@@ -212,11 +245,29 @@ export function create(ctx) {
   const dialAnim = panel(dial.el, { y: -14, s: 0.9 });
   dialAnim.show();
 
-  const map = createMinimap(ctx);
+  // Landmarks you have stood in. Shared with the minimap, which persists it
+  // with the exploration history (so the lamps stay lit across reloads).
+  const visited = new Set();
+  const map = createMinimap(ctx, { visited, onTap: () => api.cycleMap() });
   root.appendChild(map.el);
+  root.appendChild(map.chip);
+  root.appendChild(map.atlas);
   const mapAnim = panel(map.el, { y: 14, s: 0.92 });
+  const mapChipAnim = panel(map.chip, { y: 10, s: 0.9 });
+  // The explored map is not the corner plate: it is a big centred sheet (the
+  // ATLAS) over a scrim, above toasts / banner / dialogue, so nothing transient
+  // can sit on top of it — on a phone least of all.
+  const atlasAnim = panel(map.atlasPlate, { rise: 0.24, fall: 0.16, y: 18, s: 0.94 });
+  let atlasShown = false, scrimOp = -1;
   mapAnim.show();
   let mapOn = true, mapMode = 'local';
+  const MAP_MODES = ['local', 'world', 'history'];
+  /** Show whichever map surface the mode wants (corner plate or atlas). */
+  function syncMap(pop) {
+    const atlasOn = mapOn && mapMode === 'history';
+    if (mapOn && !atlasOn) mapAnim.show(pop); else mapAnim.hide();
+    if (atlasOn) atlasAnim.show(pop); else atlasAnim.hide();
+  }
 
   // ── controls: camera chip, full card, collapsing to a persistent H chip ────
   // (bottom-left column: the camera chip always sits directly above whichever
@@ -235,20 +286,28 @@ export function create(ctx) {
       ${kb('C')}<em>duck · slide · <b>stomp</b> from the air</em>
       ${kb('R')}<em>dodge roll</em>
       ${kb('L')}<em>look up (hold)</em>
+      ${kb('V')}<em>look around (hold) · tap = <b>behind me</b></em>
       ${kb('X')}<em>use held item — or <b>left-click</b></em>
       ${kb('F')}<em>next item</em>
       ${kb('E', 'Enter')}<em>talk · open doors</em>
-      ${kb('Q', 'E')}<em>turn view</em>
-      ${kb('1', '2', '3')}<em>camera: iso · follow · top</em>
-      ${kb('M')}<em>map: near / world / off</em>
+      ${kb('Q', 'E')}<em>turn view — E turns only when <b>nothing is in reach</b></em>
+      ${kb('Right-drag', 'Wheel')}<em>orbit · zoom</em>
+      ${kb('1', '2', '3')}<em>camera: iso · follow (swings behind you) · top</em>
+      ${kb('M')}<em>map: near · world · <b>explored</b> · off — or tap it</em>
       ${kb('H')}<em>hide this</em>
     </div>`, botLeft);
   const hintAnim = panel(hintEl, { y: 14, s: 0.94 });
   const chipEl = add('cci cci-plate cci-chip',
     `<div class="cci-chip-in"><span class="cci-key">H</span><em>help</em></div>`, botLeft);
   const chipAnim = panel(chipEl, { y: 12, s: 0.9 });
+  const chipIn = chipEl.querySelector('.cci-chip-in');
+  const chipEm = chipEl.querySelector('em');
   let hintMode = ctx.shot ? 'chip' : 'card';
   let hintTimer = ctx.shot ? 0 : HINT_LIFE;
+  // Leaving the title lands on the WORLD, not on a key list over a third of the
+  // screen: the controls start as the small H chip, spelled out and breathing
+  // for HINT_NUDGE seconds; H opens the full card as before.
+  let chipNudge = 0, chipNudging = false;
 
   // ── top column: toasts, then the location banner ───────────────────────────
   const topCol = add('cci cci-topcol');
@@ -338,29 +397,34 @@ export function create(ctx) {
   let fadeVal = 0, fadeTo = 0, fadeRate = 2, fadeResolve = null;
 
   // ── intro title card ───────────────────────────────────────────────────────
-  const introEl = add('cci cci-intro', `
-    <div class="cci-intro-bg"></div><div class="cci-intro-stripe"></div><div class="cci-intro-stripe b"></div>
-    <div class="cci-intro-in">
-      <div class="cci-intro-ico"><span>${icon('lolli', { w: 2 })}</span><span>${icon('cup', { w: 2 })}</span><span>${icon('paw', { w: 2 })}</span></div>
-      <h1>Candyland<span class="amp">&amp;</span><span class="cat">Cat Island</span></h1>
-      <div class="sub">a holiday you'll never forget (or leave)</div>
-      <div class="press">press any key</div>
-    </div>`);
+  // ui/title.js builds the screen (logo, credits, sprinkles) and, while it is
+  // up, borrows the world: a golden-hour clock and a slow orbit camera. This
+  // block owns WHEN: up → (any key / tap) → a short dip to dark, under which
+  // the world is handed back → done. 'ui:intro:done' fires on the key press.
+  const title = createTitle(ctx);
+  const introEl = title.el;
+  // the title screen is decoration: if it ever throws, the HUD must live on
+  let titleWarned = false;
+  const titleDo = (fn) => { try { fn(); } catch (err) { if (!titleWarned) { titleWarned = true; console.error('[ui] title screen', err); } } };
+  root.appendChild(introEl);
   const introAnim = panel(introEl, { rise: 0.35, fall: 0.7, y: 0, s: 1, back: false });
   // Screenshots skip the title card so renders show the game HUD.
   // (?intro=1 forces it back on, which is how the title card itself gets shot.)
   const forceIntro = ctx.params?.get('intro') === '1';
   let introState = (ctx.shot && !forceIntro) ? 'skip' : 'up';
-  let lockedByIntro = false;
+  let lockedByIntro = false, introOutT = 0;
   if (introState === 'up') {
     introAnim.p = 1; introAnim.want = 1;
     introEl.style.display = ''; introEl.style.opacity = '1'; introEl.style.transform = 'scale(1)';
+    root.classList.add('cci-titling');          // the HUD waits under the title
+    titleDo(() => title.begin());
   }
   const dismissIntro = () => {
     if (introState !== 'up') return;
-    introState = 'out'; introAnim.hide();
-    if (lockedByIntro && ctx.systems.player) ctx.systems.player.locked = false;
-    hintMode = 'card'; hintTimer = HINT_LIFE;
+    introState = 'out';
+    titleDo(() => title.leave());
+    fadeTo = 1; fadeRate = 1 / INTRO_DIP;       // dip to dark; the world swaps back under it
+    hintMode = 'chip'; hintTimer = 0; chipNudge = HINT_NUDGE;
     ctx.events.emit('ui:intro:done');
   };
   if (introState === 'up') {
@@ -457,7 +521,16 @@ export function create(ctx) {
     sayName.style.setProperty('--pacc', `linear-gradient(180deg, hsl(${h} 66% 56%), hsl(${h} 62% 42%))`);
     if (entry.speaker) { sayName.textContent = entry.speaker; sayName.style.display = ''; }
     else sayName.style.display = 'none';
-    sayText.innerHTML = `<span class="cci-ghost">${esc(entry.text)}</span>`;
+    // An ellipsis-only line is a BEAT, not a speech: '…' alone in a speech box
+    // reads as unfinished placeholder text. It plays as a stage direction
+    // instead — three dots breathing, and what the speaker is doing.
+    if (isEllipsis(entry.text)) {
+      const who = String(entry.speaker || '').split(/[—–]/)[0].trim();
+      const verb = BEATS[hue((entry.speaker || '') + '|' + entry.text) % BEATS.length];
+      const dir = who ? `${who} ${verb}` : verb.charAt(0).toUpperCase() + verb.slice(1);
+      sayText.innerHTML = `<span class="cci-beat"><i></i><i></i><i></i></span><em class="cci-beat-dir">${esc(dir)}</em>`;
+      reveal = entry.text.length;                   // nothing to type: the clock just runs
+    } else sayText.innerHTML = `<span class="cci-ghost">${esc(entry.text)}</span>`;
     sayAdv.style.opacity = '0.5';
     sayAdvMore.style.display = sayQueue.length ? '' : 'none';
     sayAdvCount.textContent = String(sayQueue.length);
@@ -544,7 +617,6 @@ export function create(ctx) {
   }
 
   // ── landmark tracking ──────────────────────────────────────────────────────
-  const visited = new Set();
   const lastAnnounced = new Map();
   let hereId = null, hereLabel = '', lastPlace = '';
 
@@ -737,15 +809,33 @@ export function create(ctx) {
       if (Math.abs(fadeVal - fadeTo) < 0.001) return Promise.resolve();
       return new Promise((res) => { fadeResolve = res; });
     },
-    /** M cycles: near → world → hidden. */
+    /** M (or a tap on the plate) cycles: near → world → world + history → hidden. */
     cycleMap() {
       if (!mapOn) { mapOn = true; mapMode = 'local'; }
       else if (mapMode === 'local') mapMode = 'world';
+      else if (mapMode === 'world') mapMode = 'history';
       else mapOn = false;
-      if (mapOn) mapAnim.show(true); else mapAnim.hide();
+      syncMap(true);
       return mapOn ? mapMode : 'off';
     },
-    showMinimap(v = !mapOn) { mapOn = !!v; if (mapOn) mapAnim.show(true); else mapAnim.hide(); return mapOn; },
+    /** Jump straight to a map mode: 'local'|'near' · 'world' · 'history' · 'off'. */
+    setMapMode(m = 'local') {
+      const want = m === 'near' ? 'local' : String(m);
+      if (want === 'off' || want === 'hidden') { mapOn = false; syncMap(false); return 'off'; }
+      if (!MAP_MODES.includes(want)) return mapOn ? mapMode : 'off';
+      const changed = !mapOn || mapMode !== want;
+      mapOn = true; mapMode = want;
+      if (changed) syncMap(true);
+      return mapMode;
+    },
+    showMinimap(v = !mapOn) { mapOn = !!v; syncMap(true); return mapOn; },
+    /** Pin something to the chart (both map modes). Same id again = update in place. */
+    addMapMarker(spec) { return map.addMarker(spec); },
+    removeMapMarker(id) { return map.removeMarker(id); },
+    get mapMarkers() { return map.markers; },
+    /** Forget everywhere you have been (grid, trail, lit landmarks, localStorage). */
+    resetHistory() { map.resetHistory(); if (hereId) visited.add(hereId); },
+    explored() { return map.explored(); },
     showHint(v = true) { hintMode = v ? 'card' : 'chip'; hintTimer = v ? Infinity : 0; },
     /** Force the hotbar on/off; null = automatic (shows itself at the first pickup). */
     showHotbar(v = true) { hotbar.show(v); return v; },
@@ -783,8 +873,22 @@ export function create(ctx) {
       if (introState === 'up') {
         if (!lockedByIntro && ctx.systems.player && !ctx.systems.player.locked) { ctx.systems.player.locked = true; lockedByIntro = true; }
         if (inp.pressed.size) dismissIntro();
-      } else if (introState === 'out' && introAnim.p <= 0) {
-        introState = 'done';
+        titleDo(() => title.update(dt));
+      } else if (introState === 'out') {
+        titleDo(() => title.update(dt));
+        // fully dark: give the camera, clock and HUD back, then lift the dip.
+        // The player stays locked until here, so the key that started the game
+        // never also jumps / swings / talks.
+        introOutT += dt;
+        if (fadeVal >= 1 || introOutT > INTRO_DIP + 0.6) {   // (a rival fade can't strand it)
+          titleDo(() => title.restore());
+          if (lockedByIntro && ctx.systems.player) ctx.systems.player.locked = false;
+          lockedByIntro = false;
+          root.classList.remove('cci-titling');
+          introAnim.p = 0; introAnim.want = 0; introEl.style.display = 'none';
+          fadeTo = 0; fadeRate = 1 / INTRO_LIFT;
+          introState = 'done';
+        }
       } else if (introState === 'skip') {
         introState = 'done';
         ctx.events.emit('ui:intro:done');
@@ -973,13 +1077,36 @@ export function create(ctx) {
         hintTimer -= dt;
         if (hintTimer <= 0) hintMode = 'chip';
       }
-      if (hintMode === 'card') { hintAnim.show(); chipAnim.hide(); }
+      if (hintMode === 'card') { hintAnim.show(); chipAnim.hide(); chipNudge = 0; }
       else { hintAnim.hide(); chipAnim.show(); }
+      if (introState === 'done' && chipNudge > 0) chipNudge -= dt;
+      const nudgeOn = chipNudge > 0;
+      if (nudgeOn !== chipNudging) {
+        chipNudging = nudgeOn;
+        chipEm.textContent = nudgeOn ? 'how to holiday' : 'help';
+        chipEl.classList.toggle('nudge', nudgeOn);
+        if (!nudgeOn) chipIn.style.transform = '';
+      }
+      if (nudgeOn) chipIn.style.transform = `scale(${(1 + 0.045 * (0.5 - 0.5 * Math.cos((HINT_NUDGE - chipNudge) * 3.4))).toFixed(4)})`;
 
       // widgets — the dial carries a daylight countdown for exactly as long as
       // the objective is still telling you to be home before dark
       dial.update(ctx, /before dark/i.test(objText));
-      if (mapOn) map.draw(mapMode, visited, hereId);
+      // exploration history runs whether or not the map is showing
+      if (hereId && !visited.has(hereId)) visited.add(hereId);
+      map.tick(dt);
+      if (mapOn) {
+        if (mapMode === 'history') map.drawAtlas(visited, hereId);
+        else map.draw(mapMode, visited, hereId);
+        mapChipAnim.hide();
+      } else if (introState === 'done' || introState === 'skip') mapChipAnim.show();
+      // the atlas layer (scrim + sheet) exists only while its sheet is showing
+      const aVis = atlasAnim.visible;
+      if (aVis !== atlasShown) { atlasShown = aVis; map.atlas.style.display = aVis ? '' : 'none'; }
+      if (aVis) {
+        const op = Math.round(atlasAnim.p * 100) / 100;
+        if (op !== scrimOp) { scrimOp = op; map.atlasScrim.style.opacity = String(op); }
+      }
 
       // fade
       if (fadeVal !== fadeTo) {
@@ -991,7 +1118,7 @@ export function create(ctx) {
 
       // panel animation
       sayAnim.step(dt); promptAnim.step(dt); banAnim.step(dt); objAnim.step(dt);
-      dialAnim.step(dt); mapAnim.step(dt); hintAnim.step(dt); chipAnim.step(dt);
+      dialAnim.step(dt); mapAnim.step(dt); mapChipAnim.step(dt); atlasAnim.step(dt); hintAnim.step(dt); chipAnim.step(dt);
       cardAnim.step(dt); introAnim.step(dt);
     },
   };

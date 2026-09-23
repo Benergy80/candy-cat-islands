@@ -1,0 +1,125 @@
+{
+ "flyer_pad": {
+  "pos": [
+   206.5,
+   9.5
+  ],
+  "az": 3.93,
+  "el": 0.42,
+  "dist": 36,
+  "time": 12,
+  "frames": 70
+ },
+ "flyer_air_strait": {
+  "pos": [
+   40,
+   22
+  ],
+  "time": 12,
+  "frames": 60,
+  "call": {
+   "escape.routes.flyer.debugFly": [
+    0,
+    22,
+    150,
+    -1.5708,
+    true
+   ]
+  }
+ },
+ "flyer_air_thermal": {
+  "pos": [
+   -60,
+   -10
+  ],
+  "time": 16.5,
+  "frames": 60,
+  "call": {
+   "escape.routes.flyer.debugFly": [
+    -62,
+    -6,
+    70,
+    -1.9,
+    true
+   ]
+  }
+ },
+ "flyer_air_to_thermals": {
+  "pos": [
+   60,
+   -30
+  ],
+  "time": 12,
+  "frames": 60,
+  "call": {
+   "escape.routes.flyer.debugFly": [
+    55,
+    -28,
+    120,
+    1.5708,
+    true
+   ]
+  }
+ },
+ "flyer_air_high": {
+  "pos": [
+   120,
+   20
+  ],
+  "time": 10,
+  "frames": 60,
+  "call": {
+   "escape.routes.flyer.debugFly": [
+    110,
+    30,
+    300,
+    -2.2,
+    true
+   ]
+  }
+ },
+ "flyer_air_night": {
+  "pos": [
+   150,
+   40
+  ],
+  "time": 22,
+  "frames": 70,
+  "call": {
+   "escape.routes.flyer.debugFly": [
+    150,
+    50,
+    110,
+    3.3,
+    true
+   ]
+  }
+ },
+ "flyer_thermals_overview": {
+  "free": [
+   150,
+   -20
+  ],
+  "y": 80,
+  "az": 0.9,
+  "el": 0.32,
+  "dist": 330,
+  "time": 17,
+  "frames": 50
+ },
+ "flyer_parked_candy": {
+  "pos": [
+   -61,
+   -36
+  ],
+  "time": 12,
+  "frames": 60,
+  "call": {
+   "escape.routes.flyer.debugPark": [
+    -65,
+    -40,
+    -2.26
+   ]
+  }
+ }
+}

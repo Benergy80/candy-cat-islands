@@ -53,6 +53,10 @@ import { flowerBeds } from './flowers.js';
 // the meadow frames was a landed butterfly, not the sheep. Candy pink cannot be
 // mistaken for one, and landings now also avoid the flock — see nearSheep.)
 const WING_HUES = [0xff62a8, 0xffc41f, 0x1fa6ff, 0x24d49c, 0x9a4dff];
+// Separation (per bed) and the visitor's body: a wingspan is ~1.2 u, the
+// visitor is ~1.9 u to the hat brim with a ~0.45 u brim radius.
+const SEP_NEAR = 0.8, SEP_FAR = 1.3, SEP_DY = 0.6, SIDE = 0.3;
+const BODY_TOP = 2.0, SHY_R = 1.7, HARD_R = 1.15;
 
 // ── one wing, in the XZ plane, extending along +x * side ─────────────────────
 // z+ is forward (fore wing), z- is aft (hind wing). A real butterfly outline:
@@ -134,7 +138,7 @@ function butterflyGeo() {
 }
 
 export function create(env) {
-  const { ctx, world, scene, shadowField } = env;
+  const { ctx, world, scene, shadowField, ground } = env;
   const r = rng(hash('candy-butterflies'));
 
   // Loops are anchored on the flower beds — the beds ARE the reason a butterfly
@@ -181,6 +185,10 @@ export function create(env) {
   }
   for (const k of ['aPhase', 'aRate', 'aAmp', 'aFold']) pool.attr(k).needsUpdate = true;
   pool.flushColors();
+  // WAVE 3 polish: neighbours on the same bed, for the in-flight separation pass
+  const byBed = new Map();
+  flies.forEach((f, i) => { f.i = i; f.x = 0; f.y = 0; f.z = 0; f.ox = 0; f.oz = 0; let a = byBed.get(f.c); if (!a) byBed.set(f.c, a = []); a.push(f); });
+  const beds = [...byBed.values()];
 
   let wasVisible = true;
   let airborne = N;
@@ -225,13 +233,81 @@ export function create(env) {
         // 78 calls a frame). f.g is damped for a smooth cruise altitude; gRaw is
         // the un-damped sample, because the shadow decal has to sit ON the real
         // surface — a damped value lags on a slope and buries the decal.
-        if ((f.gTimer -= dt) <= 0) { f.gTimer = 0.2; f.gRaw = world.height(x, z); f.g += (f.gRaw - f.g) * 0.7; }
+        // WAVE 3 (Contract A): the ground here is the player's ground core, so a
+        // butterfly crossing a bench or a log rides over its TOP rather than
+        // through it — and the cruise base rises at once, only the descent is
+        // damped, so a wing never dips into a prop between samples.
+        if ((f.gTimer -= dt) <= 0) {
+          f.gTimer = 0.2; f.gRaw = ground ? ground.height(x, z) : world.height(x, z);
+          f.g += (f.gRaw - f.g) * 0.7; if (f.g < f.gRaw) f.g = f.gRaw;
+        }
 
         // cruise height: strictly 1–2.5 u over the ground under the butterfly
         let alt = f.hi + Math.sin(t * 1.25 + f.ph) * 0.26 + Math.sin(t * 5.9 + f.ph) * 0.05;
         alt = alt < 1.0 ? 1.0 : alt > 2.5 ? 2.5 : alt;
         const y = p ? (f.g + alt) * flying + p.py * f.land : f.g + alt;
 
+        f.x = x; f.y = y; f.z = z; f.flying = flying;
+      }
+
+      // ── no butterfly flies through another ──────────────────────────────
+      // Six share a bed on loops of different radius and speed, so two of them
+      // regularly cross. When two airborne ones close to within a wingspan the
+      // pair splits vertically (eased by distance, so there is no pop); a
+      // perched one never moves — the flier goes over it.
+      for (let b = 0; b < beds.length; b++) {
+        const list = beds[b];
+        for (let m = 0; m < list.length; m++) {
+          const A = list[m];
+          for (let n = m + 1; n < list.length; n++) {
+            const B = list[n];
+            let hx = A.x - B.x, hz = A.z - B.z, hd = Math.hypot(hx, hz);
+            if (hd >= SEP_FAR) continue;
+            const dy = A.y - B.y, gap = Math.abs(dy);
+            if (gap >= SEP_DY) continue;
+            const fa = A.flying > 0.5 ? 1 : 0, fb = B.flying > 0.5 ? 1 : 0;
+            if (!(fa + fb)) continue;
+            // sideways first (up to SIDE each), so two wings never share the
+            // same patch of screen either; whatever is left goes vertical
+            const w = 1 - gap / SEP_DY;
+            if (hd < 1e-3) { hx = 1; hz = 0; hd = 1e-3; }
+            const side = Math.min(SIDE, (SEP_FAR - hd) * 0.5 * w) / (fa + fb) * 2;
+            const ux = hx / Math.max(hd, 1e-3), uz = hz / Math.max(hd, 1e-3);
+            A.x += ux * side * fa; A.z += uz * side * fa; B.x -= ux * side * fb; B.z -= uz * side * fb;
+            const hd2 = hd + side * (fa + fb);
+            if (hd2 >= SEP_FAR) continue;
+            const need = SEP_DY * (hd2 <= SEP_NEAR ? 1 : 1 - (hd2 - SEP_NEAR) / (SEP_FAR - SEP_NEAR));
+            if (gap >= need) continue;
+            const push = (need - gap) / (fa + fb), sgn = dy >= 0 ? 1 : -1;
+            A.y += sgn * push * fa; B.y -= sgn * push * fb;
+          }
+        }
+      }
+      for (let i = 0; i < N; i++) { const f = flies[i]; if (f.flying > 0.5 && f.y < f.g + 0.85) f.y = f.g + 0.85; }
+
+      // ── and none flies through the visitor ──────────────────────────────
+      // A butterfly whose loop crosses the visitor's body (feet → hat brim)
+      // shies sideways out of it — a smoothed offset, so it swerves rather
+      // than jumps — and is then held hard outside the body as a last resort.
+      const pl = ctx.systems.player, pp = pl?.position;
+      const px = pp ? pp.x : 1e9, pz = pp ? pp.z : 1e9, pTop = pp ? pp.y + BODY_TOP : -1e9, pBot = pp ? pp.y - 0.3 : 1e9;
+      const k = Math.min(1, dt * 7);
+      for (let i = 0; i < N; i++) {
+        const f = flies[i];
+        let x = f.x, z = f.z;
+        const y = f.y;
+        let tx = 0, tz = 0;
+        if (f.flying > 0.5 && y < pTop + 0.35 && y > pBot) {
+          const dx = x - px, dz = z - pz, d = Math.hypot(dx, dz);
+          if (d < SHY_R) { const q = d > 1e-3 ? (SHY_R - d) / d : 0; tx = dx * q; tz = dz * q; if (d <= 1e-3) tx = SHY_R; }
+        }
+        f.ox += (tx - f.ox) * k; f.oz += (tz - f.oz) * k;
+        x += f.ox; z += f.oz;
+        if (f.flying > 0.5 && y < pTop + 0.2 && y > pBot) {
+          const dx = x - px, dz = z - pz, d = Math.hypot(dx, dz);
+          if (d < HARD_R) { const q = d > 1e-3 ? HARD_R / d : 0; x = d > 1e-3 ? px + dx * q : px + HARD_R; z = d > 1e-3 ? pz + dz * q : pz; }
+        }
+        const flying = f.flying;
         const yaw = f.a + (f.w > 0 ? -Math.PI / 2 : Math.PI / 2);
         const s = f.scale * vis;
         pool.place(i, x, y, z, yaw,

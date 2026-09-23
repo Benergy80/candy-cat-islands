@@ -66,11 +66,13 @@ export class Kit {
     this.d = 'misc';
     this.prims = 0;
     this.overflow = null;       // see _push: where non-opaque primitives go
+    this.collapse = null;       // { fromMat: toMat } — mobile shells fold metal into matte
   }
   at(district) { this.d = district; return this; }
 
   _push(geo, color, o) {
-    const m = o.mat || 'matte';
+    let m = o.mat || 'matte';
+    if (this.collapse && this.collapse[m]) m = this.collapse[m];
     // A shell Part only owns its OPAQUE masses (walls, roof, ironwork) so the
     // whole shell can be faded as one mesh while the player is inside. Glass,
     // signs, bulbs and the additive night spill belong to the town-wide pools —
@@ -204,6 +206,31 @@ export class Kit {
   /** Same but lying flat (faces +Y) — for painted ground markings / posters on tables. */
   signFlat(cell, x, y, z, w, d, o = {}) {
     return this.sign(cell, x, y, z, w, d, { ...o, rx: -Math.PI / 2 + (o.rx || 0) });
+  }
+
+  /**
+   * Mobile tier (after SignAtlas.combine()): move every sign<p> / signglow<p>
+   * bucket onto the one combined page — UVs rewritten into page p's slot of
+   * the { C, R } grid, buckets folded into sign0 / signglow0.
+   */
+  remapPages(L) {
+    if (!L) return;
+    const re = /^(sign|signglow)(\d+)$/;
+    const out = new Map();
+    for (const [key, bk] of this.buckets) {
+      const m = re.exec(bk.mat);
+      if (!m) { if (out.has(key)) out.get(key).geos.push(...bk.geos); else out.set(key, bk); continue; }
+      const page = +m[2], col = page % L.C, row = Math.floor(page / L.C);
+      for (const geo of bk.geos) {
+        const uv = geo.attributes.uv;
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, (col + uv.getX(i)) / L.C, (L.R - 1 - row + uv.getY(i)) / L.R);
+      }
+      const mat = m[1] + '0', nk = bk.district + '|' + mat;
+      const into = out.get(nk);
+      if (into) into.geos.push(...bk.geos);
+      else out.set(nk, { district: bk.district, mat, geos: bk.geos });
+    }
+    this.buckets = out;
   }
 
   // ── output ─────────────────────────────────────────────────────────────────

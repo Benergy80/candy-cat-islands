@@ -23,15 +23,37 @@
 // cross; ring yourself in it and they pace the edge complaining. Holding a
 // weapon by day makes them keep their distance and taunt you for it.
 //
+// WAVE 3 — Contract A (ground & collision, player-owned): every kid's feet sit
+// at ctx.systems.player.groundInfo(x, z).h EVERY frame (terrain, deck, or the
+// top of a LOW prop — they walk ON crates, kerbs and steps), and after every
+// brain has moved it the kid's circle (k.r ≈ 0.5·scale) goes through
+// player.pushOut(): props, benches, walls (oriented boxes), trunks and rocks
+// can never be inside a kid. Every candidate step is tested with the same
+// pushOut first, so a kid slides along a wall instead of grinding into it;
+// a hit the slide cannot turn into progress makes a wanderer turn round and a
+// night circler reverse. LOW props (benches, crates) are never half-entered:
+// a kid whose body cuts into one's side is moved fully ON it (its goal is on
+// or across the bench: it hops up and walks over) or fully OFF it (goal on
+// this side: it goes round) — see resolveLow(). Mid-punt a kid is solid at
+// its real height, so it sails over a picket fence but never into a bench.
+// Falls back to world.height + the old local circle grid when the player API
+// is missing. api.debugPositions() → [{x,y,z,r,kind}].
+// Contract C — the new arsenal (cannon / whip / poprocks / gum / marshmallow /
+// boomerang / water): see sourpatch/hit.js. Contract B — while
+// ctx.systems.powerups.active the kids FLEE the visitor, and one that touches
+// him is bounced 6 u with a puff (hits.bounce); nobody gets eaten meanwhile.
+//
 // Measured (A/B with the rig AND props hidden, at the game camera): 9 draw
 // calls / 32.0k tris by day, 13 / 35.3k at night, 14 / 37.3k during the dusk
 // beat. Budget is 40 calls / 60k tris.
 // Kids never leave Candyland: every position test goes through onCandy().
 // Exposes: api.kids [{pos, color, name, state}], api.getMood(), api.phase,
-//          api.hit(kidRef, opts) → result|false, api.stomp(x,z,r), api.stats()
+//          api.hit(kidRef, opts) → result|false, api.stomp(x,z,r), api.stats(),
+//          api.debugPositions() → [{x,y,z,r,kind,name,role,state,vis,air,onProp}]
 // Events:  'sourpatch:phase' { phase, prev }, 'sourpatch:eaten' { x, z },
 //          'sourpatch:hit' { i, name, weapon, kind, reaction, gaveUp },
 //          'sourpatch:dissolved' / ':respawn' / ':bonk' / ':gaveup' / ':stomped'
+//          / ':bounced' (touched the invincible visitor)
 // Listens: 'player:stomp' { x, z, r }
 // Views:   tools/views/sourpatch.json
 // ─────────────────────────────────────────────────────────────────────────────
@@ -52,11 +74,43 @@ const RING_R = 10;
 const BODY_R = 0.6;           // a kid's own footprint — props push this hard
 const ARMED_GAP = 2.0;        // extra metres of personal space when you're holding something
 const ARMED_RING = 2.5;       // extra circling radius at night when you're holding something
+const KID_R = 0.5;            // Contract A: a kid's pushOut circle is KID_R × its scale (0.50–0.59)
+const SEP_STEP = 0.3;         // kid-kid separation: most a kid is shoved per frame (≥ a sprint step)
+const TURN_CD = 2.2;          // seconds between "hit something, turn round" decisions
+const STAR_FLEE_R = 18;       // Contract B: the invincible visitor scatters everyone this close
+const STAR_BOUNCE = 6;        // …and one that touches him flies this far
+// Contract A, LOW props (benches, crates, steps): a kid is either fully ON one
+// (feet on its top) or fully OFF it (body at most STRADDLE_TOL into the
+// footprint) — never on the grass with half its body inside a bench seat.
+const STRADDLE_TOL = 0.08;    // how far a kid's body may touch a low prop's side
+const STEP_SEEN = 0.12;       // a top this far above the feet is a step up (lower: it is ground)
+const ON_IN = 0.05;           // "on" = centre this far past the core's edge ramp (full top underfoot)
+const LOW_RAMP = 0.3;         // the ground core's edge ramp (player/ground.js RAMP)
+const LCELL = 8;              // low-prop bins (world units)
+// POLISH (critic: "the hungry crowd packs into one interpenetrating clump",
+// "the blue pair merges into the purple lollipop lamp", "keep them off the
+// star pickup's ring"): a night pack keeps a body-width of air between
+// hunters, nobody stands inside the visitor, and the things that carry no
+// collider — pickups on their light discs, low invincibility stars, the
+// creatures' flower beds — are kept clear of gummy bodies too.
+const HUNT_GAP = 1.8;         // night: hunters keep (rA + rB) × this apart (≈ one body-width of air)
+const HUNT_BODY = 1.25;       // night: bodies in the 'reach' pose are wider — the hard floor is (rA + rB) × this
+const SPREAD_RATE = 3.2;      // u/s a hunter drifts to open that gap (soft: never a pop)
+const VISITOR_R = 0.42;       // the visitor's body (player RADIUS 0.36 + his jumper)
+const MARK_AGE = 1.5;         // s between re-reads of the pickups / stars / flowers
+const LOW_MARGIN = 0.5;       // a kid STANDING STILL beside a bench drifts to this much air off its side
+const LOW_DRIFT = 0.9;        // …at this speed (u/s): it never stops pressed flush into a bench back
 
 // scratch
 const _gp = new THREE.Vector3();
 const _sun = new THREE.Vector3(0.3, 0.8, 0.5);
 const _glint = {};            // reused burst options bag: never allocate per frame
+const _po = { x: 0, z: 0, hit: false };     // Contract A scratch (pushOut)
+const _po2 = { x: 0, z: 0, hit: false };
+const _gi = { h: 0, prop: null };           // Contract A scratch (groundInfo)
+const _on = { x: 0, z: 0 }, _off = { x: 0, z: 0 };        // low props: the two ways out of a straddle
+const _slide = { x: 0, z: 0, nx: 0, nz: 0 };              // hit.js: a punt sliding along a wall
+const LOW_RINGS = [0.35, 0.7, 1.1, 1.6, 2.2, 3.0];
 
 export function create(ctx) {
   const { world, events } = ctx;
@@ -69,12 +123,31 @@ export function create(ctx) {
   // frame; to a kid each patch is a wall, not a hazard — they never walk in.
   const salt = createSaltField(ctx);
 
-  const groundY = (x, z) => Math.max(0.05, world.height(x, z));
+  // Contract A: where a kid's feet rest — the player's ground core (terrain,
+  // walkable decks, the top of a LOW prop), or bare terrain if it is missing.
+  // Writes _gi.prop as a side effect so the shared layer knows who is on a prop.
+  const groundY = (x, z) => {
+    const pl = ctx.systems.player;
+    if (pl && typeof pl.groundInfo === 'function') {
+      const g = pl.groundInfo(x, z, _gi);
+      if (g && Number.isFinite(g.h)) return Math.max(0.05, g.h);
+    }
+    _gi.prop = null;
+    return Math.max(0.05, world.height(x, z));
+  };
+  // the Chocolate Lake is a bowl of chocolate, not a place to stand in up to the eyes
+  const LAKE = world.LAKE;
+  const lakeOK = (x, z) => {
+    if (!LAKE) return true;
+    const dx = x - LAKE.x, dz = z - LAKE.z, R = LAKE.r + 7;
+    if (dx * dx + dz * dz > R * R) return true;
+    return world.height(x, z) > (LAKE.surface ?? 2) - 0.3;
+  };
   // CONTAINMENT: Sour Patch Kids belong to Candyland and may never appear on Cat
   // Island — they used to spawn around the player at night and steal Cat
   // Island's interaction prompt. Every position test goes through onCandy().
   const onCandy = (x, z) => x < 0 && world.islandAt(x, z) === 'candy';
-  const landOK = (x, z) => world.height(x, z) > 0.35 && onCandy(x, z);
+  const landOK = (x, z) => world.height(x, z) > 0.35 && onCandy(x, z) && lakeOK(x, z);
   const dist2d = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
   const angDamp = (cur, tgt, l, dt) => {
     let d = tgt - cur; d = Math.atan2(Math.sin(d), Math.cos(d));
@@ -91,7 +164,7 @@ export function create(ctx) {
   function buildColliderGrid() {
     cellMap.clear();
     for (const c of ctx.colliders || []) {
-      if (c.x > 0 || c.r < 0.16) continue;                 // candy island, real obstacles only
+      if (!c || c.box || !(c.x <= 0) || !(c.r >= 0.16)) continue;   // candy island, real circles only
       const rc = Math.ceil((c.r + BODY_R + 0.5) / CELL);
       const cx = Math.floor(c.x / CELL), cz = Math.floor(c.z / CELL);
       for (let a = -rc; a <= rc; a++) for (let b = -rc; b <= rc; b++) {
@@ -101,10 +174,452 @@ export function create(ctx) {
       }
     }
   }
+  /** Is a kid-sized circle here inside anything SOLID? Contract A: the
+   *  player's pushOut (circles AND oriented boxes; LOW props are never solid —
+   *  kids walk on them). Legacy: the local circle grid. Truthy = blocked. */
   function blocked(x, z, pad = BODY_R) {
+    const pl = ctx.systems.player;
+    if (pl && typeof pl.pushOut === 'function') return pl.pushOut(x, z, pad, _po).hit ? _po : null;
     const cell = cellMap.get(cellKey(x, z)); if (!cell) return null;
     for (const c of cell) { const r = c.r + pad; if ((x - c.x) ** 2 + (z - c.z) ** 2 < r * r) return c; }
     return null;
+  }
+  /**
+   * Contract A, the net under every brain: resolve the kid's circle against
+   * every SOLID collider. A push that would shove it into the sea, the lake or
+   * off Candyland puts it back where it stood at the start of the frame
+   * instead. Returns true on a hit (the planners read k.bumped = turn round).
+   */
+  function resolveProps(k) {
+    const pl = ctx.systems.player;
+    if (!pl || typeof pl.pushOut !== 'function') { pushOutOfProps(k); return false; }
+    if (k.air > 0.05) {
+      // mid-punt: solid AT ITS HEIGHT (it may be sailing over a picket fence);
+      // anything it would be inside is resolved again the frame it lands
+      const q = solidAt(k.x, k.z, k.r, k.groundY + k.air, _po);
+      if (!q.hit) return false;
+      if (landOK(q.x, q.z)) { k.x = q.x; k.z = q.z; } else { k.x = k.px; k.z = k.pz; }
+      k.bumps++;
+      return true;
+    }
+    const q = pl.pushOut(k.x, k.z, k.r, _po);
+    if (!q.hit) return false;
+    if (landOK(q.x, q.z)) { k.x = q.x; k.z = q.z; }
+    else if (!pl.pushOut(k.px, k.pz, k.r, _po2).hit) { k.x = k.px; k.z = k.pz; }
+    else { k.x = q.x; k.z = q.z; }
+    // wedged (a gap narrower than a kid — furniture against a wall): the
+    // push cannot resolve it, so step to the nearest spot that is clear
+    if (pl.pushOut(k.x, k.z, k.r, _po2).hit) unstick(k, pl);
+    k.bumped = true; k.bumps++;
+    return true;
+  }
+  const UNSTICK_RINGS = [0.5, 0.9, 1.4, 2.0, 2.8, 3.8, 5.0, 6.5];
+  let unsticks = 0;
+  const unstickLog = [];                      // last few, for the verifier (allocates only when it fires)
+  function unstick(k, pl) {
+    unsticks++;
+    if (unstickLog.length >= 8) unstickLog.shift();
+    unstickLog.push({ i: k.i, role: k.role, state: k.hurt?.mode || k.state, x: +k.x.toFixed(2), z: +k.z.toFixed(2), px: +k.px.toFixed(2), pz: +k.pz.toFixed(2) });
+    for (const rr of UNSTICK_RINGS) {
+      for (let a = 0; a < 12; a++) {
+        const ang = (a / 12) * Math.PI * 2 + rr;
+        const x = k.x + Math.cos(ang) * rr, z = k.z + Math.sin(ang) * rr;
+        if (!landOK(x, z) || salt.blocked(x, z) || pl.pushOut(x, z, k.r, _po2).hit) continue;
+        k.x = x; k.z = z; return true;
+      }
+    }
+    return false;
+  }
+  // ── LOW props: fully on, or fully off ─────────────────────────────────────
+  // The ground core treats a low prop as walkable ground: its top is under the
+  // feet only once the kid's CENTRE is inside the footprint (ramped over the
+  // outer 0.3 u), and pushOut never blocks it. So a kid whose centre stopped
+  // just short of a bench stood on the grass with half its body inside the
+  // seat (verifier: Tartlet 0.34 u into the plaza bench). The rule now: a kid
+  // whose body cuts into a low prop's side by more than STRADDLE_TOL while
+  // that top stands above its feet is moved the short way to ONE of two
+  // places — fully ON (centre past the ramp, feet on the top: it hops up) or
+  // fully OFF (body clear of the footprint). ON when its goal this frame is on
+  // the prop or across it (it walks over the bench); OFF when the goal is on
+  // this side (it goes round, and the planners read that as a bump). No goal
+  // (shoved, landed, posed): stay on if it was on, else the nearer side.
+  const lowCells = new Map();
+  let lowN = 0, lowGhosts = 0, lowSeenLen = -1, lowSeenAudit = null, lowAge = 0, frame = 0;
+  const lowStats = { on: 0, off: 0, unstick: 0, fail: 0 };
+  const lowKey = (cx, cz) => (cx + 4096) * 8192 + (cz + 4096);
+  function rebuildLow() {
+    const pl = ctx.systems.player, G = pl?.ground;
+    lowCells.clear(); lowN = 0; lowGhosts = 0; lowAge = 0;
+    lowSeenLen = (ctx.colliders || []).length; lowSeenAudit = pl?.colliderAudit || null;
+    if (!G || typeof G.forEachLow !== 'function') return;
+    G.forEachLow((i, c, top, base) => {
+      if (!(c.x < 0) || !(top - base > STEP_SEEN)) return;           // Candyland, taller than a kerb
+      const br = (c.box ? 0.5 * Math.hypot(c.w || 0, c.d || 0) : (c.r || 0));
+      if (!(br > 0)) return;
+      const e = { c, top }, R = br + 0.75;                          // + the widest kid + tolerance
+      const x0 = Math.floor((c.x - R) / LCELL), x1 = Math.floor((c.x + R) / LCELL);
+      const z0 = Math.floor((c.z - R) / LCELL), z1 = Math.floor((c.z + R) / LCELL);
+      for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+        const key = lowKey(cx, cz);
+        let a = lowCells.get(key); if (!a) { a = []; lowCells.set(key, a); }
+        a.push(e);
+      }
+      lowN++;
+    });
+    // GHOSTS: legacy colliders (absolute h > 1.6) the player's calibration
+    // found nothing drawn for — never solid, never stood on, to the ground
+    // core. Nothing to see, but by the brief's letter an h > 1.6 is SOLID, so a
+    // kid keeps out of them anyway: an infinitely tall "low prop" is a wall to
+    // lowClash (and to a punt), and costs one bin entry.
+    if (typeof G.kindOf === 'function') {
+      for (const c of ctx.colliders || []) {
+        if (!c || !(c.x < 0) || c.solid === false || !(typeof c.h === 'number' && c.h > 1.6 && c.h < 1e4)) continue;
+        if (G.kindOf(c) !== 'none') continue;
+        const br = c.box ? 0.5 * Math.hypot(c.w || 0, c.d || 0) : (c.r || 0);
+        if (!(br > 0)) continue;
+        const e = { c, top: Infinity }, R = br + 0.75;
+        const x0 = Math.floor((c.x - R) / LCELL), x1 = Math.floor((c.x + R) / LCELL);
+        const z0 = Math.floor((c.z - R) / LCELL), z1 = Math.floor((c.z + R) / LCELL);
+        for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+          const key = lowKey(cx, cz);
+          let a = lowCells.get(key); if (!a) { a = []; lowCells.set(key, a); }
+          a.push(e);
+        }
+        lowN++; lowGhosts++;
+      }
+    }
+  }
+  /** Rebinned when colliders are added, after the player calibrates its low
+   *  tops to the drawn meshes, and every 10 s (a prop moved or burned). */
+  function lowSync(dt) {
+    lowAge += dt;
+    const pl = ctx.systems.player;
+    if ((ctx.colliders || []).length !== lowSeenLen || (pl?.colliderAudit || null) !== lowSeenAudit || lowAge > 10) rebuildLow();
+  }
+  /** Signed distance from (x, z) to a collider's footprint (negative inside). */
+  function sdistC(c, x, z) {
+    const dx = x - c.x, dz = z - c.z;
+    if (c.box) {
+      const rot = c.rot || 0, cs = Math.cos(rot), sn = Math.sin(rot);
+      const lx = dx * cs + dz * sn, lz = -dx * sn + dz * cs;
+      const qx = Math.abs(lx) - (c.w || 0) * 0.5, qz = Math.abs(lz) - (c.d || 0) * 0.5;
+      const ox = qx > 0 ? qx : 0, oz = qz > 0 ? qz : 0;
+      return Math.sqrt(ox * ox + oz * oz) + Math.min(Math.max(qx, qz), 0);
+    }
+    return Math.hypot(dx, dz) - (c.r || 0);
+  }
+  // the core's edge ramp for this prop: never wider than a quarter of it
+  const rampOf = (c) => c.box ? Math.min(LOW_RAMP, 0.25 * Math.min(c.w || 0, c.d || 0)) : Math.min(LOW_RAMP, 0.5 * (c.r || 0));
+  /** Nearest point at least `depth` inside the footprint (the full top). */
+  function innerPoint(c, x, z, depth, out) {
+    const dx = x - c.x, dz = z - c.z;
+    if (c.box) {
+      const rot = c.rot || 0, cs = Math.cos(rot), sn = Math.sin(rot);
+      let lx = dx * cs + dz * sn, lz = -dx * sn + dz * cs;
+      const ex = Math.max(0, (c.w || 0) * 0.5 - depth), ez = Math.max(0, (c.d || 0) * 0.5 - depth);
+      lx = clamp(lx, -ex, ex); lz = clamp(lz, -ez, ez);
+      out.x = c.x + lx * cs - lz * sn; out.z = c.z + lx * sn + lz * cs;
+    } else {
+      const d = Math.hypot(dx, dz), R = Math.max(0, (c.r || 0) - depth);
+      const f = d > R && d > 1e-6 ? R / d : 1;
+      out.x = c.x + dx * f; out.z = c.z + dz * f;
+    }
+    return out;
+  }
+  /** Nearest point whose distance from the footprint is exactly `gap`. */
+  function outerPoint(c, x, z, gap, out) {
+    const dx = x - c.x, dz = z - c.z;
+    if (c.box) {
+      const rot = c.rot || 0, cs = Math.cos(rot), sn = Math.sin(rot);
+      let lx = dx * cs + dz * sn, lz = -dx * sn + dz * cs;
+      const hw = (c.w || 0) * 0.5, hd = (c.d || 0) * 0.5;
+      if (Math.abs(lx) > hw || Math.abs(lz) > hd) {                    // outside: along the gradient
+        const px = clamp(lx, -hw, hw), pz = clamp(lz, -hd, hd);
+        const ox = lx - px, oz = lz - pz, d = Math.hypot(ox, oz) || 1;
+        lx = px + ox / d * gap; lz = pz + oz / d * gap;
+      } else if (hw - Math.abs(lx) < hd - Math.abs(lz)) lx = (lx < 0 ? -1 : 1) * (hw + gap);   // inside: nearest face
+      else lz = (lz < 0 ? -1 : 1) * (hd + gap);
+      out.x = c.x + lx * cs - lz * sn; out.z = c.z + lx * sn + lz * cs;
+    } else {
+      let d = Math.hypot(dx, dz), ux = 1, uz = 0;
+      if (d > 1e-6) { ux = dx / d; uz = dz / d; }
+      out.x = c.x + ux * ((c.r || 0) + gap); out.z = c.z + uz * ((c.r || 0) + gap);
+    }
+    return out;
+  }
+  /** Cheap pre-test, no ground query: does a circle here touch any low prop's footprint? */
+  function lowNear(x, z, r) {
+    if (!lowN) return false;
+    const a = lowCells.get(lowKey(Math.floor(x / LCELL), Math.floor(z / LCELL)));
+    if (!a) return false;
+    for (let j = 0; j < a.length; j++) {
+      const c = a[j].c;
+      if (c.solid !== false && r - sdistC(c, x, z) > STRADDLE_TOL) return true;
+    }
+    return false;
+  }
+  /** The low prop whose SIDE a kid (feet at `feet`) cuts into here, or null. */
+  function lowClash(x, z, r, feet) {
+    const a = lowCells.get(lowKey(Math.floor(x / LCELL), Math.floor(z / LCELL)));
+    if (!a) return null;
+    let best = null, bestOv = STRADDLE_TOL;
+    for (let j = 0; j < a.length; j++) {
+      const e = a[j], c = e.c;
+      if (c.solid === false || e.top - feet <= STEP_SEEN) continue;   // on it, or above it
+      const ov = r - sdistC(c, x, z);
+      if (ov > bestOv) { bestOv = ov; best = e; }
+    }
+    return best;
+  }
+  /** A kid may stand here: land, no salt, nothing solid, no low-prop straddle. */
+  function lowOK(k, x, z) {
+    if (!landOK(x, z) || salt.blocked(x, z)) return false;
+    if (ctx.systems.player.pushOut(x, z, k.r, _po2).hit) return false;
+    return !lowNear(x, z, k.r) || !lowClash(x, z, k.r, groundY(x, z));
+  }
+  /** ON or OFF? Its goal decides; without one, the side it was on / the nearer. */
+  function wantsOn(k, c) {
+    if (k.goalF === frame) {
+      const gx = k.goalX, gz = k.goalZ;
+      if (sdistC(c, gx, gz) < -0.05) return true;                      // the goal is ON it
+      const dx = gx - k.x, dz = gz - k.z, L = Math.hypot(dx, dz);
+      if (L > 0.05) {                                                  // …or across it: walk over
+        const reach = Math.min(L, 4), n = Math.ceil(reach / 0.4);
+        for (let s = 1; s <= n; s++) {
+          const f = Math.min(reach, s * 0.4) / L;
+          if (sdistC(c, k.x + dx * f, k.z + dz * f) < -0.05) return true;
+        }
+      }
+      return false;                                                    // this side: go round
+    }
+    if (k.lowOn === c) return true;
+    return Math.hypot(_on.x - k.x, _on.z - k.z) < Math.hypot(_off.x - k.x, _off.z - k.z);
+  }
+  function placeLow(k, pt, on, c) {
+    // pushed back against its own step = it walked into the bench: a bump
+    const mx = pt.x - k.x, mz = pt.z - k.z, sx = k.x - k.px, sz = k.z - k.pz;
+    const back = mx * sx + mz * sz < -1e-6;
+    k.x = pt.x; k.z = pt.z;
+    if (on) { lowStats.on++; k.lowOn = c; return; }
+    lowStats.off++; if (k.lowOn === c) k.lowOn = null;
+    if (!back) return;
+    k.bumped = true; k.bumps++;
+    // …and it goes ROUND: this frame's step turned along the bench's face,
+    // toward its goal (a bench it cannot get onto is 2.6 u of detour, not a wall)
+    const L = Math.hypot(mx, mz), step = Math.hypot(sx, sz);
+    if (L < 1e-5 || step < 1e-3 || k.goalF !== frame) return;
+    const gx = k.goalX - k.x, gz = k.goalZ - k.z, gd = Math.hypot(gx, gz);
+    if (gd < 1.0) return;                                   // it wants to stand right here: it stops
+    let tx = -mz / L, tz = mx / L;
+    const dot = (tx * gx + tz * gz) / gd;
+    const sg = Math.abs(dot) > 0.15 ? Math.sign(dot) : (k.pathDir || 1);
+    tx *= sg; tz *= sg;
+    const x = k.x + tx * step, z = k.z + tz * step;
+    if (lowOK(k, x, z)) { k.x = x; k.z = z; k.desYaw = Math.atan2(tx, tz); }
+  }
+  function unstickLow(k) {
+    for (const rr of LOW_RINGS) for (let a = 0; a < 12; a++) {
+      const ang = (a / 12) * Math.PI * 2 + rr;
+      const x = k.x + Math.cos(ang) * rr, z = k.z + Math.sin(ang) * rr;
+      if (lowOK(k, x, z)) { k.x = x; k.z = z; lowStats.unstick++; return true; }
+    }
+    return false;
+  }
+  /** After resolveProps: never end a frame straddling a low prop. A kid in
+   *  the air counts from where its feet really are (last ground + air): above
+   *  the top it is flying over the bench, below it, it is inside its side. */
+  function resolveLow(k) {
+    if (!lowN || k.vis < 0.05 || !lowNear(k.x, k.z, k.r)) return;
+    const pl = ctx.systems.player;
+    if (!pl || typeof pl.pushOut !== 'function') return;
+    const airborne = k.air > 0.05;
+    for (let pass = 0; pass < 3; pass++) {
+      const e = lowClash(k.x, k.z, k.r, airborne ? k.groundY + k.air : groundY(k.x, k.z));
+      if (!e) return;
+      const c = e.c;
+      innerPoint(c, k.x, k.z, rampOf(c) + ON_IN, _on);
+      outerPoint(c, k.x, k.z, k.r + 0.03, _off);
+      const on = airborne ? false : wantsOn(k, c);        // a flying kid bonks off the side
+      const a = on ? _on : _off, b = on ? _off : _on;
+      if (lowOK(k, a.x, a.z)) placeLow(k, a, on, c);
+      else if (lowOK(k, b.x, b.z)) placeLow(k, b, !on, c);
+      else if (!unstickLow(k)) { lowStats.fail++; return; }
+    }
+  }
+
+  /** Standing still flush against a bench (resolveLow leaves an OFF kid 0.03 u
+   *  clear) reads, from the game camera, as a kid buried in the bench back
+   *  (critic, props_night). A kid that is not walking this frame and is not
+   *  ON the prop drifts out to LOW_MARGIN of air; one on its way over the
+   *  bench (goal on or across it) is left alone, so hopping up still works. */
+  const _lm = { x: 0, z: 0 };
+  function lowMargin(k, dt) {
+    if (!lowN || k.vis < 0.5 || k.air > 0.05 || k.moving > 0.05 || k.onProp) return;
+    if (!k.hurt && k.state === 'idle' && ANCHORED[k.role] && phase === 'playful') return;
+    const a = lowCells.get(lowKey(Math.floor(k.x / LCELL), Math.floor(k.z / LCELL)));
+    if (!a) return;
+    const feet = k.groundY;
+    for (let j = 0; j < a.length; j++) {
+      const e = a[j], c = e.c;
+      if (c.solid === false || !(e.top - feet > 0.3) || e.top === Infinity) continue;
+      const gap = sdistC(c, k.x, k.z) - k.r;
+      if (gap >= LOW_MARGIN || gap < -STRADDLE_TOL) continue;
+      if (k.goalF === frame && (sdistC(c, k.goalX, k.goalZ) < 0 || wantsOn(k, c))) continue;
+      outerPoint(c, k.x, k.z, k.r + LOW_MARGIN, _lm);
+      const dx = _lm.x - k.x, dz = _lm.z - k.z, L = Math.hypot(dx, dz);
+      if (L < 1e-4) continue;
+      const st = Math.min(L, LOW_DRIFT * dt);
+      const nx = k.x + dx / L * st, nz = k.z + dz / L * st;
+      if (lowOK(k, nx, nz) && !markInto(k, nx, nz)) { k.x = nx; k.z = nz; }
+      return;
+    }
+  }
+
+  /**
+   * Kids are solid to each other too: two taggers used to share one spot on
+   * top of the village sunbather. Only the kid being updated moves (all 24
+   * take their turn each frame); a posed kid (sunbathing, sitting, licking,
+   * the shrine) never gets shoved — everyone else goes round it.
+   */
+  function separate(k, p, dt) {
+    if (k.vis < 0.5 || k.air > 0.05 || (!k.hurt && k.state === 'idle' && ANCHORED[k.role] && phase === 'playful')) return;
+    // night, and not on the pounce or sated: a PACK spread round you with a
+    // body-width of dark between each shape — not one heap of gummy
+    const spread = phase === 'hunting' && !k.hurt && night.pounce <= 0 && night.sated <= 0;
+    const soft = spread ? SPREAD_RATE * dt : 0;
+    for (const o of kids) {
+      if (o === k || o.vis < 0.5 || o.air > 0.05) continue;
+      const dx = k.x - o.x, dz = k.z - o.z, hard = (k.r + o.r) * (o.lie > 0.5 || spread ? HUNT_BODY : 0.92);
+      const min = spread ? (k.r + o.r) * HUNT_GAP : hard;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= min * min) continue;
+      const d = Math.sqrt(d2);
+      const ux = d > 1e-4 ? dx / d : Math.sin(k.ph * 6.28), uz = d > 1e-4 ? dz / d : Math.cos(k.ph * 6.28);
+      // soft: at most SEP_STEP a frame (no pops) inside the body, SPREAD_RATE
+      // outside it, and never into a prop or a gap between two of them — the
+      // props always win
+      const push = d < hard ? Math.min(hard - d, SEP_STEP) : Math.min(min - d, soft);
+      if (push <= 1e-5) continue;
+      const nx = k.x + ux * push, nz = k.z + uz * push;
+      if (stepOK(nx, nz, k.r)) { k.x = nx; k.z = nz; }
+    }
+    // …and never INSIDE the visitor (critic: a hunter 0.76 u from him, half in
+    // his jumper). Three of them touching him is still dinner: touching counts
+    // at 1.85 u and this keeps them at ~1 u.
+    if (!p || eaten.active) return;
+    const dy = (p.y ?? k.y) - k.y;
+    if (dy > 1.4 * k.scale || dy < -1.7) return;                   // he is jumping over it
+    const dx = k.x - p.x, dz = k.z - p.z, min = k.r + VISITOR_R, d2 = dx * dx + dz * dz;
+    if (d2 >= min * min) return;
+    const d = Math.sqrt(d2);
+    const ux = d > 1e-4 ? dx / d : Math.sin(k.ph * 6.28), uz = d > 1e-4 ? dz / d : Math.cos(k.ph * 6.28);
+    const push = Math.min(min - d, SEP_STEP);
+    const nx = k.x + ux * push, nz = k.z + uz * push;
+    if (stepOK(nx, nz, k.r)) { k.x = nx; k.z = nz; }
+  }
+
+  // ── keep-off marks: things with NO collider a kid must still not stand in ─
+  // Pickups (a weapon hovering over its disc of light — the critic's "purple
+  // lollipop lamp" two kids merged into), uncollected LOW invincibility stars
+  // (their rainbow ring) and the blossoms of the creatures' flower beds. None
+  // is a wall to the visitor, so none registers a collider; to a kid each is a
+  // little circle it is gently eased out of. Read through ctx.systems (all
+  // optional), rebinned every MARK_AGE s into flat [x, z, r, bodyFrac] runs —
+  // no objects, nothing allocated per frame.
+  const markCells = new Map();
+  let markN = 0, markAge = 99, markPushes = 0;
+  function addMark(x, z, r, f) {
+    const R = r + 0.75;
+    const x0 = Math.floor((x - R) / LCELL), x1 = Math.floor((x + R) / LCELL);
+    const z0 = Math.floor((z - R) / LCELL), z1 = Math.floor((z + R) / LCELL);
+    for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+      const key = lowKey(cx, cz);
+      let a = markCells.get(key); if (!a) { a = []; markCells.set(key, a); }
+      a.push(x, z, r, f);
+    }
+    markN++;
+  }
+  function rebuildMarks() {
+    for (const a of markCells.values()) a.length = 0;
+    markN = 0; markAge = 0;
+    try {
+      const pk = ctx.systems.inventory?.pickups;
+      if (Array.isArray(pk)) for (const q of pk) {
+        if (!q || q.taken || !(q.x < 0) || !Number.isFinite(q.z)) continue;
+        const g = Number.isFinite(q.ground) ? q.ground : world.height(q.x, q.z);
+        if (Number.isFinite(q.baseY) && q.baseY - g > 2.4) continue;        // on a roof / a counter: nobody's way
+        // the hovering sweet/weapon AND the halo rings round it at head height
+        // (props_day: a kid 0.85 u from a lollipop pickup stood inside its rings)
+        addMark(q.x, q.z, Number.isFinite(q.markR) ? q.markR : 1.0, 0.9);
+      }
+      const st = ctx.systems.powerups?.stars;
+      if (Array.isArray(st)) for (const s of st) {
+        if (!s || s.taken || !(s.x < 0) || !Number.isFinite(s.z)) continue;
+        if (Number.isFinite(s.y) && s.y - world.height(s.x, s.z) > 2.6) continue;   // airborne: walk under it
+        // the collect ring AND the billboard halo round the star (at the game
+        // camera a kid 2 u behind the star still sat inside its rainbow ring)
+        addMark(s.x, s.z, 2.2, 0.6);
+      }
+      // the sprinkle-ants' anthill and the dropped lollipop they are eating
+      // (a 0.95-u disc lying on the main road: kids stood ankle-deep in it)
+      const sm = ctx.systems.candyCreatures?.parts?.ants?.samples;
+      if (Array.isArray(sm) && sm.length > 1) {
+        const h = sm[0], c = sm[sm.length - 1];
+        if (h && h.x < 0 && Number.isFinite(h.z)) addMark(h.x, h.z, 1.35, 0.8);
+        if (c && c.x < 0 && Number.isFinite(c.z)) addMark(c.x, c.z, 1.05, 0.8);
+      }
+      const beds = ctx.systems.candyCreatures?.parts?.butterflies?.beds;
+      if (Array.isArray(beds)) for (const b of beds) {
+        if (!b || !Array.isArray(b.flowers)) continue;
+        for (const f of b.flowers) if (f && f.x < 0 && Number.isFinite(f.z)) addMark(f.x, f.z, 0.25, 0.8);
+      }
+    } catch (e) { /* a system that changed shape must never take the kids down */ }
+  }
+  /** Is a kid-sized circle here inside a keep-off mark? (freeSpot, anchors) */
+  function markHit(x, z, r) {
+    if (!markN) return false;
+    const a = markCells.get(lowKey(Math.floor(x / LCELL), Math.floor(z / LCELL)));
+    if (!a) return false;
+    for (let j = 0; j < a.length; j += 4) {
+      const R = a[j + 2] + r * a[j + 3];
+      if ((x - a[j]) ** 2 + (z - a[j + 1]) ** 2 < R * R) return true;
+    }
+    return false;
+  }
+  /** Would stepping to (x, z) take this kid DEEPER into a keep-off mark?
+   *  Stepping out (or along the edge) is always allowed, so a kid a pickup
+   *  respawned on can still walk off it. moveTo slides round a mark exactly as
+   *  it slides round a prop — pure push-back used to pin two hunters behind a
+   *  star, 1 u apart, walking on the spot. */
+  function markInto(k, x, z) {
+    if (!markN) return false;
+    const a = markCells.get(lowKey(Math.floor(x / LCELL), Math.floor(z / LCELL)));
+    if (!a) return false;
+    for (let j = 0; j < a.length; j += 4) {
+      const R = a[j + 2] + k.r * a[j + 3], mx = a[j], mz = a[j + 1];
+      const dn = (x - mx) * (x - mx) + (z - mz) * (z - mz);
+      if (dn < R * R && dn < (k.x - mx) * (k.x - mx) + (k.z - mz) * (k.z - mz) - 1e-6) return true;
+    }
+    return false;
+  }
+  function keepOffMarks(k) {
+    if (!markN || k.vis < 0.5 || k.air > 0.05) return;
+    const a = markCells.get(lowKey(Math.floor(k.x / LCELL), Math.floor(k.z / LCELL)));
+    if (!a) return;
+    for (let j = 0; j < a.length; j += 4) {
+      const mx = a[j], mz = a[j + 1], R = a[j + 2] + k.r * a[j + 3];
+      const dx = k.x - mx, dz = k.z - mz, d2 = dx * dx + dz * dz;
+      if (d2 >= R * R) continue;
+      const d = Math.sqrt(d2);
+      if (R - d < 0.02) continue;                     // grazing the edge: leave it be (no shimmer)
+      const ux = d > 1e-4 ? dx / d : Math.sin(k.ph * 6.28), uz = d > 1e-4 ? dz / d : Math.cos(k.ph * 6.28);
+      const push = Math.min(R - d, SEP_STEP);
+      const nx = k.x + ux * push, nz = k.z + uz * push;
+      if (!stepOK(nx, nz, k.r)) continue;
+      k.x = nx; k.z = nz; markPushes++; k.markPushes = (k.markPushes || 0) + 1;
+      // its goal is in there: it stops at the edge instead of walking on the spot
+      if (k.goalF === frame && (k.goalX - mx) ** 2 + (k.goalZ - mz) ** 2 < R * R) k.moving = 0;
+    }
   }
   function pushOutOfProps(k) {
     const cell = cellMap.get(cellKey(k.x, k.z)); if (!cell) return;
@@ -124,6 +639,7 @@ export function create(ctx) {
   }
   /** Nearest spot that is open ground AND clear of every prop. null if none. */
   function freeSpot(x, z, o = {}) {
+    if (lowSeenLen !== (ctx.colliders || []).length) rebuildLow();
     const pad = o.pad ?? BODY_R, pathMargin = o.pathMargin ?? 1.2;
     const minHeight = o.minHeight ?? 0.6, avoidLandmarks = o.avoidLandmarks ?? false;
     for (const rr of o.rings || [0, 1.3, 2.4, 3.6, 5.2, 7.2, 9.5]) {
@@ -135,6 +651,8 @@ export function create(ctx) {
         if (!world.isFreeGround(nx, nz, { pathMargin, avoidLandmarks, minHeight })) continue;
         if (blocked(nx, nz, pad)) continue;
         if (salt.blocked(nx, nz)) continue;
+        if (lowNear(nx, nz, pad)) continue;                 // fully off every bench and crate
+        if (markHit(nx, nz, pad)) continue;                 // not in a pickup, a star ring or a flower bed
         return { x: nx, z: nz };
       }
     }
@@ -229,7 +747,14 @@ export function create(ctx) {
       saltCd: rand() * 6,
       glintCd: rand() * 0.7, saltA: rand() * 6.28,
       saltSlot: ((i * 7) % N) / N * 2.15 - 1.075,    // shuffled so neighbours spread
+      // wave 3: Contract A body + planner memory, the water balloon's fun-size
+      r: 0, px: 0, pz: 0, bumped: false, wasBumped: false, bumps: 0, turnCd: 0, onProp: false,
+      shrink: 1, shrinkT: 0,
+      goalX: 0, goalZ: 0, goalF: -1, lowOn: null, bounceCd: 0,
+      // polish: night stall detector (a hunter nose to a fence swings its approach round)
+      stallT: 0, stallX: 0, stallZ: 0, swingT: 0, stalls: 0, fleeA: 0, chaseSkip: null, chaseLast: null,
     };
+    k.r = KID_R * k.scale;
     kids.push(k);
   }
   const FOUNTAIN = { x: VILLAGE.x, z: VILLAGE.z, r: 4.6 };   // refined at world:ready
@@ -279,13 +804,53 @@ export function create(ctx) {
     const s = freeSpot(k.home.x, k.home.z, { pathMargin: 0.6, rings: [2.2, 3.6, 5.4, 7.5, 10] });
     return s || k.home;
   }
-  const hits = createHits(ctx, {
+  /** pushOut at a height: the ground core skips a hurdle/fence whose top the
+   *  feet have cleared (player.ground.pushOut with a finite feetY); falls back
+   *  to the plain NPC pushOut (everything solid) or the local grid. */
+  function solidAt(x, z, r, feet, out) {
+    const pl = ctx.systems.player, G = pl?.ground;
+    if (G && typeof G.pushOut === 'function') return G.pushOut(x, z, r, feet, null, out);
+    if (pl && typeof pl.pushOut === 'function') return pl.pushOut(x, z, r, out);
+    out.x = x; out.z = z; out.hit = !!blocked(x, z, r); return out;
+  }
+  const hitsD = {
     kids, V, rand,
     phase: () => phase,
     groundY, dist2d, moveTo, faceThing, say, puff, homeSpot,
-    canStand: stepOK,
+    canStand: (x, z, k) => stepOK(x, z, k ? k.r : BODY_R),
+    // a flying kid: real Candyland, no salt, and nothing solid AT ITS HEIGHT —
+    // feet are where they really are (last ground + air), so a punt clears a
+    // 0.9-u picket fence mid-arc but not at take-off, and never goes into the
+    // SIDE of a bench below its top. 0.02 u of slack: a kid resting against a
+    // wall sits at EXACT contact, which must not read as blocked every way.
+    canFly(x, z, k, feet = k.groundY + Math.max(0, k.air || 0)) {
+      const r = k.r - 0.02;
+      if (!landOK(x, z) || salt.blocked(x, z) || solidAt(x, z, r, feet, _po2).hit) return false;
+      return !lowNear(x, z, r) || !lowClash(x, z, r, feet);
+    },
+    // a punt that hits a wall slides along its face: where the ground core
+    // puts the circle, and the face normal (null if that is no place to be)
+    slide(x, z, k) {
+      const pl = ctx.systems.player;
+      if (!pl || typeof pl.pushOut !== 'function') return null;
+      const feet = k.groundY + Math.max(0, k.air || 0);
+      let qx, qz;
+      const q = solidAt(x, z, k.r, feet, _po);
+      if (q.hit) { qx = q.x; qz = q.z; }
+      else {
+        // not a wall: the side of a bench it is too low to clear
+        const e = lowNear(x, z, k.r) ? lowClash(x, z, k.r, feet) : null;
+        if (!e) return null;
+        outerPoint(e.c, x, z, k.r + 0.03, _off); qx = _off.x; qz = _off.z;
+      }
+      const mx = qx - x, mz = qz - z, L = Math.hypot(mx, mz);
+      if (L < 1e-5 || !hitsD.canFly(qx, qz, k, feet)) return null;
+      _slide.x = qx; _slide.z = qz; _slide.nx = mx / L; _slide.nz = mz / L;
+      return _slide;
+    },
     playerPos: () => ctx.systems.player?.position || null,
-  });
+  };
+  const hits = createHits(ctx, hitsD);
 
   // two small lights are the NPC share of the island budget: night only
   const eyeLights = [0, 1].map(() => {
@@ -301,6 +866,7 @@ export function create(ctx) {
   let armed = false, heldItem = null, playerWalled = false, tauntCd = 0, patchCd = 0;
   const night = { timer: 0, ready: 0, pounce: 0, sated: 0, saltCd: 0 };
   let hatCd = 24, hatKid = null, photoCd = 6;
+  let starOn = false, starSayCd = 0;
   const lastPlayer = new THREE.Vector3(9999, 0, 9999);
   const _pp = new THREE.Vector3();
 
@@ -349,23 +915,40 @@ export function create(ctx) {
   // A kid may stand here: real Candyland ground, no prop, and — wave 2 — not one
   // grain inside a salt patch. Every single movement call goes through this, so
   // salt is a wall for walking, fleeing, dancing, hunting and being punted alike.
-  function stepOK(x, z) { return landOK(x, z) && !blocked(x, z) && !salt.blocked(x, z); }
+  function stepOK(x, z, r = BODY_R) { return landOK(x, z) && !blocked(x, z, r) && !salt.blocked(x, z); }
+  const SLIDE_SIGNS_POS = [1, -1], SLIDE_SIGNS_NEG = [-1, 1];
   function moveTo(k, tx, tz, speed, dt) {
+    k.goalX = tx; k.goalZ = tz; k.goalF = frame;        // resolveLow: on the bench, or round it?
     const dx = tx - k.x, dz = tz - k.z, d = Math.hypot(dx, dz);
     if (d < 1e-4) { k.moving = 0; return 0; }
-    const ux = dx / d, uz = dz / d;
+    const ux = dx / d, uz = dz / d, r = k.r || BODY_R;
     const step = Math.min(d, speed * dt);
     const nx = k.x + ux * step, nz = k.z + uz * step;
-    if (stepOK(nx, nz)) { k.x = nx; k.z = nz; k.moving = speed; k.desYaw = Math.atan2(ux, uz); return d; }
+    if (stepOK(nx, nz, r) && !markInto(k, nx, nz)) { k.x = nx; k.z = nz; k.moving = speed; k.desYaw = Math.atan2(ux, uz); return d; }
+    // Contract A: walked into something solid — let the ground core slide us
+    // along its face (boxes too), as long as that still gets us somewhere
+    const pl = ctx.systems.player;
+    if (pl && typeof pl.pushOut === 'function') {
+      const q = pl.pushOut(nx, nz, r, _po);
+      if (q.hit) {
+        const mx = q.x - k.x, mz = q.z - k.z, len = Math.hypot(mx, mz);
+        if (len > step * 0.3 && len < step * 1.8 && mx * ux + mz * uz > step * 0.05 &&
+            landOK(q.x, q.z) && !salt.blocked(q.x, q.z) && !pl.pushOut(q.x, q.z, r, _po2).hit && !markInto(k, q.x, q.z)) {
+          k.x = q.x; k.z = q.z; k.moving = speed * Math.min(1, Math.max(0.45, len / step));
+          k.desYaw = Math.atan2(mx, mz); return d;
+        }
+      }
+    }
     // slide round the obstacle (or along the shore) rather than grinding into it
-    for (const sgn of k.pathDir > 0 ? [1, -1] : [-1, 1]) {
+    for (const sgn of k.pathDir > 0 ? SLIDE_SIGNS_POS : SLIDE_SIGNS_NEG) {
       const sx = k.x - uz * step * sgn, sz = k.z + ux * step * sgn;
-      if (stepOK(sx, sz)) {
+      if (stepOK(sx, sz, r) && !markInto(k, sx, sz)) {
         k.x = sx; k.z = sz; k.moving = speed * 0.62;
         k.desYaw = Math.atan2(-uz * sgn, ux * sgn); return d;
       }
     }
-    k.moving = 0; k.desYaw = Math.atan2(ux, uz);
+    // nowhere to go: that is a hit — the planners turn round on it
+    k.moving = 0; k.desYaw = Math.atan2(ux, uz); k.bumped = true;
     return d;
   }
   function keepOutOfSalt(k, dt) {
@@ -389,8 +972,9 @@ export function create(ctx) {
   }
   /** Ease toward a fixed pose spot without ever walking into a prop. */
   function settleAt(k, ax, az, dt, rate = 2) {
+    k.goalX = ax; k.goalZ = az; k.goalF = frame;
     const nx = lerp(k.x, ax, Math.min(1, dt * rate)), nz = lerp(k.z, az, Math.min(1, dt * rate));
-    if (stepOK(nx, nz)) { k.x = nx; k.z = nz; }
+    if (stepOK(nx, nz, k.r)) { k.x = nx; k.z = nz; }
   }
 
   // ── day roles: one distinct pose set each ──────────────────────────────────
@@ -417,8 +1001,17 @@ export function create(ctx) {
         const group = TAGGERS;
         const it = group.find((g) => g.isIt) || group[0];
         if (k.isIt) {
+          // chasing one it cannot reach (it fled into a fenced front garden, or
+          // a pickup stands between them) for a whole stall window: pick on
+          // somebody else for a few seconds instead of running on the spot
+          if (k.swingT > 0) k.swingT -= dt;
+          if (stalled(k, dt)) { k.swingT = 3; k.chaseSkip = k.chaseLast || null; }
           let best = null, bd = 1e9;
-          for (const o of group) { if (o === k) continue; const d = dist2d(k.x, k.z, o.x, o.z); if (d < bd) { bd = d; best = o; } }
+          for (const o of group) {
+            if (o === k || (k.swingT > 0 && o === k.chaseSkip)) continue;
+            const d = dist2d(k.x, k.z, o.x, o.z); if (d < bd) { bd = d; best = o; }
+          }
+          k.chaseLast = best;
           if (best) {
             moveTo(k, best.x, best.z, 5.1, dt);
             if (bd < 1.35 && k.timer <= 0) {
@@ -430,7 +1023,11 @@ export function create(ctx) {
           k.armMode = 'reach';                        // both arms out, about to tag
           k.lean = damp(k.lean, 0.44, 6, dt);
         } else {
-          const away = Math.atan2(k.x - it.x, k.z - it.z);
+          let away = Math.atan2(k.x - it.x, k.z - it.z);
+          // backed into a corner for a whole stall window: break sideways and
+          // hold that line a moment (a real kid dodges; it does not moonwalk)
+          if (k.swingT > 0) { k.swingT -= dt; away = k.fleeA; }
+          else if (stalled(k, dt)) { k.fleeA = away + (k.pathDir || 1) * (1.2 + rand() * 0.9); k.swingT = 1.6; away = k.fleeA; }
           let tx = k.x + Math.sin(away) * 5, tz = k.z + Math.cos(away) * 5;
           const dA = dist2d(k.x, k.z, PLAZA.x, PLAZA.z);
           if (dA > PLAZA.r) { tx = PLAZA.x; tz = PLAZA.z; }
@@ -446,7 +1043,15 @@ export function create(ctx) {
       }
       // ── DANCE: bounce, arms up and waving, hips swinging round the fountain ─
       case 'dance': {
-        k.orbit += dt * 0.52 * k.orbitDir;
+        // at walking pace round the ring: 0.52 rad/s on the widened ring (r ≈ 11)
+        // ran the target round at 5.7 u/s, faster than a 2.6 u/s dancer, so the
+        // dancers mostly bounced on the spot chasing a point they never reached
+        k.orbit += dt * Math.min(0.52, 2.1 / Math.max(1, FOUNTAIN.r)) * k.orbitDir;
+        // a lamp post or a flower bed on the ring and it stops dead: pick the
+        // ring up again where it stands and dance back the other way (back and
+        // forth along its free stretch of the ring reads as dancing; bouncing
+        // on the spot chasing a point it cannot reach did not)
+        if (stalled(k, dt)) { k.orbit = Math.atan2(k.z - FOUNTAIN.z, k.x - FOUNTAIN.x); k.orbitDir *= -1; }
         const r = FOUNTAIN.r + Math.sin(t * 0.7 + k.ph * 6) * 0.5;
         // LEASH: one shove from the prop push-out used to be permanent — the
         // orbit target moved on without them and they never came back. Past
@@ -568,6 +1173,11 @@ export function create(ctx) {
     // lateral offset so they don't walk single file down the licorice
     const dx = nq.x - q.x, dz = nq.z - q.z, dl = Math.hypot(dx, dz) || 1;
     const d = moveTo(k, nq.x - (dz / dl) * k.pathOff, nq.z + (dx / dl) * k.pathOff, speed, dt);
+    // Contract A: walked into something (or got pushed out of it) = turn round
+    if ((k.bumped || k.wasBumped) && k.moving < 0.5 && k.turnCd <= 0) {
+      k.pathDir *= -1; k.pathOff = -k.pathOff; k.turnCd = TURN_CD;
+      k.pathT = clamp(k.pathT + 0.03 * k.pathDir, 0, 1);
+    }
     if (d < 1.4 || k.moving === 0) {
       k.pathT += 0.03 * k.pathDir;
       if (k.pathT > 1 || k.pathT < 0) {
@@ -672,7 +1282,7 @@ export function create(ctx) {
       if (aroundPlayer) for (let a = 0; a < 18 && !ok; a++) {
         const ang = rand() * 6.28, r = 11 + rand() * 8;
         x = p.x + Math.sin(ang) * r; z = p.z + Math.cos(ang) * r;
-        ok = landOK(x, z) && dist2d(x, z, DOCK.x, DOCK.z) > SAFE_R + 1 && !blocked(x, z) && !salt.blocked(x, z);
+        ok = landOK(x, z) && dist2d(x, z, DOCK.x, DOCK.z) > SAFE_R + 1 && !blocked(x, z) && !salt.blocked(x, z) && !lowNear(x, z, k.r);
       }
       // a quarter of them come out of their own front door instead
       if (!ok || (rand() < 0.25 && dist2d(k.home.x, k.home.z, p.x, p.z) < 26)) { const h = homeSpot(k); x = h.x; z = h.z; }
@@ -735,6 +1345,33 @@ export function create(ctx) {
     }
   }
 
+  /** An even ring: a hunter whose slot another hunter at about the same range
+   *  already holds slides its own slot away round the circle — the planner
+   *  half of the pack spacing (separate() is the body half). */
+  function spaceSlot(k, p, dp, ring, dt) {
+    for (const o of kids) {
+      if (o === k || o.vis < 0.5 || o.hurt) continue;
+      const ox = o.x - p.x, oz = o.z - p.z;
+      if (Math.abs(Math.hypot(ox, oz) - Math.min(dp, ring + 1.2)) > 3) continue;
+      let da = Math.atan2(oz, ox) - k.orbit; da = Math.atan2(Math.sin(da), Math.cos(da));
+      const gapA = (k.r + o.r) * HUNT_GAP / Math.max(3, ring);
+      if (Math.abs(da) < gapA) k.orbit -= (da < 0 ? -1 : 1) * dt * 1.6 * (1 - Math.abs(da) / gapA);
+    }
+  }
+
+  /** True once per 0.9 s window in which a hunter that wanted to move got
+   *  nowhere (two of them jammed against one fence, each sliding into the
+   *  other): the planners read it like a bump. */
+  function stalled(k, dt) {
+    k.stallT += dt;
+    if (k.stallT < 0.9) return false;
+    const moved = Math.hypot(k.x - k.stallX, k.z - k.stallZ);
+    k.stallT = 0; k.stallX = k.x; k.stallZ = k.z;
+    if (moved > 0.4) return false;
+    k.stalls++;
+    return true;
+  }
+
   function nightBrain(k, dt, t, p, dp, playerSafe, reachable) {
     k.vis = Math.min(1, k.vis + dt * 1.8);
     k.lie = 0; k.sit = 0; k.kick = 0; k.cross = 0; k.eyesShut = 0;
@@ -743,7 +1380,11 @@ export function create(ctx) {
     k.headBias = 0;
 
     if (night.sated > 0) {                       // sated: shuffle off into the dark
-      const away = Math.atan2(k.x - p.x, k.z - p.z);
+      let away = Math.atan2(k.x - p.x, k.z - p.z);
+      // "away" ran into the sea or the salt: shuffle off along the shore instead
+      // of walking on the spot for the whole 22 s
+      if (k.swingT > 0) { k.swingT -= dt; away = k.fleeA; }
+      else if (stalled(k, dt)) { k.fleeA = away + k.orbitDir * (1.3 + rand() * 0.8); k.swingT = 2.5; away = k.fleeA; }
       moveTo(k, k.x + Math.sin(away) * 8, k.z + Math.cos(away) * 8, 2.4, dt);
       keepOutOfSalt(k, dt);
       return;
@@ -779,17 +1420,63 @@ export function create(ctx) {
       faceThing(k, p.x, p.z, 3, dt);
       k.armMode = 'paw';
     } else if (dp > ring + 1.2) {
-      if (k.bursting) moveTo(k, p.x, p.z, dp < 12 ? 5.4 : 3.8, dt);
+      // come in toward its OWN slot on the ring (the ring point on its side of
+      // you), not straight at your throat: a pack fans out as it arrives
+      // instead of queueing nose-to-tail into one heap (critic: "brown, green
+      // and yellow kids stack inside each other")
+      if (k.swingT > 0) k.swingT -= dt;
+      else k.orbit = angDamp(k.orbit, Math.atan2(k.z - p.z, k.x - p.x), 0.7, dt);
+      // walled in (a fenced front garden between it and you): swing its line
+      // of approach round until one opens, instead of standing nose to the fence
+      if (k.bumped || k.wasBumped) k.orbit += k.orbitDir * dt * 2.2;
+      if (stalled(k, dt)) { k.orbit += k.orbitDir * 1.0; k.swingT = 2.5; if (k.stalls % 2 === 0) k.orbitDir *= -1; }
+      spaceSlot(k, p, dp, ring, dt);
+      const tx = p.x + Math.cos(k.orbit) * ring, tz = p.z + Math.sin(k.orbit) * ring;
+      if (k.bursting) moveTo(k, tx, tz, dp < 12 ? 5.4 : 3.8, dt);
       else k.moving = 0;
       faceThing(k, p.x, p.z, 6, dt);
     } else {
-      // circle: the dread part
+      // circle: the dread part (hit something? go round the other way)
+      if ((k.bumped || k.wasBumped) && k.turnCd <= 0) { k.orbitDir *= -1; k.turnCd = TURN_CD; }
+      if (stalled(k, dt) && k.turnCd <= 0) { k.orbitDir *= -1; k.turnCd = TURN_CD; }
       k.orbit += dt * 0.7 * k.orbitDir;
+      spaceSlot(k, p, dp, ring, dt);
       const tx = p.x + Math.cos(k.orbit) * ring, tz = p.z + Math.sin(k.orbit) * ring;
       if (k.bursting) moveTo(k, tx, tz, 3.2, dt); else k.moving = 0;
       faceThing(k, p.x, p.z, 7, dt);
     }
     if (!rushing && !playerSafe) k.mouthOpen = damp(k.mouthOpen, 0, 5, dt);
+    keepOutOfSalt(k, dt);
+  }
+
+  // ── Contract B: the visitor ate an invincibility star ──────────────────────
+  // Everyone within STAR_FLEE_R runs for it — sunbathers leap up, hunters drop
+  // the hunt — fanning out rather than queueing; the far ones cower with their
+  // hands up and watch. Touching him is handled in update() (hits.bounce).
+  function starBrain(k, dt, t, p, dp) {
+    k.lie = damp(k.lie, 0, 9, dt); k.sit = damp(k.sit, 0, 9, dt);
+    k.kick = damp(k.kick, 0, 9, dt); k.cross = damp(k.cross, 0, 9, dt);
+    k.eyesShut = damp(k.eyesShut, 0, 9, dt);
+    k.freezeHead = 0; k.headBias = 0;
+    if (k.state !== 'idle') { if (k.gotHat) props.hat.visible = false; k.gotHat = false; k.state = 'idle'; }
+    if (dp < STAR_FLEE_R) {
+      const away = Math.atan2(k.x - p.x, k.z - p.z);
+      const fan = Math.sin(t * 2.3 + k.ph * 6.28) * 0.55 + (k.orbitDir * 0.35);
+      moveTo(k, k.x + Math.sin(away + fan) * 6, k.z + Math.cos(away + fan) * 6, dp < 8 ? 6.6 : 5.2, dt);
+      if (k.moving === 0 && (k.bumped || k.wasBumped) && k.turnCd <= 0) { k.orbitDir *= -1; k.turnCd = 0.8; }
+      k.armMode = 'run';
+      k.lean = damp(k.lean, 0.36, 6, dt);
+      k.gaitAmp = Math.max(k.gaitAmp, 0.9);
+      k.mouthOpen = damp(k.mouthOpen, 0.8, 8, dt); k.mouthWide = damp(k.mouthWide, 1, 8, dt);
+      if (k.moving > 0.5) hopTick(k, dt, 3.4, 0.09);
+    } else {
+      k.moving = 0;
+      faceThing(k, p.x, p.z, 5, dt);
+      k.armMode = 'up';
+      k.lean = damp(k.lean, -0.2, 4, dt);
+      k.sway = Math.sin(t * 17 + k.ph * 6.28) * 0.07;          // trembling
+      k.mouthWide = damp(k.mouthWide, 0.9, 4, dt);
+    }
     keepOutOfSalt(k, dt);
   }
 
@@ -812,7 +1499,8 @@ export function create(ctx) {
     if (next === 'hunting') { spawnHunters(p); night.sated = 0; }
     if (prev) {
       ctx.events.emit('sourpatch:phase', { phase: next, prev });
-      for (const e of entries) e.label = next === 'hunting' ? 'Talk to it' : `Talk to ${kids[e.ki].name}`;
+      // at night they still have names; you are just less sure they will answer to them
+      for (const e of entries) e.label = next === 'hunting' ? `Plead with ${kids[e.ki].name}` : `Talk to ${kids[e.ki].name}`;
     }
   }
 
@@ -832,6 +1520,7 @@ export function create(ctx) {
     let fountain = null;
     const near = Number.isFinite(mark?.x) ? { x: mark.x, z: mark.z, w: 6 } : { x: VILLAGE.x, z: VILLAGE.z, w: 13 };
     for (const c of ctx.colliders || []) {
+      if (!c || c.box || !Number.isFinite(c.r)) continue;          // boxes have no r
       if (c.r < (mark ? 1.0 : 3) || dist2d(c.x, c.z, near.x, near.z) > near.w) continue;
       if (!fountain || c.r > fountain.r) fountain = c;
     }
@@ -871,7 +1560,12 @@ export function create(ctx) {
         const x = VILLAGE.x + Math.cos(ang) * r, z = VILLAGE.z + Math.sin(ang) * r;
         if (world.height(x, z) < 0.9 || blocked(x, z, pad)) continue;
         let n = 0;
-        for (const c of ctx.colliders || []) { if (c.x > 0 || c.r < 0.3) continue; if (dist2d(c.x, c.z, x, z) < 7) n += c.r; }
+        for (const c of ctx.colliders || []) {
+          if (!c || !(c.x <= 0)) continue;
+          const cr = c.box ? 0.5 * Math.hypot(c.w || 0, c.d || 0) : (c.r || 0);
+          if (!(cr >= 0.3)) continue;
+          if (dist2d(c.x, c.z, x, z) < 7) n += cr;
+        }
         const score = n + r * 0.1 + dist2d(x, z, FOUNTAIN.x, FOUNTAIN.z) * -0.02;
         if (score < bestScore) { bestScore = score; PLAZA.x = x; PLAZA.z = z; found = true; }
       }
@@ -947,6 +1641,34 @@ export function create(ctx) {
       e.ki = k.i; entries.push(e);
     }
   });
+  // Contract A: the player calibrates its low props against the drawn meshes on
+  // the first frame after world:ready (some become SOLID, ghosts retire) —
+  // after that, re-check every pose spot and front door once.
+  let revalidated = false;
+  function revalidate() {
+    revalidated = true;
+    rebuildLow();
+    rebuildMarks();
+    for (const k of kids) {
+      // posed kids AND every morning spawn spot: nothing solid, and fully off
+      // any bench (a sunbather half on a seat edge is the straddle again) —
+      // nor lying in a flower bed or on top of a pickup
+      const straddle = lowNear(k.anchor.x, k.anchor.z, k.r) || markHit(k.anchor.x, k.anchor.z, k.r);
+      if ((ANCHORED[k.role] && k.role !== 'shrine' && blocked(k.anchor.x, k.anchor.z, k.r)) || straddle) {
+        const s = freeSpot(k.anchor.x, k.anchor.z, { pad: k.r, pathMargin: straddle ? 0.4 : 0.8, rings: [0.5, 0.8, 1.4, 2.2, 3.2, 4.4, 6] });
+        if (s) {
+          const moveKid = straddle && dist2d(k.x, k.z, k.anchor.x, k.anchor.z) < 0.05;
+          k.anchor.x = s.x; k.anchor.z = s.z;
+          if (moveKid) { k.x = s.x; k.z = s.z; }
+        }
+      }
+      if (blocked(k.home.x, k.home.z, BODY_R) || lowNear(k.home.x, k.home.z, BODY_R) || markHit(k.home.x, k.home.z, BODY_R)) {
+        const s = freeSpot(k.home.x, k.home.z, { pathMargin: 0.6, minHeight: 0.9, rings: [1.4, 2.6, 4, 6, 8, 11] });
+        if (s) { k.home.x = s.x; k.home.z = s.z; }
+      }
+    }
+  }
+
   events.on('interact', (target) => {
     if (phase !== 'playful' || photoCd > 0) return;
     if (target && String(target.id).startsWith('sourpatch_')) return;
@@ -994,11 +1716,28 @@ export function create(ctx) {
       }
       return best;
     },
+    /** Contract A verifier hook: every kid's body circle and where its feet are.
+     *  y = feet (ground + air: `air` > 0 only mid-punt, < 0 only while
+     *  dissolving). vis < 0.05 = indoors / a puddle (not drawn). */
+    debugPositions() {
+      const out = [];
+      for (const k of kids) {
+        out.push({ x: k.x, y: k.y, z: k.z, r: k.r, kind: 'sourpatch', name: k.name, role: k.role,
+          state: k.hurt?.mode || k.state, vis: k.vis, air: k.air || 0, feet: k.groundY, onProp: k.onProp });
+      }
+      return out;
+    },
     stats() {
       let visible = 0, hurting = 0, dizzy = 0, fleeing = 0, stunned = 0, dissolving = 0, puddles = 0, home = 0;
+      let onProp = 0, bumps = 0, shrunk = 0, stuck = 0, spinning = 0, staggering = 0, panicking = 0;
       for (const k of kids) {
         if (k.vis > 0.5) visible++;
+        if (k.onProp) onProp++;
+        bumps += k.bumps;
+        if (k.shrinkT > 0) shrunk++;
         const m = k.hurt?.mode;
+        if (m === 'stuck') stuck++; else if (m === 'spin') spinning++;
+        else if (m === 'stagger') staggering++; else if (m === 'panic') panicking++;
         if (m) hurting++;
         if (m === 'dizzy' || m === 'fly') dizzy++;
         else if (m === 'flee') fleeing++;
@@ -1011,7 +1750,12 @@ export function create(ctx) {
         phase: phase || 'playful', kids: N, visible,
         armed, held: heldItem?.id ?? (ctx.systems.inventory?.held || null),
         saltPatches: salt.count, playerWalled,
-        reacting: { hurting, dizzy, fleeing, stunned, dissolving, puddles, gaveUpAtHome: home },
+        reacting: { hurting, dizzy, fleeing, stunned, dissolving, puddles, gaveUpAtHome: home, stuck, spinning, staggering, panicking, shrunk },
+        ground: { onProp, bumps, unsticks, unstickLog: unstickLog.slice(), api: typeof ctx.systems.player?.pushOut === 'function',
+          low: { props: lowN - lowGhosts, ghosts: lowGhosts, hopOn: lowStats.on, keptOff: lowStats.off, unstick: lowStats.unstick, fail: lowStats.fail },
+          marks: { n: markN, pushes: markPushes } },
+        star: starOn,
+        hunt: { pounce: night.pounce > 0, ready: +night.ready.toFixed(2), sated: night.sated > 0 },
         ...hits.counters(),
       };
     },
@@ -1020,6 +1764,12 @@ export function create(ctx) {
       const t = ctx.state.elapsed;
       const pl = ctx.systems.player; if (!pl) return;
       const p = pl.position;
+      if (!revalidated && pl.colliderAudit) revalidate();
+      frame++; lowSync(dt);
+      markAge += dt; if (markAge > MARK_AGE) rebuildMarks();
+      // Contract B: is the visitor invincible right now?
+      const wasStar = starOn;
+      starOn = !!ctx.systems.powerups?.active;
       sayCd = Math.max(0, sayCd - dt); photoCd = Math.max(0, photoCd - dt);
       hatCd -= dt; night.saltCd = Math.max(0, night.saltCd - dt);
       tauntCd = Math.max(0, tauntCd - dt); patchCd = Math.max(0, patchCd - dt);
@@ -1039,6 +1789,15 @@ export function create(ctx) {
       const want = ctx.state.isNight ? 'hunting' : (time >= 18.5 && time <= 19.5 ? 'watching' : 'playful');
       if (want !== phase) setPhase(want, p);
       api.phase = phase; phaseT += dt;
+
+      // the star lands: the nearest kid that can see it screams about it
+      starSayCd = Math.max(0, starSayCd - dt);
+      if (starOn && !wasStar && p.x < -18) {
+        let near = null, nd = 30;
+        for (const k of kids) { if (k.vis < 0.5 || hits.absent(k)) continue; const d = dist2d(k.x, k.z, p.x, p.z); if (d < nd) { nd = d; near = k; } }
+        if (near) { say(near, V.STAR[near.lineIdx++ % V.STAR.length], true); starSayCd = 4; }
+        props.hat.visible = false;
+      }
 
       // big player jumps (teleport / ferry / respawn): keep the cast on stage
       const jumped = _pp.copy(p).distanceTo(lastPlayer) > 20;
@@ -1096,10 +1855,20 @@ export function create(ctx) {
       // ── per-kid brains ──────────────────────────────────────────────────────
       for (const k of kids) {
         k.sayCd = Math.max(0, k.sayCd - dt);
+        k.turnCd = Math.max(0, k.turnCd - dt);
+        k.px = k.x; k.pz = k.z;                          // where it stood (resolveProps' fallback)
+        k.wasBumped = k.bumped; k.bumped = false;
         const dp = dist2d(k.x, k.z, p.x, p.z);
         // being hit outranks having a job: the reaction owns the kid while it runs
         if (hits.brain(k, dt, t, p, dp)) {
           if (k.hurt && k.hurt.mode !== 'gone' && k.hurt.mode !== 'sulk') keepOutOfSalt(k, dt);
+        }
+        // Contract B outranks the schedule: a glowing tourist is everyone's problem
+        else if (starOn && k.vis > 0.3 && playerOnCandy) {
+          starBrain(k, dt, t, p, dp);
+          if (dp < STAR_FLEE_R && starSayCd <= 0 && k.sayCd <= 0 && rand() < dt * 0.6) {
+            if (say(k, V.STAR[k.lineIdx++ % V.STAR.length])) { starSayCd = 5 + rand() * 4; k.sayCd = 12; }
+          }
         }
         else if (phase === 'playful') { k.vis = Math.min(1, k.vis + dt * 3); dayBrain(k, dt, t, p, dp); }
         else if (phase === 'watching') duskBrain(k, dt, t, p, dp);
@@ -1112,11 +1881,23 @@ export function create(ctx) {
         }
 
         // ── shared animation layer ───────────────────────────────────────────
-        pushOutOfProps(k);
         // salt thrown at their feet shoves them out with a squeak
         if (salt.count && k.vis > 0.2 && salt.push(k) && !k.hurt && rand() < 0.35) {
           k.hopT = 0; k.squash = -0.16; puff(k, 5, 0.5);
           if (k.sayCd <= 0 && patchCd <= 0 && say(k, V.SALT_PATCH[k.lineIdx++ % V.SALT_PATCH.length])) { patchCd = 9; k.sayCd = 14; }
+        }
+        // Contract A: nothing solid may be inside a kid, whatever moved it
+        // (other kids first, then the props — the props always win)
+        separate(k, p, dt);
+        keepOffMarks(k);        // pickups, low stars, flower beds: no collider, still not a place to stand
+        resolveProps(k);
+        resolveLow(k);          // …and never half inside a bench: fully on it, or fully off
+        lowMargin(k, dt);       // …and never parked flush against its back
+        // Contract B: touch the invincible visitor and you go flying
+        if (starOn && k.vis > 0.5 && playerOnCandy && dist2d(k.x, k.z, p.x, p.z) < 0.95 + k.r) {
+          if (hits.bounce(k, p.x, p.z, STAR_BOUNCE) && k.sayCd <= 0 && rand() < 0.5) {
+            say(k, V.BONK[k.lineIdx++ % V.BONK.length]); k.sayCd = 6;
+          }
         }
         // hard containment net: whatever any brain did, a kid that is no longer
         // standing on Candyland goes straight back to its own front door.
@@ -1127,7 +1908,15 @@ export function create(ctx) {
         // feet exactly on the ground: no damping, or they hover on every slope.
         // `air` is the only thing allowed to lift them off it (the punt arc, and
         // the sink when they dissolve).
-        k.groundY = groundY(k.x, k.z);
+        // Contract A: groundInfo(x, z).h — up onto low props, down off them.
+        // A step of more than a hand's height gets a little jelly landing.
+        const g = groundY(k.x, k.z);
+        k.onProp = !!_gi.prop; k.lowOn = _gi.prop || null;
+        // mid-punt, `air` is height above the ground UNDER the kid: keep the
+        // arc continuous when that ground steps (off a bench = a longer fall)
+        if (k.air > 0.001 && k.hurt && k.hurt.mode === 'fly') k.air = Math.max(0, k.air + k.groundY - g);
+        if (k.vis > 0.5 && !k.air && Math.abs(g - k.groundY) > 0.28 && Math.abs(g - k.groundY) < 2) k.squash = Math.min(k.squash, -0.12);
+        k.groundY = g;
         k.y = k.groundY + (k.air || 0);
         k.yaw = angDamp(k.yaw, k.desYaw, phase === 'hunting' ? 9 : 6, dt);
         k.gait += dt * (0.6 + k.moving * 3.2) * (k.moving > 0.2 ? 1 : 0.3);
@@ -1160,7 +1949,7 @@ export function create(ctx) {
             k.headRoll = damp(k.headRoll, phase === 'hunting' ? Math.sin(t * 1.7 + k.ph * 6.28) * 0.12 : 0, 4, dt);
           }
         }
-        if (k.role !== 'lick' && k.role !== 'tag' && k.role !== 'follow' && k.state === 'idle' && phase !== 'hunting') {
+        if (k.role !== 'lick' && k.role !== 'tag' && k.role !== 'follow' && k.state === 'idle' && phase !== 'hunting' && !k.hurt && !starOn) {
           k.lean = damp(k.lean, k.moving > 3 ? 0.14 : 0, 5, dt);
         }
         // blink (they stop blinking at night)
@@ -1177,7 +1966,8 @@ export function create(ctx) {
       }
 
       // ── the pounce ──────────────────────────────────────────────────────────
-      if (phase === 'hunting' && !eaten.active && night.sated <= 0) {
+      if (starOn) { night.ready = 0; night.pounce = 0; }
+      else if (phase === 'hunting' && !eaten.active && night.sated <= 0) {
         if (ringCount >= 3 && night.timer > HUNT_GRACE && !playerSafe && playerOnCandy) night.ready += dt;
         else night.ready = Math.max(0, night.ready - dt * 1.5);
         if (night.ready > 2.2 && night.pounce <= 0) {
@@ -1186,7 +1976,7 @@ export function create(ctx) {
         }
         if (night.pounce > 0) {
           night.pounce -= dt;
-          if (touching >= 3) {
+          if (touching >= 3 && !pl.invulnerable) {
             eaten.trigger();
             night.sated = 22; night.pounce = 0; night.ready = 0;
             for (const k of kids) { k.burstT = 0.3; k.mouthOpen = 0; }
@@ -1197,9 +1987,15 @@ export function create(ctx) {
 
       // eye lights on the two nearest visible hunters
       if (nightMix > 0.15) {
-        const close = kids.filter((k) => k.vis > 0.4).sort((a, b) => dist2d(a.x, a.z, p.x, p.z) - dist2d(b.x, b.z, p.x, p.z));
+        // the two nearest, found without filter()/sort() (nothing allocated per frame)
+        let c0 = null, c1 = null, d0 = Infinity, d1 = Infinity;
+        for (const k of kids) {
+          if (k.vis <= 0.4) continue;
+          const d = dist2d(k.x, k.z, p.x, p.z);
+          if (d < d0) { c1 = c0; d1 = d0; c0 = k; d0 = d; } else if (d < d1) { c1 = k; d1 = d; }
+        }
         for (let i = 0; i < 2; i++) {
-          const k = close[i], l = eyeLights[i];
+          const k = i ? c1 : c0, l = eyeLights[i];
           if (!k || dist2d(k.x, k.z, p.x, p.z) > 34) { l.visible = false; continue; }
           l.visible = true;
           l.position.set(k.x, k.y + 1.40 * k.scale, k.z + 0.2);

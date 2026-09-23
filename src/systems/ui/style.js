@@ -212,8 +212,15 @@ export const CSS = `
 }
 
 /* ── minimap (bottom-right) ───────────────────────────────────────────────── */
-#ui .cci-map { right: 20px; bottom: 18px; z-index: 12; padding: 7px; border-radius: 15px; }
+#ui .cci-map {
+  right: 20px; bottom: 18px; z-index: 12; padding: 7px; border-radius: 15px;
+  transform-origin: 100% 100%; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
 #ui .cci-map canvas { display: block; border-radius: 9px; border: 2.5px solid var(--edge); }
+/* a world plate is something you OPENED: it sits over the transient banner,
+   toasts and dialogue (which on a phone would otherwise cover it) */
+#ui .cci-map[data-mode="world"] { z-index: 41; }
 /* the chart dims itself from ctx.state.daylight (minimap.js), so no CSS filter */
 #ui .cci-map-foot {
   display: flex; align-items: center; gap: 6px; padding: 5px 4px 1px; max-width: 196px;
@@ -224,8 +231,81 @@ export const CSS = `
 }
 #ui .cci-map-here {
   font: 800 11px/1.1 var(--fbody); letter-spacing: .06em; color: var(--ink-soft);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0;
 }
+/* the M cycle as three pips: near · world · explored. The lit one is where you are. */
+#ui .cci-map-modes { display: flex; gap: 3px; margin-left: auto; padding-left: 6px; flex: 0 0 auto; }
+#ui .cci-map-modes i { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--edge); background: transparent; opacity: .45; box-sizing: content-box; }
+#ui .cci-map[data-mode="local"] .cci-map-modes i:nth-child(1),
+#ui .cci-map[data-mode="world"] .cci-map-modes i:nth-child(2),
+#ui .cci-atlas .cci-map-modes i:nth-child(3) { background: var(--gold); opacity: 1; }
+
+/* ── the EXPLORED MAP (atlas): M's third stop, a big centred sheet ─────────────
+   Above toasts (40), banner, dialogue (30) and the touch controls (≤ 50); below
+   cards (62), the title (84) and the fade (92). The scrim fades with the sheet
+   (ui.js writes its opacity). Tap the sheet (or M) to close it. */
+#ui .cci-atlas {
+  z-index: 58; inset: 0; display: flex; align-items: center; justify-content: center;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+#ui .cci-atlas-scrim {
+  position: absolute; inset: 0; opacity: 0;
+  background: radial-gradient(ellipse 70% 70% at 50% 50%, rgba(22,12,32,.3) 0%, rgba(22,12,32,.56) 100%);
+}
+#ui .cci-atlas-plate {
+  position: relative; padding: 10px 12px 10px; border-radius: 22px;
+  cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+}
+#ui .cci-atlas-head { display: flex; align-items: center; gap: 10px; padding: 1px 4px 9px; }
+#ui .cci-atlas-ico {
+  width: 34px; height: 34px; padding: 6px; box-sizing: border-box; flex: 0 0 auto; border-radius: 50%;
+  color: var(--ink); background: var(--gold); border: 2.5px solid var(--edge); box-shadow: 0 2px 0 rgba(43,36,66,.3);
+}
+#ui .cci-atlas-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+#ui .cci-atlas-title b { font: 800 23px/1 var(--fdisp); color: var(--ink); white-space: nowrap; }
+#ui .cci-atlas-close { margin-left: auto; display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+#ui .cci-atlas-close em { font: 800 10.5px/1 var(--fbody); font-style: normal; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-soft); }
+#ui .cci-atlas-close em.t { display: none; }
+body.cci-touch #ui .cci-atlas-close em.k { display: none; }
+body.cci-touch #ui .cci-atlas-close em.t { display: inline; }
+#ui .cci-atlas-chart {
+  position: relative; border-radius: 13px; overflow: hidden; border: 3px solid var(--edge);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.4);
+}
+#ui .cci-atlas-chart canvas { display: block; }
+#ui .cci-atlas-chart canvas.rt, #ui .cci-atlas-chart canvas.pl, #ui .cci-atlas-chart canvas.dy { position: absolute; left: 0; top: 0; }
+#ui .cci-atlas-foot { display: flex; align-items: center; gap: 16px; padding: 9px 4px 1px; min-width: 0; }
+/* the footer reports what you have seen: 'Explored: Candyland 37% · Cat Island 12%',
+   each island's figure over a progress rule in its colour (--p from minimap.js) */
+#ui .cci-map-xp { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font: 800 13.5px/1.3 var(--fbody); letter-spacing: .02em; color: var(--ink-soft); }
+#ui .cci-map-xp-lab { font-weight: 900; color: var(--ink); letter-spacing: .12em; text-transform: uppercase; font-size: 10.5px; }
+#ui .cci-map-xp-isl {
+  color: var(--ink); font-weight: 900; padding-bottom: 3px;
+  background: linear-gradient(90deg, var(--xpc) var(--p, 0%), rgba(43,36,66,.14) var(--p, 0%)) left bottom / 100% 3px no-repeat;
+}
+#ui .cci-map-xp-isl.c { --xpc: var(--pink); }
+#ui .cci-map-xp-isl.k { --xpc: var(--teal); }
+#ui .cci-atlas-legend { display: flex; align-items: center; gap: 14px; margin-left: auto; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+#ui .cci-atlas-leg { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+#ui .cci-atlas-leg em { font: 700 11.5px/1 var(--fbody); font-style: normal; color: var(--ink-soft); }
+#ui .cci-atlas-leg em b { font-weight: 900; color: var(--ink); }
+#ui .cci-atlas-leg i { display: block; flex: 0 0 auto; box-sizing: border-box; }
+#ui .cci-atlas-leg .lg-place { width: 14px; height: 14px; border-radius: 50%; background: #fff6d8; border: 3px solid #e8a91c; box-shadow: 0 0 0 1.2px var(--edge), 0 0 7px 2px rgba(255,201,74,.7); }
+#ui .cci-atlas-leg .lg-route { width: 26px; height: 8px; border-radius: 4px; border: 1.5px solid rgba(43,36,66,.6);
+  background: repeating-linear-gradient(90deg, #e21f55 0 7px, #fffaf0 7px 11px); }
+#ui .cci-atlas-leg .lg-fog { width: 18px; height: 12px; border-radius: 4px; border: 1.5px solid var(--edge);
+  background: repeating-linear-gradient(45deg, rgba(176,140,92,.3) 0 1px, transparent 1px 5px), #f8efd8; }
+#ui .cci-atlas .cci-map-modes { margin-left: 0; }
+
+/* ── map chip: what is left of the map while it is OFF (tap / M brings it back) ── */
+#ui .cci-mapchip {
+  right: 20px; bottom: 18px; z-index: 12; display: flex; align-items: center; gap: 7px;
+  padding: 6px 12px 7px 9px; border-radius: 999px; transform-origin: 100% 100%;
+  cursor: pointer; touch-action: none; -webkit-tap-highlight-color: transparent;
+}
+#ui .cci-mapchip-ico { width: 18px; height: 18px; color: var(--ink); flex: 0 0 auto; }
+#ui .cci-mapchip em { font: 800 11px/1 var(--fbody); font-style: normal; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
 /* standing INSIDE a named place: the name goes loud and the pin lights up */
 #ui .cci-map.at-landmark .cci-map-pin { background: var(--gold); opacity: 1; }
 #ui .cci-map.at-landmark .cci-map-here { color: var(--ink); font-weight: 900; }
@@ -240,6 +320,10 @@ export const CSS = `
 #ui .cci-chip { left: 20px; bottom: 18px; z-index: 11; padding: 6px 12px 7px 9px; border-radius: 999px; }
 #ui .cci-chip-in { display: flex; align-items: center; gap: 7px; }
 #ui .cci-chip em { font: 800 11px/1 var(--fbody); font-style: normal; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
+#ui .cci-chip-in { transform-origin: 20% 50%; }
+/* just after the title: the chip spells itself out and wears a soft pink ring */
+#ui .cci-chip.nudge { box-shadow: var(--lift), var(--inlay), 0 0 0 3px rgba(239,79,132,.32); }
+#ui .cci-chip.nudge em { color: var(--ink); }
 
 /* ── interaction prompt ───────────────────────────────────────────────────── */
 #ui .cci-prompt { z-index: 16; left: 50%; bottom: 168px; }
@@ -318,6 +402,13 @@ export const CSS = `
   animation: cci-blink .6s steps(1) infinite;
 }
 @keyframes cci-blink { 0%,49% { opacity: 1 } 50%,100% { opacity: 0 } }
+/* a '...' line is a BEAT: three breathing dots and a stage direction */
+#ui .cci-beat { display: inline-flex; gap: 5px; vertical-align: middle; margin-right: 10px; }
+#ui .cci-beat i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-soft); animation: cci-beat 1.1s ease-in-out infinite; }
+#ui .cci-beat i:nth-child(2) { animation-delay: .18s; }
+#ui .cci-beat i:nth-child(3) { animation-delay: .36s; }
+@keyframes cci-beat { 0%,100% { opacity: .3; transform: translateY(0) } 45% { opacity: 1; transform: translateY(-3px) } }
+#ui .cci-beat-dir { font-style: italic; font-weight: 700; color: var(--ink-soft); vertical-align: middle; }
 /* The advance affordance: always 'E ▸'; a bobbing '▼ n' joins it on the left
    when more lines are queued, so text never simply stops. */
 #ui .cci-adv {
@@ -428,57 +519,227 @@ export const CSS = `
 }
 #ui .cci-fade { z-index: 92; inset: 0; background: #0b0a12; opacity: 0; display: none; }
 
-#ui .cci-intro { z-index: 84; inset: 0; display: flex; align-items: center; justify-content: center; }
-#ui .cci-intro-bg {
-  position: absolute; inset: 0;
+/* ── title screen (ui/title.js) ─────────────────────────────────────────────
+   The LIVE world is the picture: a low golden-hour hero shot from the sea, the
+   horizon ~57% down, so the top half is sky. Layers, back to front:
+     .cci-ti-sky    the sky grade: a backdrop hue/saturation lift masked to the
+                    sky zone (the peach dusk band → candy pink, orange-lit clouds
+                    → coral) under a thin lavender veil at the zenith. (One
+                    rotation for the whole zone: a second, warmer-for-the-top
+                    one turned the lit cloud faces mustard.) (#ui is position:fixed, so it
+                    is an isolated group: mix-blend-mode can't see the canvas,
+                    backdrop-filter can.)
+     .cci-ti-dof    depth of field focused on the islands: a backdrop blur ramped
+                    in from just under them (the tagline + pill sit on soft sea)
+                    and along the top edge (a cloud right by the lens)
+     .cci-ti-scrim  a plum glow behind the tagline + pill, a plum floor for the
+                    credits, and the faintest vignette
+     .cci-ti-motes  sprinkles (three depths, all BEHIND the type)
+     .cci-ti-stage  .cci-ti-top (the logo ALONE, in the sky zone) and
+                    .cci-ti-lower (tagline + pill, over the defocused sea)
+   The logo is staged: ribbon eyebrow · CANDYLAND (bouncy candy-stripe letters)
+   · a gold AND badge · CAT ISLAND (calm mint letters, ears and a tail).
+   Every letter is two layers — a fat ink outline (.o) under a clipped fill
+   (.f) — so the stroke sits OUTSIDE the glyph instead of eating the stripes.
+   --tf is the one size everything hangs off; title.js also scales the logo
+   down if an odd window still can't hold it in the sky zone. */
+#ui .cci-intro {
+  z-index: 84; inset: 0; display: flex; flex-direction: column; overflow: hidden;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  --tf: clamp(34px, min(14vw, 13.5vh), 150px);
+  --ti-ink: #24122c;
+  --ti-plum: 44,14,52;
+  --ti-zone: 50vh;          /* the sky zone the logo is fitted into */
+  --ti-lower: 65vh;         /* where the tagline + pill group starts */
+  --ti-lowh: 5vh;           /* ~half its height: the plum glow's centre sits here below it */
+  --ti-dof-top: 17vh;       /* the top defocus fades out by here */
+  --ti-dof-a: 60vh;         /* the near-sea defocus starts here… */
+  --ti-dof-b: 73vh;         /* …and is full from here down */
+}
+/* the HUD waits underneath while the title is up */
+#ui.cci-titling > .cci:not(.cci-intro):not(.cci-fade):not(.cci-nvig):not(.cci-vig) { visibility: hidden !important; }
+#ui .cci-ti-sr { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+#ui .cci-ti-sky {
+  position: absolute; left: 0; right: 0; top: 0; height: 60vh; pointer-events: none;
+  -webkit-backdrop-filter: hue-rotate(-24deg) saturate(1.16) brightness(1.05); backdrop-filter: hue-rotate(-24deg) saturate(1.16) brightness(1.05);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 72%, transparent 96%); mask-image: linear-gradient(180deg, #000 0%, #000 72%, transparent 96%);
+  background: linear-gradient(180deg, rgba(198,158,255,.26) 0%, rgba(206,164,255,.16) 22%, rgba(236,172,250,.06) 42%, rgba(255,176,214,.08) 62%, rgba(255,176,214,0) 92%);
+}
+/* depth of field, focused on the islands: the near sea (and anything drifting
+   right in front of the lens up top, like a close cloud) goes soft */
+#ui .cci-ti-dof {
+  position: absolute; inset: 0; pointer-events: none;
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,.9) 0, transparent var(--ti-dof-top), transparent var(--ti-dof-a), #000 var(--ti-dof-b));
+  mask-image: linear-gradient(180deg, rgba(0,0,0,.9) 0, transparent var(--ti-dof-top), transparent var(--ti-dof-a), #000 var(--ti-dof-b));
+}
+#ui .cci-ti-scrim {
+  position: absolute; inset: 0; pointer-events: none;
   background:
-    radial-gradient(ellipse 58% 44% at 50% 44%, rgba(255,196,220,.46), rgba(255,175,205,0) 72%),
-    linear-gradient(165deg, #1e0e28 0%, #4b1a3e 42%, #8d2551 72%, #c9527e 100%);
+    radial-gradient(ellipse min(460px, 64vw) max(120px, 14vh) at 50% calc(var(--ti-lower) + var(--ti-lowh)),
+      rgba(var(--ti-plum),.6) 0%, rgba(var(--ti-plum),.4) 42%, rgba(var(--ti-plum),.14) 74%, rgba(var(--ti-plum),0) 100%),
+    linear-gradient(180deg, rgba(var(--ti-plum),0) 76%, rgba(var(--ti-plum),.34) 90%, rgba(30,8,38,.62) 100%),
+    radial-gradient(ellipse 130% 110% at 50% 42%, rgba(0,0,0,0) 64%, rgba(36,10,46,.3) 100%);
 }
-#ui .cci-intro-bg::after {
-  content: ''; position: absolute; inset: 0; opacity: .5;
-  background-image:
-    radial-gradient(circle, rgba(255,255,255,.9) 1.4px, transparent 1.6px),
-    radial-gradient(circle, rgba(255,201,74,.85) 1.6px, transparent 1.8px),
-    radial-gradient(circle, rgba(127,227,192,.8) 1.3px, transparent 1.5px);
-  background-size: 137px 121px, 191px 163px, 223px 197px;
-  background-position: 11px 23px, 71px 5px, 33px 88px;
+#ui .cci-ti-motes { position: absolute; inset: 0; overflow: hidden; }
+#ui .cci-ti-motes i {
+  position: absolute; left: 0; top: 0; border-radius: 99px;
+  border: 1.2px solid rgba(36,18,44,.5); box-shadow: inset 0 1.2px 0 rgba(255,255,255,.55);
 }
-#ui .cci-intro-stripe {
-  position: absolute; left: 0; right: 0; top: 0; height: 12px;
-  background: repeating-linear-gradient(115deg, var(--pink) 0 20px, #fff6fa 20px 40px);
-  border-bottom: 3px solid var(--edge);
+#ui .cci-ti-motes i.mid { opacity: .85; }
+#ui .cci-ti-motes i.far { opacity: .6; filter: blur(.7px); border-color: rgba(36,18,44,.25); box-shadow: none; }
+#ui .cci-ti-stage { position: absolute; inset: 0; }
+#ui .cci-ti-top {
+  position: absolute; left: 0; right: 0; top: calc(env(safe-area-inset-top, 0px) + 2.5vh); height: var(--ti-zone);
+  display: flex; align-items: center; justify-content: center; padding: 0 12px;
 }
-#ui .cci-intro-stripe.b { top: auto; bottom: 0; border-bottom: 0; border-top: 3px solid var(--edge);
-  background: repeating-linear-gradient(115deg, var(--teal) 0 20px, #fff6ec 20px 40px); }
-#ui .cci-intro-in { position: relative; text-align: center; padding: 0 24px; }
-#ui .cci-intro-ico { display: flex; justify-content: center; gap: 22px; }
-#ui .cci-intro-ico span { width: 40px; height: 40px; filter: drop-shadow(0 4px 8px rgba(0,0,0,.5)); }
-#ui .cci-intro-ico span:nth-child(1) { color: #ff8fb4; }
-#ui .cci-intro-ico span:nth-child(2) { color: #ffe0a8; transform: translateY(-5px) scale(1.12); }
-#ui .cci-intro-ico span:nth-child(3) { color: #8fe6c8; }
-#ui .cci-intro h1 {
-  margin: 16px 0 0; font: 800 clamp(44px, 8.4vw, 104px)/.98 var(--fdisp);
-  color: #fff6e2; -webkit-text-stroke: 7px #24122c; paint-order: stroke fill;
-  text-shadow: 0 8px 0 rgba(36,18,44,.6), 0 18px 44px rgba(0,0,0,.6);
+#ui .cci-ti-block { display: flex; flex-direction: column; align-items: center; transform-origin: 50% 50%; }
+#ui .cci-ti-logo {
+  position: relative; display: flex; flex-direction: column; align-items: center;
+  padding: 0 .46em; font-size: var(--tf); line-height: .9;
 }
-#ui .cci-intro h1 .amp { color: var(--gold); font-size: .62em; display: block; margin: 2px 0; -webkit-text-stroke-width: 5px; }
-#ui .cci-intro h1 .cat { color: #8fe6c8; }
-#ui .cci-intro .sub {
-  margin: 22px auto 0; max-width: 30ch;
-  font: 700 clamp(15px, 1.6vw, 21px)/1.35 var(--fbody); font-style: italic; color: #ffe6d2;
-  text-shadow: 0 2px 0 rgba(36,18,44,.75), 0 6px 18px rgba(0,0,0,.6);
-}
-#ui .cci-intro .press {
-  margin-top: 36px; display: inline-block; padding: 9px 20px 10px; border-radius: 999px;
-  background: rgba(20,8,26,.55); border: 2.5px solid rgba(255,238,216,.7);
-  font: 800 12px/1 var(--fbody); letter-spacing: .2em; text-transform: uppercase; color: #ffeed8;
-  animation: cci-pulse 1.6s ease-in-out infinite;
-}
-@keyframes cci-pulse { 0%,100% { opacity: .55; transform: translateY(0) } 50% { opacity: 1; transform: translateY(-3px) } }
 
+/* eyebrow: a pink ribbon with notched tails */
+#ui .cci-ti-eyebrow { position: relative; z-index: 3; font-size: .235em; margin-bottom: .1em; transform-origin: 50% 60%; }
+#ui .cci-ti-rib {
+  position: relative; display: inline-block; padding: .26em .95em .2em;
+  font: 800 1em/1 var(--fdisp); letter-spacing: .17em; color: #fff8ee; white-space: nowrap;
+  background: linear-gradient(180deg, #ff86ae 0%, var(--pink) 58%, #d7386f 100%);
+  border: .11em solid var(--ti-ink); border-radius: .32em;
+  box-shadow: 0 .15em 0 var(--ti-ink), 0 .34em .6em rgba(16,4,24,.4), inset 0 .09em 0 rgba(255,255,255,.5);
+  text-shadow: 0 .09em 0 rgba(36,18,44,.6);
+}
+#ui .cci-ti-rib::before, #ui .cci-ti-rib::after {
+  content: ''; position: absolute; top: .42em; bottom: -.42em; width: 1.1em; z-index: -1;
+  background: linear-gradient(180deg, #c8336a, #a8285a); border: .11em solid var(--ti-ink);
+}
+#ui .cci-ti-rib::before { left: -.78em; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 34% 50%); }
+#ui .cci-ti-rib::after { right: -.78em; clip-path: polygon(0 0, 100% 0, 66% 50%, 100% 100%, 0 100%); }
+
+/* the two island words */
+#ui .cci-ti-word {
+  position: relative; display: flex; align-items: flex-end; justify-content: center; white-space: nowrap;
+  font: 800 1em/.94 var(--fdisp); letter-spacing: -.01em;
+  filter: drop-shadow(0 .06em 0 var(--ti-ink)) drop-shadow(0 .15em .16em rgba(16,4,24,.5));
+}
+#ui .cci-ti-l { position: relative; display: inline-block; transform-origin: 50% 85%; }
+#ui .cci-ti-l b { display: block; font: inherit; }
+#ui .cci-ti-l .o { position: absolute; left: 0; top: 0; color: var(--ti-ink); -webkit-text-stroke: .17em var(--ti-ink); }
+#ui .cci-ti-l .f { position: relative; color: transparent; -webkit-background-clip: text; background-clip: text; }
+#ui .cci-ti-l.cd .f {
+  background-image:
+    linear-gradient(180deg, rgba(255,255,255,.66) 0%, rgba(255,255,255,.14) 30%, rgba(255,255,255,0) 44%),
+    linear-gradient(0deg, rgba(90,10,50,.32) 0%, rgba(90,10,50,0) 30%),
+    repeating-linear-gradient(126deg, var(--c) 0 .09em, #fff6ec .09em .18em);
+}
+#ui .cci-ti-cat { font-size: .8em; margin-top: .02em; }
+#ui .cci-ti-l.ct { transform-origin: 50% 100%; }
+#ui .cci-ti-l.ct .f {
+  background-image:
+    linear-gradient(180deg, rgba(255,255,255,.62) 0%, rgba(255,255,255,.1) 34%, rgba(255,255,255,0) 46%),
+    linear-gradient(180deg, #e6fff6 0%, #a2f0d7 40%, #52c7a8 72%, #2fa88c 100%);
+}
+#ui .cci-ti-sp { display: inline-block; width: .24em; }
+#ui .cci-ti-ears { position: absolute; left: .01em; top: -.25em; width: .7em; height: .5em; transform-origin: 25% 100%; }
+#ui .cci-ti-tail { position: absolute; right: -.42em; bottom: .08em; width: .5em; height: .7em; transform-origin: 8% 92%; }
+
+/* lollipop (peeks from behind the C) + AND badge + sparkles */
+#ui .cci-ti-lolli { position: absolute; left: -.34em; top: -.36em; width: .6em; height: 1.04em; transform-origin: 50% 90%; }
+#ui .cci-ti-and { position: relative; z-index: 2; display: flex; align-items: center; gap: .18em; margin: .06em 0 .02em; font-size: .27em; }
+#ui .cci-ti-andb {
+  font: 800 1em/1 var(--fdisp); letter-spacing: .1em; color: var(--ti-ink); padding: .2em .55em .14em .65em; border-radius: 999px;
+  background: linear-gradient(180deg, #ffeab0, var(--gold) 70%, #f0ab2c);
+  border: .1em solid var(--ti-ink);
+  box-shadow: 0 .12em 0 var(--ti-ink), 0 .26em .5em rgba(16,4,24,.4), inset 0 .07em 0 rgba(255,255,255,.75);
+}
+#ui .cci-ti-and .st { width: .85em; height: .85em; filter: drop-shadow(0 .07em 0 var(--ti-ink)); }
+#ui .cci-ti-spark { position: absolute; width: .19em; height: .19em; color: #fff6d6; filter: drop-shadow(0 0 .05em rgba(255,214,130,.95)); }
+#ui .cci-ti-spark.s1 { right: .18em; top: .2em; }
+#ui .cci-ti-spark.s2 { left: .08em; top: 1.5em; width: .14em; height: .14em; }
+#ui .cci-ti-spark.s3 { right: .52em; bottom: .7em; width: .13em; height: .13em; }
+
+/* the lower group: tagline + press pill (their plum glow is the scrim's first layer) */
+#ui .cci-ti-lower {
+  position: absolute; left: 0; right: 0; top: var(--ti-lower); z-index: 0;
+  display: flex; flex-direction: column; align-items: center; padding: 0 16px;
+}
+#ui .cci-intro .sub {
+  margin: 0; text-align: center;
+  font: 800 clamp(15px, 1.55vw, 22px)/1.3 var(--fbody); font-style: italic; letter-spacing: .01em; color: #fff4e6;
+  text-shadow:
+    2px 0 0 var(--ti-ink), -2px 0 0 var(--ti-ink), 0 2px 0 var(--ti-ink), 0 -2px 0 var(--ti-ink),
+    1.5px 1.5px 0 var(--ti-ink), -1.5px 1.5px 0 var(--ti-ink), 1.5px -1.5px 0 var(--ti-ink), -1.5px -1.5px 0 var(--ti-ink),
+    0 4px 0 var(--ti-ink), 0 6px 14px rgba(10,2,16,.55);
+}
+#ui .cci-ti-pressrow { margin-top: clamp(14px, 2.8vh, 26px); }
+#ui .cci-intro .press {
+  --ring: 0;
+  display: inline-block; padding: .9em 2em .95em; border-radius: 999px; white-space: nowrap;
+  font: 900 clamp(13px, calc(.55vw + 7.5px), 17px)/1 var(--fbody); letter-spacing: .17em; text-transform: uppercase; color: #fffaf2;
+  background: linear-gradient(180deg, #ff8fb6 0%, #ff5c93 46%, #e23a74 100%);
+  border: 3.5px solid var(--ti-ink);
+  text-shadow: 0 2px 0 var(--ti-ink), 1px 0 0 var(--ti-ink), -1px 0 0 var(--ti-ink), 0 -1px 0 var(--ti-ink);
+  box-shadow:
+    0 5px 0 var(--ti-ink),
+    inset 0 2.5px 0 rgba(255,255,255,.55), inset 0 -3px 0 rgba(150,20,70,.35),
+    0 0 0 calc(4px + var(--ring) * 7px) rgba(255,176,206,calc(.34 - var(--ring) * .22)),
+    0 12px 26px rgba(10,4,20,.45);
+}
+#ui .cci-ti-credits {
+  position: absolute; left: 0; right: 0; bottom: env(safe-area-inset-bottom, 0px);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 14px;
+  padding: 10px 16px 18px; text-align: center;
+  font: 700 14.5px/1.25 var(--fbody); letter-spacing: .02em; color: #ffe6d6;
+  text-shadow: 0 1.5px 0 rgba(26,8,32,.95), 0 2px 10px rgba(0,0,0,.65);
+}
+#ui .cci-ti-cr { white-space: nowrap; }
+#ui .cci-ti-cr b { font-weight: 900; color: #fffaf2; }
+#ui .cci-ti-crdot { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); border: 1.5px solid var(--ti-ink); box-shadow: 0 1px 0 var(--ti-ink); }
+/* short windows (landscape phones): tighter, no tagline, the pill lower */
+@media (max-height: 480px) {
+  #ui .cci-intro { --tf: clamp(30px, min(14vw, 17.5vh), 150px); --ti-zone: 52vh; --ti-lower: 70vh; --ti-lowh: 4.5vh; }
+  #ui .cci-ti-top { top: calc(env(safe-area-inset-top, 0px) + 1.5vh); }
+  #ui .cci-intro .sub { display: none; }
+  #ui .cci-ti-pressrow { margin-top: 0; }
+  #ui .cci-intro .press { padding: 8px 20px 9px; font-size: 11.5px; border-width: 3px; }
+  #ui .cci-ti-credits { padding: 6px 16px 8px; font-size: 11.5px; }
+}
+/* tall windows (portrait phones): the logo rides a little lower in its sky,
+   the lower group clears the pier corner, the credits stack */
+@media (max-aspect-ratio: 3/4) {
+  #ui .cci-intro { --ti-zone: 46vh; --ti-lower: 71vh; --ti-lowh: 4vh; --ti-dof-a: 63vh; --ti-dof-b: 76vh; }
+  #ui .cci-ti-top { top: calc(env(safe-area-inset-top, 0px) + 7vh); }
+}
+@media (max-width: 560px) {
+  #ui .cci-ti-credits { flex-direction: column; gap: 3px; font-size: 12.5px; padding-bottom: 16px; }
+  #ui .cci-ti-crdot { display: none; }
+  #ui .cci-intro .press { letter-spacing: .14em; }
+  #ui .cci-ti-logo { padding: 0 .34em; }
+}
+
+/* Small screens: the map STAYS (minimap.js fits its plate to the viewport and
+   it takes taps); only the keyboard card goes. */
+@media (max-width: 760px), (max-height: 460px) {
+  #ui .cci-map { right: 12px; bottom: 12px; padding: 5px; border-radius: 13px; }
+  #ui .cci-map-foot { padding-top: 4px; }
+  #ui .cci-mapchip { right: 12px; bottom: 12px; }
+}
+/* the atlas on a phone / small window: the same sheet, less furniture */
+@media (max-width: 760px), (max-height: 540px) {
+  #ui .cci-atlas-plate { padding: 6px 8px 6px; border-radius: 16px; }
+  #ui .cci-atlas-head { padding: 0 2px 5px; gap: 8px; }
+  #ui .cci-atlas-ico { width: 26px; height: 26px; padding: 4px; }
+  #ui .cci-atlas-title .cci-eyebrow { display: none; }
+  #ui .cci-atlas-title b { font-size: 17px; }
+  #ui .cci-atlas-foot { padding-top: 5px; gap: 10px; }
+  #ui .cci-map-xp { font-size: 12px; }
+  #ui .cci-atlas-leg:nth-child(3) { display: none; }
+}
+@media (max-width: 640px) {
+  #ui .cci-atlas-legend { display: none; }
+}
 @media (max-width: 760px) {
-  #ui .cci-map, #ui .cci-hint { display: none !important; }
+  #ui .cci-hint { display: none !important; }
   #ui .cci-banner-title { font-size: 24px; white-space: normal; }
   #ui .cci-say-text { font-size: 15.5px; }
   #ui .cci-slot { width: 42px; height: 42px; padding: 6px; }

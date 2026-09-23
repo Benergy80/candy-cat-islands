@@ -29,11 +29,17 @@ const params = new URLSearchParams(location.search);
 const SHOT = params.get('shot') === '1';
 
 const app = document.getElementById('app');
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: SHOT });
-renderer.setPixelRatio(SHOT ? 1 : Math.min(window.devicePixelRatio, 2));
+// QUALITY TIER. 'mobile' on phones (coarse pointer + a short side under 900 css px, or ?q=mobile):
+// systems read ctx.state.quality at create() and trim instance counts, particles, shadows and post
+// effects (see docs/BRIEF.md WAVE 3 → iPhone tier). ?q=high forces the desktop tier anywhere.
+const IS_TOUCH = (() => { try { return window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 1; } catch (e) { return false; } })();
+const QUALITY = params.get('q') || ((IS_TOUCH && Math.min(window.innerWidth, window.innerHeight) < 900) ? 'mobile' : 'high');
+const MOBILE = QUALITY === 'mobile';
+const renderer = new THREE.WebGLRenderer({ antialias: !MOBILE, powerPreference: 'high-performance', preserveDrawingBuffer: SHOT });
+renderer.setPixelRatio(SHOT ? 1 : Math.min(window.devicePixelRatio, MOBILE ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = MOBILE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -48,7 +54,7 @@ const ctx = {
   state: {
     time: params.has('time') ? parseFloat(params.get('time')) : 9.5, // hours 0..24
     timeFrozen: SHOT, daylight: 1, isNight: false, island: 'candy', ferry: null, paused: false, elapsed: 0,
-    quality: params.get('q') || 'high',
+    quality: QUALITY, mobile: MOBILE, touch: IS_TOUCH,
   },
   systems: {},
   layers: { water: 1 },

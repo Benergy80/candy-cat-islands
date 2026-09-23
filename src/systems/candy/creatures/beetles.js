@@ -12,7 +12,11 @@
 import * as THREE from 'three';
 import { rng, hash } from '../../../core/util.js';
 import { CANDY } from '../../../core/palette.js';
-import { Pool, part, mergeParts, shadeAxis, applyTagShade, TAU, walkable, turnToward, pathShoulder, uiToast, uiSay } from './common.js';
+import { Pool, part, mergeParts, shadeAxis, applyTagShade, TAU, walkable, turnToward, pathShoulder, uiToast, uiSay, HIT, WET } from './common.js';
+
+// Contract A body (units of the beetle's scale): shell, head, eyes and the
+// splayed legs all sit inside one circle at the pivot.
+export const BEETLE_BODY = { r: 0.46 };
 
 // Candyland's vegetation is wall-to-wall, so most beetles live on the licorice
 // path shoulders where you can actually see them; the rest wander the deep floor.
@@ -64,7 +68,7 @@ function beetleGeo() {
 }
 
 export function create(env) {
-  const { ctx, world, scene, shadowField } = env;
+  const { ctx, world, scene, shadowField, ground } = env;
   const r = rng(hash('candy-beetles'));
   const geo = beetleGeo();
   const mat = applyTagShade(new THREE.MeshStandardMaterial({
@@ -95,7 +99,7 @@ export function create(env) {
       // clock, and each one holds a small lateral offset so the line is a
       // ragged CURVE rather than a ruler.
       const b = {
-        x, z, zone, y: world.height(x, z), yTimer: 0,
+        x, z, zone, y: world.height(x, z), bump: 0, kind: 'beetle',
         head: r() * TAU, curve: (r() - 0.5) * 0.95, ct: r() * 3, base: 0.85 + r() * 0.5,
         speed: 0, scale: 1.3 + r() * 0.55, ph: r() * TAU, rate: 14 + r() * 7,
         lat: (r() - 0.5) * 0.5, sway: 0.5 + r() * 1.1, panic: 0, ahead: null, gap: 0, rank: 0,
@@ -122,12 +126,13 @@ export function create(env) {
   // ── secret: the Royal Jellybean, three times the size and far too dignified
   // to run from anybody. Lives in the deep Gummy Forest.
   const royal = bugs[ZONES[0].n + 3];
-  royal.royal = true; royal.scale = 3.2; royal.base = 0.32; royal.zone = { x: -214, z: -34, r: 12 };
+  royal.royal = true; royal.kind = 'royal_beetle'; royal.scale = 3.2; royal.base = 0.32; royal.zone = { x: -214, z: -34, r: 12 };
   royal.x = -214; royal.z = -34; royal.y = world.height(royal.x, royal.z);
   royal.ahead = null;                                     // royalty walks alone
   for (const b of bugs) if (b.ahead === royal) b.ahead = null;
   pool.tint(bugs.indexOf(royal), 0xffc93a);
   pool.flushColors();
+  for (const b of bugs) { b.r = BEETLE_BODY.r * b.scale; b.sc = b.scale; b.yaw = b.head; b.body = BEETLE_BODY; }
 
   ctx.events.on('world:ready', () => {
     ctx.systems.interaction?.register({
@@ -179,7 +184,7 @@ export function create(env) {
           }
         }
         b.panic = Math.max(0, b.panic - dt * 0.7);
-        let follow = 0;
+        let follow = 0, bx = b.x, bz = b.z;
         if (!fleeing) {
           if (b.ahead && !b.ahead.panic) {
             // Keep station behind the beetle in front, but OFF ITS AXIS: the
@@ -192,7 +197,7 @@ export function create(env) {
             const dx = tx - b.x, dz = tz - b.z, d = Math.hypot(dx, dz);
             if (d > 0.04) b.head = turnToward(b.head, Math.atan2(dx, dz), dt * 3.0);
             follow = Math.min(2.6, d * 2.2);
-            if (d > 6) { b.x = tx; b.z = tz; }              // snapped by terrain: re-form
+            if (d > 6) { bx = tx; bz = tz; }                // snapped by terrain: re-form
           } else {
             // long lazy arcs, re-curving every few seconds — a leader that
             // curves is what makes the whole line behind it curve
@@ -205,12 +210,18 @@ export function create(env) {
         const cruise = b.ahead && !fleeing ? follow : b.base * (1 - night * 0.65);
         const want = (fleeing ? 4.6 : cruise) * (1 + b.panic * 0.8);
         b.speed += (want - b.speed) * Math.min(1, dt * 5);
-        const nx = b.x + Math.sin(b.head) * b.speed * dt;
-        const nz = b.z + Math.cos(b.head) * b.speed * dt;
-        if (walkable(world, nx, nz, 2.2)) { b.x = nx; b.z = nz; }
-        else b.head += 2.0 + r() * 1.2;                       // bounce off water / river
-        // ground height: each bug re-samples ~6×/s, plenty for a 1 u/s crawler
-        if ((b.yTimer -= dt) <= 0) { b.yTimer = 0.16; b.y = world.height(b.x, b.z); }
+        const nx = bx + Math.sin(b.head) * b.speed * dt;
+        const nz = bz + Math.cos(b.head) * b.speed * dt;
+        // Contract A, every frame: pushed clear of trunks, sticks and walls,
+        // standing ON logs and benches, refused at the water's edge
+        b.bump = Math.max(0, b.bump - dt);
+        const res = ground.step(b, nx, nz, b.head, b.scale, BEETLE_BODY, 2.2);
+        if (res & WET) b.head += 2.0 + r() * 1.2;             // bounce off water / river
+        else if ((res & HIT) && b.bump <= 0 && !(b.ahead && !b.ahead.panic && !fleeing)) {
+          // bumped a solid: a leader (or a loner, or a bolting bug) turns round;
+          // a follower just slides along it and keeps station on the one ahead
+          b.bump = 0.7; b.head += Math.PI + (r() - 0.5) * 1.2;
+        }
         // own leg clock per beetle (was `i * 1.7`, which locked neighbours in a
         // train into a marching-band step and sold the "identical clones" read)
         const scuttle = Math.sin(t * b.rate + b.ph);

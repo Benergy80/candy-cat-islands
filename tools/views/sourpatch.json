@@ -1,12 +1,131 @@
 {
-  "sour_village_day":  { "pos": [-140, 40],  "time": 11,   "frames": 100, "dist": 38, "el": 0.58, "az": 0.785 },
-  "sour_close_day":    { "pos": [-144, 34],  "time": 11,   "frames": 110, "dist": 24, "el": 0.50, "az": 2.356 },
-  "sour_dusk_turn":    { "pos": [-140, 40],  "time": 19,   "frames": 50,  "dist": 27, "el": 0.46, "az": 0.785 },
-  "sour_night_hunt":   { "pos": [-140, 40],  "time": 23,   "frames": 140, "dist": 26, "el": 0.55, "az": 0.785 },
-  "sour_pier_safe":    { "pos": [-44, 24],   "time": 22,   "frames": 160, "dist": 44, "el": 0.60, "az": 0.785 },
-  "sour_close_night":  { "pos": [-140, 40],  "time": 23,   "frames": 140, "dist": 12, "el": 0.24, "az": 0.785 },
-  "sour_beach":        { "pos": [-50, 26],   "time": 12,   "frames": 160, "dist": 36, "el": 0.48, "az": 2.356 },
-  "sour_cupcake":      { "pos": [-88, -12],  "time": 12,   "frames": 90,  "dist": 34, "el": 0.5 },
-  "sour_meadow":       { "pos": [-110, -45], "time": 12,   "frames": 90,  "dist": 30, "el": 0.45 },
-  "sour_shrine":       { "pos": [-210, -37], "time": 15,   "frames": 90,  "dist": 40, "el": 0.7 }
+ "sour_village_day": {
+  "pos": [
+   -140,
+   40
+  ],
+  "time": 11,
+  "frames": 100,
+  "dist": 38,
+  "el": 0.58,
+  "az": 0.785
+ },
+ "sour_close_day": {
+  "pos": [
+   -144,
+   34
+  ],
+  "time": 11,
+  "frames": 110,
+  "dist": 24,
+  "el": 0.5,
+  "az": 2.356
+ },
+ "sour_dusk_turn": {
+  "pos": [
+   -140,
+   40
+  ],
+  "time": 19,
+  "frames": 50,
+  "dist": 27,
+  "el": 0.46,
+  "az": 0.785
+ },
+ "sour_night_hunt": {
+  "pos": [
+   -140,
+   40
+  ],
+  "time": 23,
+  "frames": 140,
+  "dist": 26,
+  "el": 0.55,
+  "az": 0.785
+ },
+ "sour_pier_safe": {
+  "pos": [
+   -44,
+   24
+  ],
+  "time": 22,
+  "frames": 160,
+  "dist": 44,
+  "el": 0.6,
+  "az": 0.785
+ },
+ "sour_close_night": {
+  "pos": [
+   -140,
+   40
+  ],
+  "time": 23,
+  "frames": 140,
+  "dist": 12,
+  "el": 0.24,
+  "az": 0.785
+ },
+ "sour_beach": {
+  "pos": [
+   -50,
+   26
+  ],
+  "time": 12,
+  "frames": 160,
+  "dist": 36,
+  "el": 0.48,
+  "az": 2.356
+ },
+ "sour_cupcake": {
+  "pos": [
+   -88,
+   -12
+  ],
+  "time": 12,
+  "frames": 90,
+  "dist": 34,
+  "el": 0.5
+ },
+ "sour_meadow": {
+  "pos": [
+   -110,
+   -45
+  ],
+  "time": 12,
+  "frames": 90,
+  "dist": 30,
+  "el": 0.45
+ },
+ "sour_shrine": {
+  "pos": [
+   -210,
+   -37
+  ],
+  "time": 15,
+  "frames": 90,
+  "dist": 40,
+  "el": 0.7
+ },
+ "sour_w3_props_day": {
+  "pos": [
+   -137,
+   41
+  ],
+  "time": 11,
+  "frames": 120,
+  "dist": 24,
+  "el": 0.55,
+  "az": 0.785
+ },
+ "sour_w3_props_night": {
+  "pos": [
+   -140,
+   40
+  ],
+  "time": 23,
+  "frames": 150,
+  "dist": 22,
+  "el": 0.5,
+  "az": 0.785
+ }
 }

@@ -23,6 +23,37 @@ import * as G from './nature/geo.js';
 import * as PL from './nature/place.js';
 import { buildProps } from './nature/props.js';
 import { createBirds } from './nature/birds.js';
+import { createInstanceCuller, withNearField, NEAR } from '../terrain/instcull.js';
+import { createBlobShadows } from '../terrain/blobs.js';
+
+// ── MOBILE TIER (docs/BRIEF.md Contract I) ───────────────────────────────────
+// The planner runs identically on both tiers (same seeds, same order, same rng
+// draws per item, same instance count), so the island is the same island. On
+// ctx.state.mobile:
+//   · NEAR FIELD, NOT A COUNT — small planting (tufts, flowers, catnip,
+//     lavender, pebbles, shells, litter…) keeps every instance, tagged with a
+//     rank (a position hash; −1 for anything owning a collider). The culler
+//     and the vertex shader draw 100% of them within 28 u of the VISITOR, 60%
+//     out to 60 u, 25% beyond, none past 130 u, each growing in over 3 u
+//     (terrain/instcull.js, NEAR FIELD). The old per-species count cut left the
+//     Main Street meadow half-bald right under the lens.
+//   · SHADOWS FROM TREES ONLY, NEAR ONLY — cypress, pine, olive and palm cast
+//     within NEAR.SHADOW (40 u) of the visitor, the caster shrinking over the
+//     last 6 u; rocks, hedges, boxes, posts and shrubs do not. The hero-prop
+//     merge (feather, maze, pond, stacks) keeps the shadow the first tier pass
+//     left it.
+//   · a soft contact blob under each tree fades IN past 34–40 u where its real
+//     shadow ends (scratch posts and topiary, which never cast, keep theirs at
+//     every distance);
+//   · every species is packed per frame to what the camera sees.
+const MOBILE_NEAR = new Set(['grass', 'wildflower', 'catnipLow', 'catnip', 'catnipTall', 'lavender', 'marram', 'scree',
+  'shell', 'litter', 'sunflower', 'marigold', 'driftwood', 'fishbone', 'yarn', 'agave']);
+const MOBILE_TREES = new Set(['cypress', 'pine', 'olive', 'palm']);
+const MOBILE_BLOB = { cypress: 0.9, pine: 0.75, olive: 1.0, palm: 0.6, scratchpost: 0.9, topiary: 1.0 };
+function keepHash(x, z, salt) {
+  const h = Math.sin(x * 127.1 + z * 311.7 + salt * 74.7) * 43758.5453;
+  return h - Math.floor(h);
+}
 
 const TAU = Math.PI * 2;
 const WIND = 0.85;      // prevailing wind bearing: everything leans off this
@@ -72,12 +103,19 @@ export function create(ctx) {
   const t0 = performance.now();
   const group = new THREE.Group(); group.name = 'cat_nature';
   scene.add(group);
+  const MOBILE = !!ctx.state?.mobile;
+  const culler = MOBILE ? createInstanceCuller(ctx, { cell: 24 }) : null;
   const uniforms = { uTime: { value: 0 } };
   const rand = rng(hash('cat-nature-build'));
 
   // ── materials ─────────────────────────────────────────────────────────────
-  const matFoliage = inject(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0, flatShading: true, side: THREE.DoubleSide }), uniforms, SWAY, 'catnat-foliage');
-  const matBlade = inject(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0, flatShading: false, side: THREE.DoubleSide }), uniforms, SWAY, 'catnat-blade');
+  const mkFoliage = () => inject(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0, flatShading: true, side: THREE.DoubleSide }), uniforms, SWAY, 'catnat-foliage');
+  const mkBlade = () => inject(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0, flatShading: false, side: THREE.DoubleSide }), uniforms, SWAY, 'catnat-blade');
+  const matFoliage = mkFoliage();
+  const matBlade = mkBlade();
+  // mobile near-field twins: the same shading plus the per-instance grow-in
+  // (a material of their own, so trees/rocks/props never see an aRank)
+  const nearMat = MOBILE ? new Map([[matFoliage, withNearField(mkFoliage(), 'density')], [matBlade, withNearField(mkBlade(), 'density')]]) : null;
   const matBird = inject(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0, flatShading: true, side: THREE.DoubleSide }), uniforms, FLAP, 'catnat-bird', true, HEAD + 'attribute float aFlap;\n');
   const matEye = new THREE.MeshStandardMaterial({ color: 0xfff2b8, emissive: 0xffdb52, emissiveIntensity: 2.6, roughness: 0.35, side: THREE.DoubleSide });
   matEye.toneMapped = false;                       // the eyes must survive ACES at night
@@ -85,6 +123,10 @@ export function create(ctx) {
   const matWater = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.15, metalness: 0.15, transparent: true, opacity: 0.72 });
   const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   inject(depthMat, uniforms, SWAY, 'catnat-depth', false);
+  // mobile trees: same swaying caster, shrinking away past NEAR.SHADOW
+  const depthMatNear = MOBILE
+    ? withNearField(inject(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), uniforms, SWAY, 'catnat-depth', false), 'shadow')
+    : null;
 
   // ── hero props (also reserves their footprints in the planner) ────────────
   // Architecture runs first (main.js order), so its colliders are the "do not
@@ -752,10 +794,15 @@ export function create(ctx) {
     if (!items.length) continue;
     const geo = spec.geo(rng(hash('cat-nature-geo-' + spec.name)));
     const n = items.length;
-    const mesh = new THREE.InstancedMesh(geo, spec.mat, n);
+    // mobile near field: same instances as desktop, plus a rank per instance
+    const nmat = MOBILE && MOBILE_NEAR.has(spec.name) ? nearMat.get(spec.mat) : null;
+    const rank = nmat ? new Float32Array(n) : null;
+    const mesh = new THREE.InstancedMesh(geo, nmat || spec.mat, n);
     mesh.name = 'cat_nature_' + spec.name;
     const phase = new Float32Array(n), swayA = new Float32Array(n), tint = new Float32Array(n * 3);
     const sunYaw = r() * TAU;
+    let salt = 0; if (rank) for (let c = 0; c < spec.name.length; c++) salt += spec.name.charCodeAt(c) * (c + 1);
+    let j = 0;
     for (let i = 0; i < n; i++) {
       const it = items[i];
       // SIZE TIERS: `tiers: [[lo,hi], …]` draws a discrete size class per
@@ -785,12 +832,19 @@ export function create(ctx) {
       }
       _e.set(rx, yaw, rz, 'YXZ');
       _m.compose(_p.set(it.x, it.y, it.z), _q.setFromEuler(_e), _s.set(s, sy, s));
-      mesh.setMatrixAt(i, _m);
-      phase[i] = r() * TAU;
-      swayA[i] = (spec.sway ?? 0) * (0.65 + r() * 0.7);
+      const ph = r() * TAU;
+      const sw = (spec.sway ?? 0) * (0.65 + r() * 0.7);
       _c.set(spec.tints ? spec.tints[(r() * spec.tints.length) | 0] : 0xffffff);
       _c.offsetHSL((r() - 0.5) * (spec.hueJit ?? 0.03), (r() - 0.5) * 0.1, (r() - 0.5) * (spec.lumJit ?? 0.09));
-      tint[i * 3] = _c.r; tint[i * 3 + 1] = _c.g; tint[i * 3 + 2] = _c.b;
+      if (rank) {
+        const owns = (spec.collide && s >= (spec.collideMin ?? 0)) || !!spec.collideBox;
+        rank[j] = owns ? -1 : keepHash(it.x, it.z, salt);
+      }
+      mesh.setMatrixAt(j, _m);
+      phase[j] = ph;
+      swayA[j] = sw;
+      tint[j * 3] = _c.r; tint[j * 3 + 1] = _c.g; tint[j * 3 + 2] = _c.b;
+      j++;
       // ── wave-2 collision contract ──────────────────────────────────────────
       // Circles for trunks, rocks and bush masses; ORIENTED BOXES for hedges.
       // `rot` is negated: every consumer of a box collider maps world→local with
@@ -805,13 +859,20 @@ export function create(ctx) {
     geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1));
     geo.setAttribute('aSway', new THREE.InstancedBufferAttribute(swayA, 1));
     geo.setAttribute('aTint', new THREE.InstancedBufferAttribute(tint, 3));
+    if (rank) geo.setAttribute('aRank', new THREE.InstancedBufferAttribute(rank, 1));
     mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    mesh.count = j;                       // === n on both tiers
     mesh.castShadow = !!spec.cast; mesh.receiveShadow = !!spec.cast;
-    if (spec.cast) mesh.customDepthMaterial = depthMat;
+    if (spec.cast && !MOBILE) mesh.customDepthMaterial = depthMat;
+    if (MOBILE) {                         // receive stays as authored
+      mesh.castShadow = !!spec.cast && MOBILE_TREES.has(spec.name);
+      if (mesh.castShadow) mesh.customDepthMaterial = depthMatNear;
+    }
     mesh.computeBoundingSphere();
     group.add(mesh);
     meshes.push(mesh);
-    instances += n; triangles += n * G.triCount(geo);
+    if (culler) culler.add(mesh, { pad: 2.0, density: !!rank, shadowNear: mesh.castShadow ? NEAR.SHADOW : 0 });
+    instances += j; triangles += j * G.triCount(geo);
     spec.items = items;
   }
 
@@ -900,6 +961,14 @@ export function create(ctx) {
   const matBlob = new THREE.MeshStandardMaterial({ color: 0x1d2a18, roughness: 1, metalness: 0, transparent: true, opacity: 0.3, depthWrite: false });
   const birds = createBirds(ctx, G.gGull(), G.gPigeon(), matBird, G.gBirdBlob(), matBlob);
   for (const m of birds.meshes) { group.add(m); instances += m.count; triangles += m.count * G.triCount(m.geometry); }
+  // Mobile: the birds and koi are written every frame and were never culled
+  // (they drew from Candyland). Fixed spheres around where they can ever be —
+  // the flocks' wheel + scatter radii, the pond — let three cull them normally.
+  if (MOBILE) {
+    const fence = (m, x, y, z, r) => { if (!m) return; m.boundingSphere = new THREE.Sphere(new THREE.Vector3(x, y, z), r); m.frustumCulled = true; };
+    for (const m of birds.meshes) fence(m, 122, 14, 4, 125);
+    if (koiMesh && props.meta.pond) fence(koiMesh, props.meta.pond.x, props.meta.pond.y, props.meta.pond.z, (props.meta.pond.r || 6) + 3);
+  }
 
   // ── colliders for trunks and hero props ───────────────────────────────────
   ctx.colliders = ctx.colliders || [];
@@ -940,6 +1009,35 @@ export function create(ctx) {
       if (touched) { mesh.instanceMatrix.needsUpdate = true; mesh.computeBoundingSphere(); }
     }
     console.warn(`[cat/nature] clearance pass: ${cleared} instances blanked inside ${rects.length} building rects`);
+  });
+
+  // mobile: contact blobs (after the clearance pass above). Under a TREE the
+  // blob only grows in past 34–40 u from the visitor, where the tree's real
+  // shadow ends (aNear = 1); posts and topiary never cast, so theirs stay.
+  if (MOBILE) ctx.events.on('world:ready', () => {
+    const pts = [], near = [];
+    const m4 = new THREE.Matrix4(), pv = new THREE.Vector3(), qv = new THREE.Quaternion(), sv = new THREE.Vector3();
+    for (const mesh of meshes) {
+      const nm = mesh.name.replace('cat_nature_', '');
+      const k = MOBILE_BLOB[nm]; if (!k) continue;
+      const tree = mesh.castShadow && MOBILE_TREES.has(nm) ? 1 : 0;
+      const g = mesh.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      const half = Math.max(g.boundingBox.max.x - g.boundingBox.min.x, g.boundingBox.max.z - g.boundingBox.min.z) / 2;
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, m4); m4.decompose(pv, qv, sv);
+        if (!(sv.x > 1e-4)) continue;
+        pts.push({ x: pv.x, z: pv.z, r: Math.min(6, Math.max(0.8, half * sv.x * k)) });
+        near.push(tree);
+      }
+    }
+    const blobs = createBlobShadows(ctx, pts, { name: 'cat_nature_blobs', opacity: 0.32, culler });
+    if (blobs) {
+      // read by the culler at its first-render snapshot, so it is packed too
+      blobs.geometry.setAttribute('aNear', new THREE.InstancedBufferAttribute(new Float32Array(near), 1).setUsage(THREE.DynamicDrawUsage));
+      withNearField(blobs.material, 'blobmix');
+      group.add(blobs);
+    }
   });
 
   triangles += G.triCount(props.geo) + G.triCount(props.water) + (props.signGeo ? G.triCount(props.signGeo) : 0);

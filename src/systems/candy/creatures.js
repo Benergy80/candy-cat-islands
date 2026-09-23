@@ -14,13 +14,18 @@
 //                           heads (flowers.js), gone after dusk
 //   candy flowers       66  the perches themselves, merged into creature-props
 //   marshmallow sheep    8  Lollipop Meadow lane, pettable, shepherd's bell —
-//                           lobed fleece, four dark hooves, tail, face clear of
-//                           the wool, so they read from straight above
+//                           puff-cloud fleece, toasted-marshmallow face with big
+//                           white eyes, four chocolate hooves, tail; after dark
+//                           they walk to the bell and sleep round it, heads in,
+//                           with a faint moonlit glow so they never go missing
 //   syrup fish          12  9 searched river stations (never under a bridge) +
 //                           3 in Chocolate Lake; arc, splash and ripple at both
 //                           ends of every leap
-//   sprinkle-ants       30  two-lane column ON the licorice shoulder into the
-//                           village (trail derived from the path polyline)
+//   sprinkle-ants       14  red-licorice carriers (head / thorax / gaster, white
+//                           eyes, stepping legs) on a two-lane loop along the
+//                           licorice road into the village: out empty, home with
+//                           a sprinkle crosswise in the jaws, 1.5 body lengths
+//                           apart; the column parts round the visitor and kids
 //   jellyfish           12  Sugar Pier bay, up from dusk, soft glow
 //   sugar-gliders      5–7  daylight V crossings at 16–19.5 u — the altitude is
 //                           non-negotiable; the lens only chooses where
@@ -35,14 +40,27 @@
 // flock all cost a single extra draw call between them. Nothing on this island
 // floats over a picture of the ground.
 //
+// GROUND (WAVE 3, Contract A): every WALKER — sheep, snails, beetles, ants —
+// takes its y from ctx.systems.player.groundInfo(x,z).h every frame and runs
+// ctx.systems.player.pushOut on its body after moving (creatures/common.js,
+// class Ground). Solids (trunks, candy canes, walls, rocks) push it clear and
+// its planner turns it round (ants detour instead: their planner is the trail);
+// LOW props (benches, logs, crates ≤ 1.6 u) are walked ON. Butterflies ride
+// over the same ground heights. The visitor and every Sour Patch Kid are
+// moving bodies no walker may pass through (Ground.bindDynamic): a walker is
+// shoved aside and its planner turns it, the ant column parts round them, and
+// butterflies shy out of the visitor's body and split apart in the air. api.debugPositions() → [{x,y,z,r,kind}] for a
+// verifier; api.groundStats() → step/hit/wet counters.
+//
 // 16 meshes exist; 12 are drawn by day (13 during a glider crossing) and 14 at
-// night — well inside the 25-call creature budget — for 43.4k triangles against
-// a 60k budget. The whole group is hidden when the camera is not on Candyland,
+// night — well inside the 25-call creature budget — for 60.3k triangles (the
+// WAVE 3 red-licorice ants and puff-cloud sheep cost ~13k more than the old
+// lumps; the game camera views measure 0.70–0.74M triangles in total). The whole group is hidden when the camera is not on Candyland,
 // so Cat Island pays nothing for any of it, and the group carries noOcclude /
 // noInstOcclude so no animal can ever shove the game camera around.
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
-import { flapClock, ShadowField, ColliderGrid, OBSTACLES } from './creatures/common.js';
+import { flapClock, ShadowField, ColliderGrid, OBSTACLES, Ground, bodyCircles } from './creatures/common.js';
 import * as beetles from './creatures/beetles.js';
 import * as snails from './creatures/snails.js';
 import * as butterflies from './creatures/butterflies.js';
@@ -76,7 +94,7 @@ export function create(ctx) {
   ctx.scene.add(group);
 
   // Every grounded creature draws its contact shadow into ONE pooled decal
-  // mesh (78 butterflies + 52 beetles + 12 snails + 8 sheep + 30 ants + the
+  // mesh (78 butterflies + 52 beetles + 12 snails + 8 sheep + 14 ants + the
   // glider flock), so grounding the whole island costs a single draw call.
   const shadowField = new ShadowField(group, 200);
 
@@ -89,7 +107,11 @@ export function create(ctx) {
   obstacles.rebuild();
   OBSTACLES.grid = obstacles;
 
-  const env = { ctx, world: ctx.world, scene: group, THREE, shadowField, obstacles };
+  // Contract A adapter: the player's ground core (it is created AFTER this
+  // system, so it is looked up every frame in update → ground.bind()).
+  const ground = new Ground(ctx, ctx.world);
+
+  const env = { ctx, world: ctx.world, scene: group, THREE, shadowField, obstacles, ground };
   const parts = {};
   for (const [name, mod] of MODULES) {
     try { parts[name] = mod.create(env); }
@@ -116,13 +138,90 @@ export function create(ctx) {
     `${stats.blossoms} blossoms · ${stats.fishStations} fish stations (13 calls/33.6k day · 18/26.8k night)`);
 
   let hidden = false;
+  let staging = null;
   const api = {
     group, parts, stats,
     report: () => stats,
     /** For other systems: where the flock currently is, for a shepherd NPC etc. */
     flock: () => parts.sheep?.flock ?? [],
+    /** Authoring/views: tonight's sheep huddle round the bell, finished now. */
+    settleFlock: () => parts.sheep?.settle?.(),
     /** Authoring/views: put a sugar-glider V over the camera at progress t. */
     flypast: (t) => parts.birds?.cue?.(t),
+    /**
+     * Every walking NPC's body circle, for a verifier: { x, y, z, r, kind,
+     * onProp, probes }. (x,z,r) is the pivot circle pushOut resolved LAST this
+     * frame; probes are the extra nose/tail circles of long animals (sheep,
+     * ants), resolved before it. y is where the feet rest (groundInfo h).
+     */
+    debugPositions() {
+      const out = [];
+      const add = (list, kind) => {
+        if (!Array.isArray(list)) return;
+        for (const e of list) {
+          if (!e || typeof e.x !== 'number') continue;
+          out.push({ x: e.x, y: e.y, z: e.z, r: e.r ?? 0.4, kind: e.kind || kind, onProp: !!e.prop, probes: bodyCircles(e) });
+        }
+      };
+      add(parts.sheep?.flock, 'sheep');
+      add(parts.snails?.snails, 'snail');
+      add(parts.beetles?.bugs, 'beetle');
+      add(parts.ants?.column, 'ant');
+      return out;
+    },
+    /**
+     * Authoring/views/tests: move the walker of `kind` ('sheep' | 'snail' |
+     * 'beetle' | 'royal_beetle') nearest (x,z) to (x,z), facing `heading`
+     * (yaw, radians). A beetle train leader brings its followers along. The
+     * walker is then grounded and pushed out by the normal Contract-A step on
+     * the next frame — staging never bypasses collision. Returns the walker.
+     */
+    stage(kind, x, z, heading) {
+      const lists = { sheep: parts.sheep?.flock, snail: parts.snails?.snails, beetle: parts.beetles?.bugs, royal_beetle: parts.beetles?.bugs };
+      const list = lists[kind]; if (!Array.isArray(list)) return null;
+      let best = null, bd = Infinity;
+      for (const e of list) {
+        if (staging && staging.has(e)) continue;          // stageAll: one walker per entry
+        if ((e.kind || kind) !== kind || (kind === 'beetle' && e.ahead)) continue;
+        const d = Math.hypot(e.x - x, e.z - z); if (d < bd) { bd = d; best = e; }
+      }
+      if (!best) return null;
+      if (staging) staging.add(best);
+      const dx = x - best.x, dz = z - best.z;
+      best.x = x; best.z = z;
+      if (typeof heading === 'number') best.head = heading;
+      if (kind === 'sheep') { best.mode = 'graze'; best.timer = 6; best.tx = x; best.tz = z; }
+      if (kind === 'beetle' || kind === 'royal_beetle') {
+        best.panic = 0;
+        for (const f of list) {
+          let a = f.ahead, hops = 0;
+          while (a && a !== best && hops++ < 8) a = a.ahead;
+          if (a === best) { f.x += dx; f.z += dz; if (typeof heading === 'number') f.head = heading; }
+        }
+      }
+      return best;
+    },
+    /** stage() for several walkers at once: [[kind, x, z, heading?], ...] (views can only call one path once). */
+    stageAll(list) {
+      staging = new Set();
+      try { return Array.isArray(list) ? list.map((a) => (Array.isArray(a) ? api.stage(...a) : null)) : []; }
+      finally { staging = null; }
+    },
+    /**
+     * Authoring/views/tests: teleport the visitor onto the ant column's centre
+     * line at arc length s (0 = anthill … trailLength = lollipop), `off` u to
+     * the side (+ = village side, − = out on the road), so a view can show the
+     * column parting round him. Returns the point.
+     */
+    visitAntTrail(s = 8, off = 0) {
+      const A = parts.ants; if (!A?.at) return null;
+      const p = A.at(s);
+      const x = p.x + Math.cos(p.dir) * (p.sh + off), z = p.z - Math.sin(p.dir) * (p.sh + off);
+      ctx.systems.player?.teleport?.(x, z);
+      return { x, z };
+    },
+    /** Contract A counters since load: steps, hits (turned round), wet (refused), onProp (frames stood on a prop). */
+    groundStats: () => ({ ...ground.stats, live: ground.live }),
     update(dt, ctx) {
       // Cull the whole island's wildlife when nobody is looking at Candyland.
       const cam = ctx.camera.position;
@@ -133,6 +232,8 @@ export function create(ctx) {
 
       flapClock.value = ctx.state.elapsed;
       obstacles.sync();
+      ground.bind();
+      ground.bindDynamic(ctx);          // the visitor + Sour Patch Kids: nobody walks through them
       for (const [name] of MODULES) {
         const p = parts[name];
         if (!p?.update) continue;

@@ -175,7 +175,7 @@ export function authorPickups(ctx, clear, nudge) {
   tool({
     id: 'pick_salt', x: booth.x - 2.15, z: booth.z - 1.95, itemId: 'salt', n: 1, fixed: true,
     y: (booth.y ?? world.height(booth.x, booth.z)) + 1.76, r: 2.4,
-    label: 'Take the Salt Shaker',
+    label: 'Take the Salt Shaker', where: 'on the Sugar Pier ticket counter',
     say: ['Somebody left a salt shaker on the ticket counter. A card under it: "FOR THE WALK HOME. — the management"'],
   });
   // Salt Gun — a small clear patch BESIDE the SALT LINE sign, on the pier side,
@@ -188,7 +188,7 @@ export function authorPickups(ctx, clear, nudge) {
   tool({
     id: 'pick_saltgun', x: -46.2, z: 12.6, itemId: 'saltgun', n: 1, r: 2.9,
     site: { x: -46.2, z: 12.6, radii: [0, 0.9, 1.8, 2.7], pad: 1.4, island: 'candy' },
-    label: 'Take the Salt Gun',
+    label: 'Take the Salt Gun', where: 'by the SALT LINE sign',
     say: ['A salt gun, dropped in the grass by the SALT LINE sign. The hopper is full. Somebody has been drawing lines out here.'],
   });
   // Candy-Cane Bat — left on the grass beside the village bandstand. Measured
@@ -197,21 +197,21 @@ export function authorPickups(ctx, clear, nudge) {
   tool({
     id: 'pick_bat', x: -127.0, z: 58.5, itemId: 'bat', n: 1, r: 2.9,
     site: { x: -127.0, z: 58.5, radii: [0, 0.9, 1.8, 2.7], pad: 1.4, island: 'candy' },
-    label: 'Take the Candy-Cane Bat',
+    label: 'Take the Candy-Cane Bat', where: 'by the village bandstand',
     say: ['The village band leaves a spare candy cane on the grass by the bandstand. It is exactly bat-shaped. This is not an accident.'],
   });
   // Gumball Slingshot — on the steps of the Great Cupcake.
   tool({
     id: 'pick_slingshot', x: -88, z: -12, itemId: 'slingshot', n: 1, r: 2.9,
     site: { x: -88, z: -12, radii: [0.8, 1.8, 2.8], pad: 1.4, island: 'candy' },
-    label: 'Take the Gumball Slingshot',
+    label: 'Take the Gumball Slingshot', where: 'under the Great Cupcake steps',
     say: ['A slingshot and a pocketful of gumballs, hidden under the cupcake steps. Sticky, but loaded.'],
   });
   // Lemon Spritzer — an offering at the Sour Shrine.
   tool({
     id: 'pick_spritzer', x: -215.6, z: -42.2, itemId: 'spritzer', n: 1, r: 2.9,
     site: { x: -215.6, z: -42.2, radii: [0.8, 1.8, 2.8], pad: 1.4, island: 'candy' },
-    label: 'Take the Lemon Spritzer',
+    label: 'Take the Lemon Spritzer', where: 'at the Sour Shrine',
     say: ['An offering at the shrine: one lemon, fitted with a trigger. The sour ones will hate this.'],
   });
   // Spray Bottle — the BACK alley behind the Fish Monger / Catnip Dispensary,
@@ -236,7 +236,7 @@ export function authorPickups(ctx, clear, nudge) {
   tool({
     id: 'pick_caramelizer', x: 213.0, z: 42.0, itemId: 'caramelizer', n: 1, r: 3.2,
     site: { x: 213.0, z: 42.0, radii: [0, 0.9, 1.8, 2.7], pad: 1.4, island: 'cat' },
-    label: 'Take the Caramelizer',
+    label: 'Take the Caramelizer', map: false,          // the secret stays a secret
     say: ['THE CARAMELIZER, left burning at the foot of the tower steps. The keeper uses it for creme brulee, allegedly. The door is scorched black.'],
   });
   // Two fuel cans, hidden badly.
@@ -249,7 +249,98 @@ export function authorPickups(ctx, clear, nudge) {
     site: { x: 120.5, z: 75.5, radii: [0.8, 1.8, 2.8], pad: 1.4, island: 'cat' },
   });
 
+  // ── WAVE 3 weapons (Contract C) ─────────────────────────────────────────
+  // Each one sits where it is USEFUL and where a path can see it: the two
+  // anti-Kid heavies on Candyland's approaches, the anti-cat soft stuff on Cat
+  // Island's arrival side. Every one gets a map marker (inventory.js).
+  const W3 = [
+    ['pick_poprocks', 'poprocks', -66.5, 37.5, 'candy', 'Take the Pop Rocks', 'by the Sugar Pier path',
+      'A FREE SAMPLE stand for Pop Rocks, abandoned mid-shift. The sign says "DO NOT COMBINE WITH SODA OR CHILDREN."'],
+    ['pick_cannon', 'jawbreaker_cannon', -124.5, -48.5, 'candy', 'Take the Jawbreaker Cannon', 'on the Candy Palace approach',
+      'The palace salute cannon, loaded with jawbreakers. The plaque reads: "FOR CEREMONIAL USE." It is not ceremonial.'],
+    ['pick_whip', 'licorice_whip', -190.5, -7.5, 'candy', 'Take the Licorice Whip', 'on the Gummy Forest path',
+      'A licorice whip, hung on a trail sign. The Sour Patch Kids flinch when they walk past it. Good.'],
+    ['pick_gum', 'bubblegum_blower', -157.5, 51.5, 'candy', 'Take the Bubblegum Blower', 'in Gumdrop Village',
+      'A bubble gun loaded with extra-sticky gum. Anything it hits stays put for a bit.'],
+    ['pick_marsh', 'marshmallow_launcher', 86.0, 27.5, 'cat', 'Take the Marshmallow Launcher', 'by the Welcome Plaza',
+      'A welcome gift from the Cat Island tourist board, apparently. Soft. Harmless. Extremely bouncy.'],
+    ['pick_balloons', 'water_balloon', 106.0, 47.5, 'cat', 'Take the Water Balloons', 'at Fish Harbor',
+      'A pail of water balloons behind the fish crates. Every cat on the quay is suddenly very busy elsewhere.'],
+    ['pick_boomerang', 'peppermint_boomerang', 150.5, -49.5, 'cat', 'Take the Peppermint Boomerang', 'in Catnip Commons',
+      'A peppermint boomerang, lost in the Commons. It keeps coming back. So will you, probably.'],
+  ];
+  for (const [id, itemId, x, z, island, label, where, line] of W3) {
+    tool({
+      id, x, z, itemId, n: 1, r: 3.0, label, where, say: [line],
+      site: { x, z, radii: [0, 1.2, 2.4, 3.6, 4.8], pad: 1.4, island, bias: (c) => (inBuilding(ctx, c.x, c.z) ? -50 : 0) },
+    });
+  }
+
   console.warn('[inventory] tool sites: ' + sited.map((s) => `${s[0]}@${s[1]},${s[2]} (${s[3]})`).join(' · '));
 
+  // ── WAVE 3 ammo caches: >= 30 per island, themed, near where each is useful ─
+  const counts = { candy: 0, cat: 0 };
+  const cacheLog = [];
+  for (const [cid, itemId, ax, az, want, rad, island, label] of CACHES) {
+    const rnd = rng(hash('ammo-' + cid));
+    const mine = [];
+    let spread = rad;
+    for (let tries = 0; tries < want * 90 && mine.length < want; tries++) {
+      if (tries > 0 && tries % (want * 30) === 0) spread += 3;          // crowded spot: widen the ring
+      const a = rnd() * Math.PI * 2, d = spread * (0.2 + 0.8 * Math.sqrt(rnd()));
+      const x = ax + Math.cos(a) * d, z = az + Math.sin(a) * d;
+      if (world.islandAt(x, z) !== island) continue;
+      if (!clear(x, z, 0.9)) continue;
+      if (inBuilding(ctx, x, z)) continue;
+      if (out.some((p) => Math.hypot(p.x - x, p.z - z) < 2.2)) continue;
+      mine.push({ x, z });
+      out.push({
+        id: `ammo_${cid}_${mine.length}`, x, z, itemId, n: 1,
+        cache: { id: cid, x: ax, z: az, itemId, label, island },
+      });
+    }
+    counts[island] += mine.length;
+    cacheLog.push(`${cid}:${mine.length}/${want}`);
+  }
+  console.warn(`[inventory] ammo caches — candy ${counts.candy}, cat ${counts.cat} · ${cacheLog.join(' ')}`);
+
   return out;
+}
+
+// [id, ammo item, x, z, count, radius, island, map label]
+const CACHES = [
+  // Candyland: Sour Patch country — heavy stuff near the Kids' haunts
+  ['c_palace', 'ammo_jawbreakers', -130, -53, 6, 7, 'candy', 'Jawbreakers'],
+  ['c_forest', 'ammo_jawbreakers', -187, -25, 5, 7, 'candy', 'Jawbreakers'],
+  ['c_meadow', 'ammo_poprocks', -103, -57, 6, 8, 'candy', 'Pop Rocks'],
+  ['c_pier', 'ammo_poprocks', -76, 42, 4, 6, 'candy', 'Pop Rocks'],
+  ['c_village', 'ammo_gum', -151, 58, 6, 8, 'candy', 'Bubblegum'],
+  ['c_cupcake', 'ammo_gumballs', -97, -7, 5, 7, 'candy', 'Gumballs'],
+  ['c_pier_salt', 'ammo_salt', -58, 13, 4, 6, 'candy', 'Salt'],
+  ['c_lake', 'ammo_marshmallows', -183, 62, 4, 7, 'candy', 'Marshmallows'],
+  // Cat Island: soft, wet and bouncy — cats hate water
+  ['k_harbor', 'ammo_balloons', 104, 60, 7, 8, 'cat', 'Water balloons'],
+  ['k_plaza', 'ammo_marshmallows', 72, 29, 5, 7, 'cat', 'Marshmallows'],
+  ['k_commons', 'ammo_marshmallows', 146, -65, 5, 8, 'cat', 'Marshmallows'],
+  ['k_commons_b', 'ammo_balloons', 131, -51, 4, 6, 'cat', 'Water balloons'],
+  ['k_gym', 'ammo_jawbreakers', 205, -17, 5, 7, 'cat', 'Jawbreakers'],
+  ['k_heights', 'ammo_poprocks', 186, 38, 5, 8, 'cat', 'Pop Rocks'],
+  ['k_mcd', 'ammo_gum', 139, -37, 4, 6, 'cat', 'Bubblegum'],
+  ['k_square', 'ammo_gumballs', 160, 17, 4, 7, 'cat', 'Gumballs'],
+];
+
+/** Inside an enterable building's footprint (either island), with a 1 u margin? */
+function inBuilding(ctx, x, z) {
+  for (const sys of [ctx.systems.catArchitecture, ctx.systems.candyArchitecture]) {
+    const rooms = sys?.interiors;
+    if (!Array.isArray(rooms)) continue;
+    for (const r of rooms) {
+      if (!r || typeof r !== 'object' || !Number.isFinite(r.x)) continue;
+      const ca = Math.cos(r.rot || 0), sa = Math.sin(r.rot || 0);
+      const dx = x - r.x, dz = z - r.z;
+      const lx = Math.abs(dx * ca + dz * sa), lz = Math.abs(-dx * sa + dz * ca);
+      if (lx < (r.w || 0) / 2 + 1 && lz < (r.d || 0) / 2 + 1) return true;
+    }
+  }
+  return false;
 }

@@ -6,18 +6,30 @@
 // size of a cow as the counterweight, and a sign that says UNDER REPAIR
 // (FOREVER). Bolt, the mechanic, has been asleep on the sled since Tuesday.
 //
-// Broken until story flag `helper_3` (Rusty finds the winch):
-//   before → "The winch is missing. Rusty might know."
+// Broken until story flag `helper_3`. Two ways to get it (wave 3, Contract D):
+//   · the WINCH is a real object: a brass drum with a crank, glowing, on the
+//     quay beside Rusty's crate under the harbour road, with a sign and a teal
+//     light column. E picks it up (inventory tool 'winch', worn on the back),
+//     carry it up the harbour road, E at the empty cradle behind the machine
+//     installs it → helper_3;
+//   · or pay Rusty three candy and he fetches it for you (his old route).
+//   before → "The winch is missing. It's on the quay by Rusty's crate."
 //   after  → "Board the Big Fling" → ratchet down, 3-2-1, and a 175-unit
 //            parabola west over the sea to a splash landing on the Candyland
 //            shore near (-50, 45) → escape:success { route: 'catapult' }.
 //
-// Draw calls: base 1 · arm 1 · yarn 1 · winch 1 · rope 1 · sign 1 · cat 1 = 7
+// Draw calls at the machine: base 1 · arm 1 · yarn 1 · winch 1 · rope 1 ·
+//   sign 1 · cat 1 · fingerpost site 1 (+ ghost 1 while you carry the winch).
+// At the quay: site 1 · winch 1 · beam 1.  On your back: 1.
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 import { CAT, CANDY } from '../../core/palette.js';
 import { clamp, smoothstep, damp } from '../../core/util.js';
-import { B, catGeo, signMesh } from './parts.js';
+import {
+  B, catGeo, signMesh, winchGeo, glowMat, beamField, Site, signAtlas, winchSpot, itemSpot,
+  nearestPathPoint, yawTo, readYaw, armYaw, mapMarker, ensureWinchItem, rustyHint, drainRustyHints,
+  colorGlowMat, nightSign, poolMesh,
+} from './parts.js';
 import { createRider, beachPoint, vehicleBusy, clearSpot, clearanceClaim } from './ride.js';
 
 const SCALE = 1.50;         // big enough that the crate rides above the palm fronds
@@ -89,11 +101,21 @@ export function create(ctx, api) {
   // the ratchet wheel the pawl bites on
   base.cyl(0.8, 0.8, 0.16, 12, 0x9aa3b0, -1.45, PIVOT, 0, 0, 0, Math.PI / 2);
   for (let i = 0; i < 10; i++) base.box(0.22, 0.22, 0.14, 0xb8c0cc, -1.45, PIVOT + Math.cos(i * 0.63) * 0.82, Math.sin(i * 0.63) * 0.82, 0, 0, i * 0.63);
-  base.beam([-2.3, 1.35, -2.6], [2.3, 1.35, -2.6], 0.5, TIMBER_DK);     // the bar the yarn slams into
-  base.box(1.9, 0.55, 0.75, 0x6a5a52, 0, 1.75, -2.6);                   // old cushion, well punished
-  // winch cradle at the back (empty until Rusty finds the drum)
-  for (const s of [-1, 1]) base.box(0.5, 1.5, 0.5, TIMBER, s * 1.25, 1.35, -4.2);
-  base.box(3.4, 0.3, 0.7, TIMBER_DK, 0, 2.2, -4.2);
+  // The bar the yarn slams into, and its cushion. Both sit TANGENT to the
+  // counterweight at rest (A_IDLE): the ball's centre is then at (0, 2.10,
+  // −1.32) with r 1.3, and the contact normal points (0, −0.55, −0.835). The
+  // old bar and cushion stood inside the ball (0.4 u deep), which read as a
+  // sphere clipping through the timbers. The bar rests on the deck planks.
+  base.beam([-2.3, 0.97, -3.03], [2.3, 0.97, -3.03], 0.5, TIMBER_DK);
+  base.box(1.9, 0.5, 0.8, 0x6a5a52, 0, 1.2455, -2.611, 0.988);          // old cushion, well punished
+  for (const s of [-1, 1]) base.box(0.34, 0.5, 0.34, IRON, s * 2.05, 0.97, -3.03);   // iron end caps
+  // winch cradle at the back: two posts with iron bearing caps and a low rail
+  // (EMPTY until somebody brings the winch back from the quay)
+  for (const s of [-1, 1]) {
+    base.box(0.5, 1.5, 0.5, TIMBER, s * 1.25, 1.35, -4.2);
+    base.box(0.6, 0.22, 0.6, IRON, s * 1.25, 2.16, -4.2);
+  }
+  base.box(2.9, 0.26, 0.6, TIMBER_DK, 0, 0.95, -4.2);
   // a ladder, because the crate is nine feet up
   for (const s of [-1, 1]) base.beam([s * 0.55, 0.2, -5.2], [s * 0.55, 3.1, -4.3], 0.16, TIMBER);
   for (let i = 0; i < 5; i++) base.box(1.3, 0.12, 0.16, TIMBER_DK, 0, 0.5 + i * 0.62, -5.02 + i * 0.18);
@@ -113,8 +135,10 @@ export function create(ctx, api) {
   group.add(arm);
 
   const ab = new B();
-  ab.beam([0, -CW - 0.4, 0], [0, ARM, 0], 0.52, TIMBER);                 // the lever
-  ab.beam([0, -CW - 0.4, 0], [0, ARM, 0], 0.30, TIMBER_DK);              // (a second, thinner spine reads as a lashed pair)
+  // The lever stops ON the counterweight (its top is at −CW − 0.35 + 1.3), bolted
+  // through an iron cap — it used to run straight through the ball's centre.
+  ab.beam([0, -CW + 0.92, 0], [0, ARM, 0], 0.52, TIMBER);                // the lever
+  ab.beam([0, -CW + 0.92, 0], [0, ARM, 0], 0.30, TIMBER_DK);             // (a second, thinner spine reads as a lashed pair)
   for (let i = 0; i < 5; i++) ab.torus(0.34, 0.07, 4, 8, YARN_2, 0, -1.2 + i * 1.6, 0, Math.PI / 2);  // yarn lashings
   ab.box(1.0, 0.34, 1.0, IRON, 0, 0, 0);                                 // hub
   // fish crate, open top, at the tip
@@ -140,27 +164,56 @@ export function create(ctx, api) {
   yb.sph(1.30, 12, 9, YARN, 0, 0, 0);
   for (let i = 0; i < 9; i++) yb.torus(1.29, 0.095, 4, 14, i % 3 === 0 ? 0xffffff : (i % 3 === 1 ? YARN_2 : 0xfff0f5), 0, 0, 0, i * 0.9, i * 0.45, i * 0.37);
   yb.cyl(0.15, 0.15, 0.9, 6, IRON, 0, 1.5, 0);
+  yb.cyl(0.4, 0.5, 0.14, 8, IRON, 0, 1.27, 0);                          // the cap the lever bolts to
   const yarnBall = yb.build('bigfling_yarn');
   yarnBall.position.set(0, -CW - 0.35, 0);
   arm.add(yarnBall);
 
-  // ── winch drum: only exists after Rusty finds it (helper_3) ─────────────────
-  const wb = new B();
-  wb.cyl(0.55, 0.55, 2.1, 10, TIMBER_DK, 0, 0, 0, 0, 0, Math.PI / 2);
-  for (const s of [-1, 1]) wb.cyl(0.78, 0.78, 0.22, 10, IRON, s * 1.0, 0, 0, 0, 0, Math.PI / 2);
-  for (let i = 0; i < 5; i++) wb.torus(0.60, 0.06, 4, 10, YARN_2, -0.7 + i * 0.35, 0, 0, 0, 0, Math.PI / 2);
-  const winch = wb.build('bigfling_winch');
+  // WARM FILL. At dusk the timbers went near-black and the frame, arm, cradle
+  // and ladder merged into one silhouette. One shared material that EMITS a
+  // warm share of each vertex colour after dark (the lanterns' light, faked
+  // without a PointLight) keeps every part its own colour.
+  const fillMat = colorGlowMat(0xffb070, { roughness: 0.78, intensity: 0 });
+  for (const m of [baseMesh, armMesh, yarnBall]) { m.material.dispose(); m.material = fillMat; }
+
+  // two work lanterns on posts: one by the ladder (lights the winch and the
+  // boarding spot), one at the front corner; each throws a pool on the ground
+  const LAMPS = [[-2.05, -6.1, 1], [3.1, 2.5, -1]];      // local x, z, which way the arm reaches
+  const lamps = new B();
+  for (const [lx, lz, dir] of LAMPS) {
+    const hx = lx + dir * 0.62;
+    lamps.cyl(0.1, 0.13, 2.5, 6, TIMBER_DK, lx, 1.25, lz);
+    lamps.box(0.86, 0.12, 0.12, TIMBER_DK, lx + dir * 0.34, 2.4, lz);
+    lamps.box(0.05, 0.22, 0.05, IRON, hx, 2.24, lz);
+    lamps.cone(0.21, 0.18, 6, IRON, hx, 2.1, lz);
+    lamps.cyl(0.15, 0.15, 0.34, 6, 0xffe2a8, hx, 1.84, lz);
+    lamps.cyl(0.17, 0.17, 0.06, 6, IRON, hx, 1.64, lz);
+  }
+  const lampMat = colorGlowMat(0xffffff, { roughness: 0.6, intensity: 0.3 });
+  const lampMesh = new THREE.Mesh(lamps.geometry(), lampMat);
+  lampMesh.name = 'bigfling_lanterns'; lampMesh.castShadow = true; lampMesh.receiveShadow = true;
+  group.add(lampMesh);
+  const toWorld = (lx, lz) => [lm.x + (lx * ca + lz * sa) * SCALE, lm.z + (-lx * sa + lz * ca) * SCALE];
+  const lampPools = poolMesh(ctx, LAMPS.map(([lx, lz, dir]) => { const [x, z] = toWorld(lx + dir * 0.8, lz); return { x, z, r: 3.0 }; }), 0xffb45a, { name: 'bigfling_lamp_pools' });
+
+  // ── the winch: the SAME brass drum you carry up from the quay, installed ────
+  // Hidden until helper_3. Its crank sits outboard of the +X cradle post.
+  const WINCH_S = 1.25;
+  const wb = winchGeo({ crankX: 1.28 });
+  const winchMat = glowMat(0xffa030, { intensity: 0.2 });
+  const winch = new THREE.Mesh(wb.geometry(), winchMat);
+  winch.name = 'bigfling_winch'; winch.castShadow = true; winch.receiveShadow = true;
+  winch.scale.setScalar(WINCH_S);
   winch.position.set(0, 2.0, -4.2);
   group.add(winch);
-  // the CRANK is the missing part (Rusty finds it) — the drum itself always
-  // sits in its cradle, because a winch-shaped hole is not a mechanism
-  const hbb = new B();
-  hbb.cyl(0.10, 0.10, 0.9, 6, IRON, 1.5, 0, 0, 0, 0, Math.PI / 2);
-  hbb.box(0.16, 0.9, 0.16, IRON, 1.95, -0.4, 0);
-  hbb.sph(0.18, 6, 4, CANDY.gummyRed, 1.95, -0.85, 0);
-  const crank = hbb.build('bigfling_crank');
-  crank.position.set(0, 2.0, -4.2);
-  group.add(crank);
+  // a teal ghost of it in the empty cradle while you are carrying the real one
+  const ghost = new THREE.Mesh(winch.geometry, new THREE.MeshBasicMaterial({
+    color: 0x5fe0ff, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  ghost.scale.setScalar(WINCH_S); ghost.position.copy(winch.position);
+  ghost.visible = false; ghost.renderOrder = 3;
+  ghost.userData.noRay = true; ghost.userData.noFade = true;
+  group.add(ghost);
 
   // rope from the winch to the crate (only while cocked)
   const rope = new THREE.Mesh(
@@ -187,14 +240,16 @@ export function create(ctx, api) {
   signFrame.rotation.y = Math.PI - 0.45;      // faces the way you walk in
   group.add(signFrame);
   const SIGN_BROKEN = [
-    { text: 'UNDER REPAIR', size: 62, color: '#b0202e' },
-    { text: '(forever)', size: 44, color: '#3b2415' },
+    { text: 'WINCH MISSING', size: 58, color: '#b0202e' },
+    { text: "it's on the quay", size: 40, color: '#3b2415' },
+    { text: "by Rusty's crate", size: 36, color: '#6b4a30' },
   ];
   const SIGN_FIXED = [
     { text: 'THE BIG FLING', size: 56, color: '#3b2415' },
     { text: 'no refunds', size: 40, color: '#b0202e' },
   ];
   const sign = signMesh(2.5, 1.25, SIGN_BROKEN, { bg: '#efd9ad' });
+  const signNight = nightSign(sign, 0.5);
   sign.position.set(-3.6, 3.05, -2.6);
   sign.rotation.y = Math.PI - 0.45;
   group.add(sign);
@@ -236,7 +291,7 @@ export function create(ctx, api) {
 
   // ── state ──────────────────────────────────────────────────────────────────
   let armA = A_IDLE, armVel = 0, phase = null, pt = 0, beat = 0;
-  let yarnSpin = 0, creak = 0;
+  let yarnSpin = 0, creak = 0, popT = 1;
   const from = new THREE.Vector3();
   const pos = new THREE.Vector3();
   const vel = new THREE.Vector3();
@@ -248,11 +303,18 @@ export function create(ctx, api) {
   // ── interaction (interaction/story/ui are created after us — wire on ready) ─
   const spot = { x: lm.x - sa * 8.4, z: lm.z - ca * 8.4 };   // behind the machine, at the ladder
   let gate = null;
+  let W = null;                                              // the winch trail (below)
   function refreshGate() {
     if (!gate) return;
-    gate.label = fixed() ? 'Board the Big Fling' : 'Inspect the Big Fling';
+    const want = fixed() ? 'Board the Big Fling' : (W?.carrying() ? 'Install the winch' : 'Inspect the Big Fling');
+    if (gate.label === want) return;
+    gate.label = want;
+    // interaction.update only calls ui.prompt when the NEAREST entry changes,
+    // so a relabel while you stand at the ladder never reached the pill
+    // ('Install the winch' stayed up after the install). Push it ourselves.
+    try { if (ctx.systems.interaction?.nearest?.() === gate) ctx.systems.ui?.prompt?.(gate.label, gate); } catch (e) { /* the pill is decoration */ }
   }
-  crank.visible = false;
+  winch.visible = false;
   rope.visible = false;
   ctx.events.on('world:ready', () => {
     gate = ctx.systems.interaction?.register({
@@ -262,22 +324,33 @@ export function create(ctx, api) {
       onInteract() {
         if (phase || vehicleBusy(ctx)) return;
         if (!fixed()) {
-          ui()?.say('The winch is missing. Rusty might know.', { speaker: 'Bolt', duration: 3.6 });
+          if (W?.carrying()) { W.install(); return; }
+          ui()?.say("Mrrf. Winch is missing. Left it on the quay by Rusty's crate. Down the harbour road. Bring it here, I'm not getting up.", { speaker: 'Bolt', duration: 5 });
+          W?.hint();
           parts()?.burst({ x: lm.x, y: my + 2.4, z: lm.z, count: 7, color: [0xdfe6ff, 0xffffff], speed: 0.7, life: 1.6, size: 0.34, gravity: 0.5, spread: 0.6 });
           return;
         }
         route.start();
       },
     }) || null;
-    crank.visible = fixed();
+    winch.visible = fixed();
     if (fixed()) sign.userData.repaint(SIGN_FIXED, { bg: '#e6f2d8' });
     refreshGate();
     story()?.once('helper_3', () => {
-      crank.visible = true;
+      const byYou = !!W?.installing;
+      W?.fixedElsewhere();
+      winch.visible = true; popT = 0;
       sign.userData.repaint(SIGN_FIXED, { bg: '#e6f2d8' });
       refreshGate();
-      ui()?.toast('Rusty screws the winch back on. It even has a handle.');
-      parts()?.burst({ x: lm.x, y: my + 2.4, z: lm.z, count: 22, color: [0xffd24a, 0xff5a8a, 0xffffff], speed: 3.2, life: 1.1, size: 0.3, gravity: -5, spread: 0.9 });
+      ui()?.toast(byYou ? 'CLUNK. Winch installed. Board at the ladder.' : 'Rusty screws the winch back on. It even has a handle.', 5.5, { icon: 'spark' });
+      const wx = lm.x - sa * 4.2 * SCALE, wz = lm.z - ca * 4.2 * SCALE;
+      parts()?.burst({ x: wx, y: my + 3.0, z: wz, count: 26, color: [0xffd24a, 0xff5a8a, 0xffffff, 0x5fe0ff], speed: 3.6, life: 1.1, size: 0.3, gravity: -5, spread: 0.9 });
+      parts()?.dust?.(wx, my + 0.4, wz, { count: 14 });
+      if (byYou) {
+        ctx.systems.camera?.shake?.(0.5, 0.35);
+        ui()?.say("…oh. You found it. Right. Ladder's round the back. Knees in, eyes shut. No refunds.", { speaker: 'Bolt', duration: 5 });
+        ui()?.setObjective?.('Board The Big Fling', 'E at the ladder behind the machine');
+      }
     });
   });
 
@@ -303,6 +376,8 @@ export function create(ctx, api) {
 
     update(dt) {
       idle(dt);
+      if (W) { try { W.update(dt); } catch (err) { if (!W.__warned) { W.__warned = true; console.error('[escape/catapult] winch trail', err); } } }
+      refreshGate();
       if (!phase) return;
       pt += dt;
       if (phase === 'lower') {
@@ -418,13 +493,33 @@ export function create(ctx, api) {
   console.warn('[escape/catapult]', JSON.stringify({
     at: [+lm.x.toFixed(1), +lm.z.toFixed(1)], clear: +(lm.clear ?? 0).toFixed(2), aim: +aim.toFixed(2),
     scale: SCALE, splash: [SPLASH.x, SPLASH.z], beach: [+beach.x.toFixed(1), +beach.z.toFixed(1)],
-    tris: Math.round(base.tris() + ab.tris() + yb.tris() + wb.tris()), meshes: 7,
+    tris: Math.round(base.tris() + ab.tris() + yb.tris() + wb.tris()), meshes: 8,
   }));
+
+  // ── THE WINCH TRAIL (Contract D) ─────────────────────────────────────────────
+  try {
+    W = createWinchTrail(ctx, {
+      spot, fixed, lm, my, aim, SCALE,
+      cradle: { x: lm.x - sa * 4.2 * SCALE, z: lm.z - ca * 4.2 * SCALE },
+      ghost, winchGeometry: winch.geometry, winchMat,
+      install() { story()?.set('helper_3', true); },
+    });
+  } catch (err) { console.error('[escape/catapult] winch trail failed', err); }
+  route.winch = W;
+  // the lantern posts are solid (pushed after the winch trail placed its sign,
+  // so that search is exactly as it was)
+  for (const [lx, lz] of LAMPS) { const [x, z] = toWorld(lx, lz); ctx.colliders.push({ x, z, r: 0.28 }); }
 
   /** Idle life: the arm creaks, the yarn drifts, Bolt breathes. */
   function idle(dt) {
     const t = ctx.state.elapsed;
     {
+      const night = 1 - (ctx.state.daylight ?? 1);
+      const fl = 0.95 + 0.05 * Math.sin(t * 6.1) * Math.sin(t * 2.3);
+      fillMat.emissiveIntensity = 0.36 * night;
+      lampMat.emissiveIntensity = (0.3 + 1.5 * night) * fl;
+      lampPools.set(0.85 * night * fl);
+      signNight(night);
       if (!phase) {
         armA = damp(armA, A_IDLE + Math.sin(t * 0.5) * 0.035, 2.2, dt);
         yarnSpin = damp(yarnSpin, 0, 1.4, dt);
@@ -433,7 +528,13 @@ export function create(ctx, api) {
       yarnBall.rotation.x = yarnSpin;
       yarnBall.rotation.z = Math.sin(t * 0.31) * 0.12;
       winch.rotation.x = (phase === 'lower' || phase === 'count') ? -ctx.state.elapsed * 5.5 : Math.sin(t * 0.4) * 0.06;
-      crank.rotation.x = winch.rotation.x;
+      ghost.rotation.x = winch.rotation.x;
+      if (popT < 1) {                                   // the install CLUNK: drop in, squash, settle
+        popT = Math.min(1, popT + dt / 0.55);
+        const k = popT, bounce = Math.sin(k * Math.PI * 2.2) * (1 - k) * 0.18;
+        winch.position.y = 2.0 + (1 - Math.min(1, k * 2.2)) * 1.6 + bounce;
+        winch.scale.set(WINCH_S * (1 + bounce * 0.6), WINCH_S * (1 - bounce * 0.9), WINCH_S * (1 + bounce * 0.6));
+      }
       // Bolt: slow breathing + the occasional dream-twitch
       const breath = 1 + Math.sin(t * 1.05) * 0.045;
       cat.scale.set(1.25, 1.25 * breath, 1.25);
@@ -449,7 +550,7 @@ export function create(ctx, api) {
       }
       // the rope is only rigged while she is cocked
       const rigged = phase === 'board' || phase === 'count' || phase === 'lower';
-      rope.visible = rigged && crank.visible;
+      rope.visible = rigged && winch.visible;
       if (rope.visible) {
         const ly = PIVOT + ARM * Math.cos(armA), lz = ARM * Math.sin(armA);
         stretchRope(0, 2.0, -4.2, 0, ly, lz, 0.085);
@@ -458,4 +559,268 @@ export function create(ctx, api) {
   }
 
   return route;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// THE WINCH TRAIL (wave 3, Contract D).
+//   quay  → a brass winch on a pallet beside Rusty's crate, "WINCH — property
+//           of The Big Fling" sign, teal light column + sparkles, map marker.
+//   E     → carried: inventory tool 'winch', a small copy strapped to the
+//           visitor's back, a teal ghost in the catapult's empty cradle, the
+//           map marker moves to the machine, the objective says where.
+//   E at the machine (the gate by the ladder) → installed → story helper_3.
+// Rusty's three-candy tier still works: he fetches it for you (fixedElsewhere).
+// ═════════════════════════════════════════════════════════════════════════════
+const WINCH_HEX = 0x5fe0ff;
+
+function createWinchTrail(ctx, M) {
+  const world = ctx.world;
+  const story = () => ctx.systems.story;
+  const ui = () => ctx.systems.ui;
+  const fx = () => ctx.systems.particles;
+  const atlas = signAtlas();
+  const S = winchSpot(ctx);
+  const group = new THREE.Group(); group.name = 'escape_winch';
+  ctx.scene.add(group);
+  const cosR = Math.cos(S.ry), sinR = Math.sin(S.ry);
+  const Wd = (lx, lz) => [S.x + lx * cosR + lz * sinR, S.z - lx * sinR + lz * cosR];
+
+  // ── the quay: pallet, sign, a coil of rope (one mesh) ──────────────────────
+  const site = new Site();
+  const PLANK = 0x9a7a4a, PLANK2 = 0x86653c, POST = 0x5b3b24;
+  for (const z of [-0.55, 0.55]) site.box(2.1, 0.16, 0.22, POST, 0, 0.0, z);            // runners
+  for (let i = 0; i < 5; i++) site.box(0.38, 0.1, 1.5, i % 2 ? PLANK : PLANK2, -0.84 + i * 0.42, 0.13, 0);
+  site.torus(0.3, 0.09, 5, 12, 0xc9b184, 0.72, 0.26, 0.5, Math.PI / 2);                 // rope coil
+  site.torus(0.2, 0.08, 5, 10, 0xc9b184, 0.72, 0.4, 0.5, Math.PI / 2);
+  // the sign stands behind it, facing the road; LOST KEY? on its back
+  const SZ = -1.45;
+  for (const x of [-1.2, 1.2]) site.cyl(0.1, 0.12, 2.9, 6, POST, x, 0.95, SZ);
+  site.box(2.5, 1.3, 0.1, POST, 0, 1.75, SZ);
+  site.box(2.7, 0.14, 0.4, 0x2f7fa0, 0, 2.46, SZ);
+  site.face('winchsign', 2.36, 1.18, 0, 1.75, SZ + 0.06);
+  site.face('poster', 0.82, 1.12, 0, 1.75, SZ - 0.06, Math.PI);
+  const quay = site.build('winch_quay');
+  quay.castShadow = false;                 // a pallet and a board: its shadow pass is not worth a call
+  const gy = S.gy;
+  quay.position.set(S.x, gy, S.z);
+  quay.rotation.y = S.ry;
+  group.add(quay);
+  for (const x of [-1.2, 1.2]) { const [px, pz] = Wd(x, SZ); ctx.colliders.push({ x: px, z: pz, r: 0.26 }); }
+  const winchCol = { x: S.x, z: S.z, r: 1.05 };
+  ctx.colliders.push(winchCol);
+  clearanceClaim(ctx, S.x - sinR * 0.4, S.z - cosR * 0.4, 5.2, 4.8, S.ry, 'winch_quay');
+
+  // ── the winch on the pallet ────────────────────────────────────────────────
+  const QS = 1.15;
+  const qb = winchGeo({ stand: true });
+  const qWinch = new THREE.Mesh(qb.geometry(), M.winchMat);
+  qWinch.name = 'winch_item'; qWinch.castShadow = false; qWinch.receiveShadow = true;   // the pallet grounds it
+  qWinch.userData.noFade = true;
+  const QY = gy + 0.18 + 0.68 * QS;
+  qWinch.position.set(S.x, QY, S.z);
+  qWinch.rotation.y = 0.18;                 // three-quarter view, crank toward the default lens
+  qWinch.scale.setScalar(QS);
+  group.add(qWinch);
+
+  const beams = beamField(ctx);
+  const beamSlot = beams.add(WINCH_HEX, { x: S.x, y: gy + 0.03, z: S.z, height: 17, width: 3.0, pool: 2.1 });
+
+  // ── the copy you wear ──────────────────────────────────────────────────────
+  const backGeo = winchGeo({}).geometry();
+  const back = new THREE.Mesh(backGeo, M.winchMat);
+  back.name = 'winch_on_back'; back.castShadow = true; back.visible = false;
+  back.userData.noFade = true;
+  back.scale.setScalar(0.5);
+  let backParent = null;
+
+  // ── the fingerpost at the machine: WINCH ← the quay · INSTALL → the back ────
+  const post = (() => {
+    const sp = itemSpot(ctx, 121.8, 74.8, { radius: 4, need: 0.8, pathMin: 0.6, pathMax: 3.2, minH: 1.2, pull: 0.25, farSide: true, avoid: [{ x: M.lm.x, z: M.lm.z, r: 5.2 }] });
+    const f = new Site();
+    const py = world.height(sp.x, sp.z);
+    const WOOD = 0x6b4a30;
+    f.cyl(0.15, 0.19, 4.5, 6, WOOD, sp.x, py + 1.8, sp.z);
+    f.sph(0.26, 8, 6, 0x2f7fa0, sp.x, py + 4.1, sp.z);
+    const arms = [{ name: 'quay', tx: S.x, tz: S.z, y: 3.55 }, { name: 'back', tx: M.spot.x, tz: M.spot.z, y: 2.8 }];
+    for (const a of arms) {
+      const yaw = armYaw(sp.x, sp.z, a.tx, a.tz);
+      f.arm(a.name, 2.9, 0.64, sp.x + Math.cos(yaw) * 1.3, py + a.y, sp.z - Math.sin(yaw) * 1.3, yaw);
+    }
+    const np = nearestPathPoint(world, sp.x, sp.z, 'cat');
+    const r = readYaw(sp.x, sp.z, np.x, np.z);
+    f.box(0.92, 1.04, 0.08, WOOD, sp.x + Math.sin(r) * 0.2, py + 1.25, sp.z + Math.cos(r) * 0.2, 0, r);
+    f.face('wposter', 0.84, 0.95, sp.x + Math.sin(r) * 0.25, py + 1.25, sp.z + Math.cos(r) * 0.25, r);
+    f.face('wposter', 0.84, 0.95, sp.x + Math.sin(r) * 0.15, py + 1.25, sp.z + Math.cos(r) * 0.15, r + Math.PI);
+    const m = f.build('winch_catapult_post');
+    m.castShadow = false;
+    ctx.scene.add(m);
+    ctx.colliders.push({ x: sp.x, z: sp.z, r: 0.35 });
+    m.userData.at = sp;
+    return m;
+  })();
+
+  // ── state ──────────────────────────────────────────────────────────────────
+  let state = 'quay';                 // quay → carried → installed
+  let entry = null, emitter = null, markerT = -1, beamK = 1, ghostK = 0;
+  const inv = () => ctx.systems.inventory;
+
+  function syncMarker() {
+    if (state === 'installed') { mapMarker(ctx, { id: 'winch', remove: true }); return; }
+    if (state === 'carried') mapMarker(ctx, { id: 'winch', x: M.cradle.x, z: M.cradle.z, glyph: 'winch', label: 'Install the winch' });
+    else mapMarker(ctx, { id: 'winch', x: S.x, z: S.z, glyph: 'winch', label: 'Catapult winch' });
+  }
+  function stopSparkles() { if (emitter) { emitter.stop?.(); emitter = null; } }
+  function strapOn(on) {
+    const pl = ctx.systems.player;
+    const torso = pl?.visitor?.nodes?.torso;
+    const parent = torso || pl?.group || null;
+    if (on && parent) {
+      if (backParent !== parent) { parent.add(back); backParent = parent; }
+      if (torso) { back.position.set(0, 0.36, -0.52); back.rotation.set(0.12, 0, 0); }
+      else { back.position.set(0, 1.05, -0.5); back.rotation.set(0.12, 0, 0); }
+      back.visible = true;
+    } else back.visible = false;
+  }
+  function dropFromBag() {
+    const I = inv();
+    if (!I) return;
+    try {
+      if (I.count?.('winch') > 0) I.spend?.('winch', I.count('winch'));
+      else I.spend?.('winch', 1);
+      const i = I.items?.findIndex?.((it) => it.id === 'winch' && !(it.count > 0));
+      if (i >= 0) I.items.splice(i, 1);
+      if (I.held === 'winch') I.setHeld?.(null);
+      ctx.events.emit('inventory:change', { itemId: 'winch' });
+    } catch (e) { /* inventory is not ours — never throw from here */ }
+  }
+  function pickUp() {
+    if (state !== 'quay' || M.fixed()) return;
+    state = 'carried';
+    if (entry) entry.enabled = false;
+    qWinch.visible = false;
+    winchCol.r = 0;                                  // nothing solid left on the pallet
+    stopSparkles();
+    strapOn(true);
+    fx()?.burst?.({ x: S.x, y: QY, z: S.z, count: 22, color: [0x9ff0ff, 0xffffff, 0xffc86a], speed: 3.0, up: 1.2, life: 0.8, size: 0.24, sizeEnd: 0.04, gravity: -4, drag: 1.6, spread: 0.7, shape: 'sparkle', blend: 'add' });
+    fx()?.dust?.(S.x, gy + 0.2, S.z, { count: 10 });
+    ensureWinchItem(ctx);
+    try { inv()?.add?.('winch', 1); } catch (e) {}
+    story()?.set('winch_carried', true);
+    syncMarker();
+    ui()?.toast('WINCH! Carry it up the harbour road to The Big Fling and press E at the empty cradle behind it.', 6.5, { icon: 'spark' });
+    ui()?.setObjective?.('Carry the winch to The Big Fling', 'up the harbour road from Fish Harbor · E at the cradle');
+    ctx.events.emit('escape:item', { item: 'winch', state: 'carried' });
+  }
+  function toInstalled() {
+    state = 'installed';
+    strapOn(false);
+    qWinch.visible = false; winchCol.r = 0;
+    if (entry) entry.enabled = false;
+    stopSparkles();
+    post.visible = false;                            // the arrows are stale now
+    syncMarker();
+  }
+
+  ctx.events.on('world:ready', () => {
+    ensureWinchItem(ctx);
+    const wp = { x: S.x, z: S.z, y: QY }, _wp = { x: 0, y: QY, z: 0 };
+    entry = ctx.systems.interaction?.register?.({
+      id: 'winch_quay', x: S.x, z: S.z, y: QY, promptH: 1.25, r: 2.8,
+      label: 'Pick up the winch', onInteract: () => pickUp(),
+      getPos() {                         // same prompt-priority bias as the key
+        const q = ctx.systems.player?.position;
+        if (!q) return wp;
+        const dx = S.x - q.x, dz = S.z - q.z, d = Math.hypot(dx, dz);
+        if (d < 0.001) return wp;
+        const k = Math.min(1.2, d * 0.5);
+        _wp.x = S.x - dx / d * k; _wp.z = S.z - dz / d * k;
+        return _wp;
+      },
+    }) || null;
+    if (M.fixed()) toInstalled();
+    else {
+      emitter = fx()?.emitter?.({
+        x: S.x, y: gy + 1.2, z: S.z, rate: 6, area: 0.6, areaY: 0.5,
+        color: [0x9ff0ff, 0xffffff, 0x5fe0ff], shape: 'sparkle', blend: 'add',
+        speed: 0.12, vy: 1.6, vyJitter: 0.5, gravity: 0.3, drag: 0.2,
+        life: 3.2, lifeVar: 0.3, size: 0.28, sizeEnd: 0.05, sizeVar: 0.4, range: 80,
+      }) || null;
+    }
+    syncMarker();
+    markerT = 2.0;
+    rustyHint(ctx, (first) => {
+      if (state === 'quay' && !M.fixed()) {
+        return first
+          ? "And that brass thing glowing next to my crate? Bolt's winch, off The Big Fling. He put it down to have a nap in 2019. Carry it up the harbour road and the catapult works. Lift with your knees."
+          : "The winch is still right there by my crate. Up the harbour road with it. The catapult. The big stupid wooden one.";
+      }
+      if (state === 'carried') return "Catapult's up the road, past the fish. Slot it in the empty cradle round the back. Mind Bolt, he bites in his sleep.";
+      return null;
+    });
+  });
+
+  const api = {
+    spot: S, post,
+    get state() { return state; },
+    /** Same as pressing E at the quay (tests + views). */
+    take: () => pickUp(),
+    carrying: () => state === 'carried' || (state !== 'installed' && !!inv()?.has?.('winch') && inv()?.def?.('winch')?.kind === 'tool'),
+    get installing() { return state === 'installing'; },
+    /** E at the machine while carrying. */
+    install() {
+      if (state === 'installed' || M.fixed()) return;
+      state = 'installing';
+      dropFromBag();
+      strapOn(false);
+      M.install();                                   // → helper_3 → fixedElsewhere()
+      if (state !== 'installed') toInstalled();
+      ctx.events.emit('escape:item', { item: 'winch', state: 'installed' });
+    },
+    /** helper_3 got set (by us, or by Rusty's candy route). */
+    fixedElsewhere() {
+      if (state === 'installed') return;
+      if (state === 'carried') {
+        dropFromBag();
+        ui()?.toast("Rusty's gull lifts the winch off your back. It is installed. Allegedly.", 5);
+      }
+      toInstalled();
+    },
+    /** Bolt said the winch is missing: point the way. */
+    hint() {
+      if (state === 'quay') {
+        ui()?.toast("The winch is on the quay by Rusty's crate, down the harbour road — look for the teal light (M: map).", 6, { icon: 'spark' });
+        syncMarker();
+      }
+    },
+    update(dt) {
+      const c = ctx;
+      const t = c.state.elapsed;
+      const night = 1 - (c.state.daylight ?? 1);
+      atlas.night(night);
+      if (markerT > 0 && (markerT -= dt) <= 0) syncMarker();
+      drainRustyHints(ctx, dt);
+      M.winchMat.emissiveIntensity = 0.26 + 0.62 * night + (state === 'quay' ? Math.sin(t * 2.6) * 0.08 : 0);
+      if (state === 'carried' && back.visible === false) strapOn(true);   // player rebuilt? re-strap
+
+      // a small rattle every few seconds, as if it wanted to be picked up
+      if (state === 'quay') {
+        const k = Math.max(0, Math.sin(t * 1.3)) ** 24;
+        qWinch.rotation.z = Math.sin(t * 40) * 0.03 * k;
+      }
+      // the ghost in the cradle breathes while the real one is on your back
+      ghostK = damp(ghostK, state === 'carried' ? 1 : 0, 4, dt);
+      M.ghost.visible = ghostK > 0.02;
+      if (M.ghost.visible) M.ghost.material.opacity = ghostK * (0.5 + 0.25 * Math.sin(t * 3.4));
+
+      beamK = damp(beamK, state === 'quay' ? 1 : 0, 2.5, dt);
+      beams.set(beamSlot, beamK < 0.01 ? 0 : beamK * (0.9 + 0.6 * night) * (0.9 + 0.1 * Math.sin(t * 2.0)));
+    },
+  };
+  console.warn('[escape/winch]', JSON.stringify({
+    quay: [+S.x.toFixed(1), +S.z.toFixed(1)], clear: +S.clear.toFixed(2), edge: +S.edge.toFixed(2), fallback: S.fallback,
+    hideout: [+S.hideout.x.toFixed(1), +S.hideout.z.toFixed(1)], cradle: [+M.cradle.x.toFixed(1), +M.cradle.z.toFixed(1)],
+    install: [+M.spot.x.toFixed(1), +M.spot.z.toFixed(1)], post: [+post.userData.at.x.toFixed(1), +post.userData.at.z.toFixed(1)],
+    winchTris: Math.round(qb.tris()),
+  }));
+  return api;
 }

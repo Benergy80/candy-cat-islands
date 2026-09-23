@@ -140,6 +140,30 @@ const SHADOW_MAX = 124;          // scenic/low-angle: up to a 248-unit box
 // day, moon by night), so this is a single 4096² depth pass.
 const SHADOW_MAP = 4096;
 const KEY_DIST = 150;
+// ── MOBILE TIER (ctx.state.mobile, read once at create; see BRIEF Contract I) ──
+// 1024² key maps (4096² sun + moon was ~128 MB of depth on a phone that has no
+// business holding it), no sea mist, ~55% of the cloud field, ONE shadow-casting
+// directional light at all times (so dusk/dawn never flips the lit-program
+// count), a shadow depth range fitted to the ground the camera can actually see,
+// and the key map refreshed at most ~40×/s instead of every frame. The desktop
+// tier never reads any of this.
+const MOBILE_SHADOW_MAP = 1024;
+const MOBILE_CLOUD_KEEP = 0.55;
+const MOBILE_SHADOW_REFRESH = 1 / 40;   // s between key-map redraws (≈ every 2nd frame at 60 fps)
+// screen samples (NDC) for the FAR side of the shadow depth fit: the top edge of
+// the frame, where the camera sees the ground furthest from the box anchor
+const FAR_SAMPLES = [[0, 0.96], [-1, 0.96], [1, 0.96], [-1, 0.4], [1, 0.4]];
+// Sky-object culling (mobile): the gameplay lens (elevation 0.64, fov 30) frames
+// NO sky at all — its top edge points ~22° below the horizon — yet the clouds,
+// sun, moon and stars are frustumCulled=false (they ride the camera), so they
+// cost a draw each for nothing. Hide each one only when it provably cannot be in
+// frame: every ray below the horizon by MARGIN (the test uses the previous
+// frame's lens, and no camera move turns more than ~3° a frame), clouds only
+// while the lens is under the lowest cloud belly, the discs only when their
+// whole quad sits above the top edge. Nothing that could be seen is hidden.
+const SKY_CULL_MARGIN = 0.06;          // rad
+const CLOUD_FLOOR = 50;                // lowest cloud underside ≈ 57 (y0 72 − bob − belly)
+const SUN_QUAD_R = 0.21, MOON_QUAD_R = 0.38;   // half-diagonal of each billboard, rad
 // 0.155: the shadow of a caster is ~6.5× its height — still unmistakably a
 // low-sun shadow — but the up-facing GROUND now gets 0.155 of the key instead
 // of 0.12, which is the difference between a dawn cast shadow you can see and
@@ -177,6 +201,8 @@ function moonAt(t, out) {
 
 export function create(ctx) {
   const { scene, renderer } = ctx;
+  const MOBILE = !!ctx.state.mobile;
+  const shadowRes = MOBILE ? MOBILE_SHADOW_MAP : SHADOW_MAP;
 
   // ── backdrop ────────────────────────────────────────────────────────────────
   const group = new THREE.Group();
@@ -189,18 +215,20 @@ export function create(ctx) {
   const moonDisc = createMoon(780);
   group.add(dome.mesh, stars.points, moonDisc.mesh, sunDisc.mesh);
 
-  const clouds = createClouds();
+  const clouds = createClouds(MOBILE ? { keep: MOBILE_CLOUD_KEEP } : undefined);
   scene.add(clouds.group);
 
-  // low sea mist — dawn weather, one draw call, world-fixed
-  const mist = createMist(ctx.world);
-  scene.add(mist.mesh);
+  // low sea mist — dawn weather, one draw call, world-fixed. Not on mobile: a
+  // 12k-triangle transparent sheet over the whole sea is pure fill-rate, and
+  // the dome + fog grade still carry the dawn.
+  const mist = MOBILE ? null : createMist(ctx.world);
+  if (mist) scene.add(mist.mesh);
 
   // ── light rig: warm key + cool counter-fill + a bounce that actually fills ──
   const sun = new THREE.DirectionalLight(0xfff2dc, 2.6);
   sun.name = 'sunLight';
   sun.castShadow = true;
-  sun.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
+  sun.shadow.mapSize.set(shadowRes, shadowRes);
   sun.shadow.camera.near = 1;
   sun.shadow.bias = -0.00035;
   sun.shadow.normalBias = 0.022;
@@ -209,11 +237,22 @@ export function create(ctx) {
   const moon = new THREE.DirectionalLight(0xa6b4d4, 0.0);
   moon.name = 'moonLight';
   moon.castShadow = false;
-  moon.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
+  moon.shadow.mapSize.set(shadowRes, shadowRes);
   moon.shadow.camera.near = 1;
   moon.shadow.bias = -0.0006;
   moon.shadow.normalBias = 0.05;
   scene.add(moon, moon.target);
+  // mobile: the key maps are redrawn on a clock (see refreshShadows), not every
+  // frame. `?shadowclock=0` (or sky.shadowClock = false) turns the clock off —
+  // needed by any harness that renders WITHOUT stepping the game (tools/
+  // mobilebench.mjs's measurement renders), which would otherwise never see a
+  // shadow pass at all on the mobile tier.
+  let shadowClock = MOBILE && ctx.params?.get?.('shadowclock') !== '0';
+  function setShadowClock(on) {
+    shadowClock = !!(MOBILE && on);
+    sun.shadow.autoUpdate = !shadowClock; moon.shadow.autoUpdate = !shadowClock;
+  }
+  setShadowClock(shadowClock);
 
   // Cool directional from the anti-sun side. This is what makes away-facing
   // surfaces read cool-blue while sun-facing ones read warm — a hemisphere
@@ -242,6 +281,28 @@ export function create(ctx) {
   const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
   const ray = new THREE.Vector3(), hit = new THREE.Vector3(), centroid = new THREE.Vector3();
   const fitPts = [0, 0, 0, 0, 0].map(() => new THREE.Vector3());
+  // mobile only: the furthest visible ground (top of frame) for the depth fit
+  const farPts = FAR_SAMPLES.map(() => new THREE.Vector3());
+  let farN = 0;
+  let shadowAcc = 1, shadowForce = true;
+  const lastRefresh = new THREE.Vector3(1e9, 0, 0);
+  let lastHalf = -1, lastSunCasts = null;
+  const vis = new THREE.Vector3();
+
+  /** sin(elevation) of the highest ray in the camera frustum (top edge). */
+  function frameTopSin() {
+    const cam = ctx.camera, q = cam.quaternion;
+    const tanV = Math.tan((cam.fov * 0.5) * Math.PI / 180), tanH = tanV * cam.aspect;
+    const fy = vis.set(0, 0, -1).applyQuaternion(q).y;
+    const uy = vis.set(0, 1, 0).applyQuaternion(q).y;
+    const ry = vis.set(1, 0, 0).applyQuaternion(q).y;
+    let best = -1;
+    for (let k = -1; k <= 1; k++) {
+      const v = (fy + uy * tanV + k * ry * tanH) / Math.sqrt(1 + tanV * tanV + k * k * tanH * tanH);
+      if (v > best) best = v;
+    }
+    return best;
+  }
   const Z_AXIS = new THREE.Vector3(0, 0, 1);
   const WORLD_UP = new THREE.Vector3(0, 1, 0);
   const negDir = new THREE.Vector3();
@@ -293,7 +354,38 @@ export function create(ctx) {
     const low = clamp((0.34 - keyElev) / 0.34, 0, 1);
     r *= 1 + low * 0.55;
     anchor.set(centroid.x, groundY, centroid.z);
+    if (MOBILE) {
+      // the rest of the frame's ground, for the depth fit only (the box itself
+      // is fitted exactly as on desktop, so framing and texel size match)
+      farN = 0;
+      for (let i = 0; i < FAR_SAMPLES.length; i++) {
+        const [sx, sy] = FAR_SAMPLES[i];
+        ray.set(sx * tanH, sy * tanV, -1).applyQuaternion(cam.quaternion).normalize();
+        const t = ray.y < -0.02 ? (groundY - cam.position.y) / ray.y : GROUND_RAY_MAX;
+        farPts[farN++].copy(cam.position).addScaledVector(ray, clamp(t, 0, GROUND_RAY_MAX));
+      }
+    }
     return clamp(Math.ceil((r + 10) / 6) * 6, SHADOW_MIN, SHADOW_MAX);
+  }
+
+  /**
+   * MOBILE: how deep (along the key direction, past the anchor) the furthest
+   * ground the camera can see lies. Nothing deeper than the deepest RECEIVER can
+   * shadow anything on screen — a caster has to sit between the light and the
+   * surface it darkens — so the shadow camera's far plane can stop there
+   * instead of 2·half + 140 units past the anchor. At a low sun that cut is the
+   * whole back half of a 370-unit strip of island, which is where most of the
+   * shadow-pass draw calls came from.
+   */
+  function depthOf(p, dir) {
+    return -(p.x - anchor.x) * dir.x - (p.y - anchor.y) * dir.y - (p.z - anchor.z) * dir.z;
+  }
+  function receiverDepth(dir) {
+    const pl = ctx.systems.player?.position;
+    let d = pl ? depthOf(pl, dir) : 0;
+    for (let i = 0; i < fitPts.length; i++) { const v = depthOf(fitPts[i], dir); if (v > d) d = v; }
+    for (let i = 0; i < farN; i++) { const v = depthOf(farPts[i], dir); if (v > d) d = v; }
+    return d;
   }
 
   /**
@@ -314,10 +406,23 @@ export function create(ctx) {
     // world size of one shadow texel, and how far it smears along the ground
     const texel = (half * 2) / res;
     const elev = Math.max(tmpA.y, 0.18);
-    light.shadow.normalBias = clamp(texel * (1.30 + 1.05 / elev), 0.030, 0.110);
-    light.shadow.bias = -0.00022 - texel * 0.0040;
     const c = light.shadow.camera;
-    const far = dist + half * 2 + 140;
+    let far = dist + half * 2 + 140;
+    if (!MOBILE) {
+      light.shadow.normalBias = clamp(texel * (1.30 + 1.05 / elev), 0.030, 0.110);
+      light.shadow.bias = -0.00022 - texel * 0.0040;
+    } else {
+      // Depth range cut to the visible receivers (+ a margin for terrain relief
+      // and the walls that catch shadows), quantised so it does not churn.
+      const need = Math.ceil((Math.max(0, receiverDepth(tmpA)) + 18) / 8) * 8;
+      const full = far;
+      far = Math.min(full, dist + Math.max(32, need));
+      // Same WORLD-space offsets as desktop: bias is in normalised depth, so a
+      // shorter depth range needs a proportionally larger value; normalBias is
+      // allowed up to ~2.7 texels of the coarser 1024² map (acne otherwise).
+      light.shadow.normalBias = clamp(texel * (1.30 + 1.05 / elev), 0.030, 0.200);
+      light.shadow.bias = (-0.00022 - texel * 0.0040) * (full - 1) / (far - 1);
+    }
     if (c.right !== half || c.far !== far) {
       c.left = -half; c.right = half; c.top = half; c.bottom = -half; c.far = far;
       c.updateProjectionMatrix();
@@ -331,6 +436,26 @@ export function create(ctx) {
     light.target.position.copy(anchor).addScaledVector(tmpB, dx).addScaledVector(tmpC, dy);
     light.position.copy(light.target.position).addScaledVector(tmpA, dist);
     light.target.updateMatrixWorld();
+  }
+
+  /**
+   * MOBILE: redraw the live key's shadow map on a clock (~40 Hz cap) instead of
+   * every frame — immediately on anything discontinuous (first frame, time jump,
+   * key swap, box resize, a teleport-sized move). Between redraws three keeps
+   * using the previous map WITH the matrix it was drawn with (shadow.matrix only
+   * changes inside a redraw), so static shadows never slide; only moving
+   * casters lag by at most one frame.
+   */
+  function refreshShadows(dt, sunCasts) {
+    const key = sunCasts ? sun : moon;
+    shadowAcc += dt;
+    const moved = (anchor.x - lastRefresh.x) ** 2 + (anchor.z - lastRefresh.z) ** 2 > 36;
+    if (shadowForce || shadowAcc >= MOBILE_SHADOW_REFRESH || moved || sunCasts !== lastSunCasts
+      || shadowHalf !== lastHalf || !key.shadow.map) {
+      key.shadow.needsUpdate = true;
+      shadowAcc = 0; shadowForce = false;
+      lastRefresh.copy(anchor); lastHalf = shadowHalf; lastSunCasts = sunCasts;
+    }
   }
 
   function applyGrade(dt) {
@@ -460,7 +585,9 @@ export function create(ctx) {
     // one shadow map at a time: sun by day, moon by night
     const sunCasts = grade.sunI > 0.35;
     sun.castShadow = sunCasts;
-    moon.castShadow = !sunCasts && grade.moonI > 0.30;
+    // mobile: exactly one shadow light at all times — a 0 ↔ 1 flip at dusk
+    // recompiles every lit program in the scene, which a phone feels as a hitch
+    moon.castShadow = MOBILE ? !sunCasts : (!sunCasts && grade.moonI > 0.30);
 
     // ── shadow box fitted to what the camera sees ────────────────────────────
     const pl = ctx.systems.player?.position;
@@ -469,6 +596,7 @@ export function create(ctx) {
     const keyDist = KEY_DIST + (shadowHalf - SHADOW_MIN) * 1.5;
     aimKey(sun, sunDir, keyDist, shadowHalf);
     aimKey(moon, moonDir, keyDist, shadowHalf);
+    if (shadowClock) refreshShadows(dt, sunCasts);
     // COOL COUNTER-FILL, always from the side opposite whichever key is live —
     // derived from the key itself rather than from "the other luminary", which
     // used to leave dusk and deep night with the fill and the key on the SAME
@@ -536,8 +664,8 @@ export function create(ctx) {
     // ── sea mist ─────────────────────────────────────────────────────────────
     const mistAmt = mistAmountAt(t, daylight);
     api.mistAmount = mistAmt;
-    mist.mesh.visible = mistAmt > 0.01;
-    if (mist.mesh.visible) {
+    if (mist) mist.mesh.visible = mistAmt > 0.01;
+    if (mist && mist.mesh.visible) {
       const mi = mist.uniforms;
       mi.uAmt.value = mistAmt;
       mi.uTime.value = ctx.state.elapsed;
@@ -551,6 +679,16 @@ export function create(ctx) {
 
     // ── exposure ─────────────────────────────────────────────────────────────
     renderer.toneMappingExposure = grade.exp;
+
+    // ── mobile: drop the sky objects this lens cannot see (see SKY_CULL_MARGIN)
+    if (MOBILE) {
+      const topEl = Math.asin(clamp(frameTopSin(), -1, 1));
+      const below = topEl < -SKY_CULL_MARGIN;
+      clouds.group.visible = !(below && ctx.camera.position.y < CLOUD_FLOOR);
+      if (below) stars.points.visible = false;
+      if (sunDisc.mesh.visible && Math.asin(clamp(sunDir.y, -1, 1)) - SUN_QUAD_R - SKY_CULL_MARGIN > topEl) sunDisc.mesh.visible = false;
+      if (moonDisc.mesh.visible && Math.asin(clamp(moonDir.y, -1, 1)) - MOON_QUAD_R - SKY_CULL_MARGIN > topEl) moonDisc.mesh.visible = false;
+    }
 
     // dome/stars/discs ride with the camera so the horizon never runs out
     group.position.copy(ctx.camera.position);
@@ -567,15 +705,24 @@ export function create(ctx) {
     lampsOn, lampMix: lampMixAt(ctx.state.time),
     mistAmount: 0,
     get shadowHalf() { return shadowHalf; },
+    /** mobile tier: is the key shadow map on its redraw clock? (setter: false = every frame) */
+    get shadowClock() { return shadowClock; },
+    set shadowClock(v) { setShadowClock(v); shadowForce = true; },
     /** Force a full re-grade (used after time jumps). */
-    refresh() { applyGrade(1 / 30); },
+    refresh() { shadowForce = true; applyGrade(1 / 30); },
     update(dt) { applyGrade(dt); },
   };
 
   // one line in the render log so the budget is measured, not asserted
-  console.warn(`[sky] ${4 + clouds.group.children.length + 1} draw calls max `
-    + `(dome, stars, sun, moon, ${clouds.group.children.length} cloud batches, mist) · `
-    + `mist ${mist.tris} tris · clouds ${clouds.count} puffs · shadow ${SHADOW_MAP}²`);
+  if (mist) {
+    console.warn(`[sky] ${4 + clouds.group.children.length + 1} draw calls max `
+      + `(dome, stars, sun, moon, ${clouds.group.children.length} cloud batches, mist) · `
+      + `mist ${mist.tris} tris · clouds ${clouds.count} puffs · shadow ${SHADOW_MAP}²`);
+  } else {
+    console.warn(`[sky] mobile tier · ${4 + clouds.group.children.length} draw calls max `
+      + `(dome, stars, sun, moon, ${clouds.group.children.length} cloud batches, no mist) · `
+      + `clouds ${clouds.count} puffs · shadow ${shadowRes}², one caster, redrawn ≤ ${Math.round(1 / MOBILE_SHADOW_REFRESH)} Hz`);
+  }
 
   ctx.events.on('time:set', () => api.refresh());
   // sky is system #0, so nobody is listening yet during create(): announce the

@@ -549,3 +549,177 @@ export function walkable(world, x, z, riverPad = 2.2, propPad = 0.3) {
   if (propPad >= 0 && !clearOfProps(x, z, propPad)) return false;
   return true;
 }
+
+// ── CONTRACT A — every walker stands on the ground the visitor stands on ─────
+// WAVE 3: sheep, snails, beetles and ants used to read world.height (terrain
+// only) and dodge props with the coarse ColliderGrid above, which turned every
+// box into its circumscribed circle and knew nothing about benches, logs or
+// crates. They now ask the ground core the player system owns:
+//   player.groundInfo(x, z, out).h  — terrain, a walkable deck, or the TOP of a
+//                                     LOW prop (≤ 1.6 u: benches, logs, crates)
+//   player.pushOut(x, z, r, out)    — the body circle resolved against every
+//                                     SOLID collider (circles + oriented boxes)
+// both through the player's spatial hash, allocation-free (we pass `out`).
+// If the player system is missing or broken the walkers fall back to terrain
+// height and to REFUSING a step into a known prop, so nothing breaks.
+//
+// A creature body is one reported circle at its pivot plus optional forward /
+// backward PROBES (a sheep is a long animal: a single circle big enough to
+// cover its nose would also keep it a metre off every fence it walks past).
+// All radii and offsets are in units of the creature's own scale:
+//   body = { r, probes: [[forwardOffset, radius], ...] }
+// Probes are resolved first and their push moves the whole animal; the pivot
+// circle is resolved LAST, so the circle reported by debugPositions() is the
+// one guaranteed clear.
+export const HIT = 1, WET = 2;
+const DYN_MAX = 48;
+
+export class Ground {
+  constructor(ctx, world) {
+    this.ctx = ctx; this.world = world;
+    this.p = null; this.live = false;
+    this.g = { h: 0, deck: false, water: 0, limit: 0, floor: 0, prop: null, top: 0, base: 0 };
+    this.q = { x: 0, z: 0, hit: false };
+    this._dq = { x: 0, z: 0 };
+    this.riverHalf = (world.RIVER?.width ?? 0) * 0.5;
+    this.stats = { steps: 0, hits: 0, wet: 0, onProp: 0, bumped: 0 };
+    // moving bodies no walker may pass through: the visitor + Sour Patch Kids
+    this.dyn = new Float64Array(DYN_MAX * 3); this.nDyn = 0;
+  }
+  /**
+   * Once per frame: the moving bodies walkers must not pass through — the
+   * visitor (unless riding a vehicle) and every visible Sour Patch Kid on
+   * Candyland. Read defensively; either list may be missing.
+   */
+  bindDynamic(ctx) {
+    let n = 0; const D = this.dyn;
+    const pl = ctx.systems?.player, pp = pl?.position;
+    if (pp && !pl.onVehicle && pp.x < 40) { D[0] = pp.x; D[1] = pp.z; D[2] = (typeof pl.radius === 'number' ? pl.radius : 0.36) + 0.04; n = 1; }
+    const kids = ctx.systems?.sourPatch?.kids;
+    if (Array.isArray(kids)) {
+      for (let i = 0; i < kids.length && n < DYN_MAX; i++) {
+        const k = kids[i];
+        if (!k || typeof k.x !== 'number' || !(k.vis > 0.4) || (k.air || 0) > 0.6) continue;
+        D[n * 3] = k.x; D[n * 3 + 1] = k.z; D[n * 3 + 2] = (typeof k.r === 'number' ? k.r : 0.5); n++;
+      }
+    }
+    this.nDyn = n;
+  }
+  /** Shift (x,z) so a circle of radius rr there clears every dynamic body; returns the shift. */
+  _dynPush(x, z, rr, out) {
+    let dx = 0, dz = 0;
+    const D = this.dyn;
+    for (let j = 0; j < this.nDyn; j++) {
+      const ox = x + dx - D[j * 3], oz = z + dz - D[j * 3 + 1], min = D[j * 3 + 2] + rr;
+      const d2 = ox * ox + oz * oz;
+      if (d2 >= min * min) continue;
+      const d = Math.sqrt(d2);
+      if (d < 1e-4) { dx += min; continue; }
+      const k = (min - d) / d; dx += ox * k; dz += oz * k;
+    }
+    out.x = dx; out.z = dz;
+    return out;
+  }
+  /** Once per frame: pick up (or lose) the player's Contract-A API. */
+  bind() {
+    const p = this.ctx.systems?.player;
+    this.live = !!p && typeof p.groundInfo === 'function' && typeof p.pushOut === 'function' && !this.broken;
+    this.p = this.live ? p : null;
+  }
+  /** Where feet rest at (x,z). Returns a shared object — copy what you need. */
+  info(x, z) {
+    const g = this.g;
+    if (this.live) {
+      try { this.p.groundInfo(x, z, g); if (g.h === g.h) return g; }
+      catch (err) { this.broken = true; this.live = false; console.error('[candyCreatures] player.groundInfo failed; falling back to terrain', err); }
+    }
+    const h = this.world.height(x, z);
+    g.h = h; g.base = h; g.water = 0; g.prop = null; g.deck = false; g.top = h; g.floor = h;
+    return g;
+  }
+  height(x, z) { return this.info(x, z).h; }
+  /** Circle (x,z,r) resolved against SOLID props; (px,pz) = where it stood. */
+  push(x, z, r, px, pz) {
+    const q = this.q;
+    if (this.live) {
+      try { this.p.pushOut(x, z, r, q); if (q.x === q.x && q.z === q.z) return q; }
+      catch (err) { this.broken = true; this.live = false; console.error('[candyCreatures] player.pushOut failed; falling back to the prop grid', err); }
+    }
+    const grid = OBSTACLES.grid;
+    const hit = !!grid && grid.hit(x, z, Math.min(r * 0.5, grid.margin));
+    q.x = hit ? px : x; q.z = hit ? pz : z; q.hit = hit;
+    return q;
+  }
+  /** Solid, dry land: not the sea, not the Chocolate Lake, not the syrup river. */
+  dry(x, z, g, riverPad) {
+    if (riverPad === Infinity) return true;                  // rail-bound walkers (ants)
+    if (g.base < 0.9 && !g.deck) return false;
+    if (g.water > 0 && g.water - g.h > 0.05) return false;
+    return this.world.riverDist(x, z) >= this.riverHalf + riverPad;
+  }
+  /**
+   * One walker, one frame. (nx,nz) is where its planner wants the pivot this
+   * frame — its current spot when it is standing still, so a prop that appears
+   * on top of a grazing sheep still shoves it clear. Resolves the body against
+   * every SOLID collider, refuses water, then sets e.y from the ground under
+   * the pivot (so it walks ON a bench, a log or a crate). Writes e.x, e.z, e.y,
+   * e.prop, e.r, e.yaw, e.sc, e.body. Returns 0 | HIT (a solid pushed it: its
+   * planner should turn around) | WET (step refused, it stayed put).
+   * riverPad = Infinity skips the dry-land test (ants on their baked trail).
+   */
+  step(e, nx, nz, yaw, sc, body, riverPad = 2.0) {
+    const S = this.stats; S.steps++;
+    let x = nx, z = nz, hit = false;
+    const pr = body.probes, R = body.r * sc;
+    const fs = Math.sin(yaw), fc = Math.cos(yaw);
+    // moving bodies first (the visitor, the kids): the walker is shoved aside
+    // like anything else he bumps into. Solids are resolved AFTER this, so a
+    // wall always wins over the visitor.
+    if (this.nDyn) {
+      const q = this._dq;
+      let bumped = false;
+      if (pr) for (let k = 0; k < pr.length; k++) {
+        const off = pr[k][0] * sc;
+        this._dynPush(x + fs * off, z + fc * off, pr[k][1] * sc, q);
+        if (q.x || q.z) { x += q.x; z += q.z; bumped = true; }
+      }
+      this._dynPush(x, z, R, q);
+      if (q.x || q.z) { x += q.x; z += q.z; bumped = true; }
+      if (bumped) { hit = true; S.bumped++; }
+    }
+    // probes, then the pivot; up to two more passes, each only when the one
+    // before moved the body (the pivot's push can shove a nose probe back into
+    // a fence post — two passes left a sheep's nose 0.19 u inside a trunk).
+    // "Moved" means > 1 mm: a circle left exactly touching a face is not a hit.
+    for (let pass = 0; pass < 3; pass++) {
+      let moved = 0;
+      if (pr) for (let k = 0; k < pr.length; k++) {
+        const off = pr[k][0] * sc;
+        const px = x + fs * off, pz = z + fc * off;
+        const q = this.push(px, pz, pr[k][1] * sc, e.x + fs * off, e.z + fc * off);
+        if (q.hit) { const dx = q.x - px, dz = q.z - pz; x += dx; z += dz; moved += Math.abs(dx) + Math.abs(dz); }
+      }
+      const q = this.push(x, z, R, e.x, e.z);
+      if (q.hit) { moved += Math.abs(q.x - x) + Math.abs(q.z - z); x = q.x; z = q.z; }
+      if (moved > 1e-3) hit = true;
+      if (!(moved > 1e-3) || !pr) break;
+    }
+    let g = this.info(x, z), res = hit ? HIT : 0;
+    if (!this.dry(x, z, g, riverPad)) { x = e.x; z = e.z; g = this.info(x, z); res |= WET; S.wet++; }
+    if (hit) S.hits++;
+    e.x = x; e.z = z; e.y = g.h; e.prop = g.prop;
+    if (g.prop) S.onProp++;
+    e.r = R; e.yaw = yaw; e.sc = sc; e.body = body;
+    return res;
+  }
+}
+
+/** Debug circles of one walker: the pivot circle plus its probes (world space). */
+export function bodyCircles(e) {
+  const out = [];
+  const b = e.body, sc = e.sc ?? 1, yaw = e.yaw ?? 0;
+  if (!b || !b.probes) return out;
+  const fs = Math.sin(yaw), fc = Math.cos(yaw);
+  for (const [off, rr] of b.probes) out.push({ x: e.x + fs * off * sc, z: e.z + fc * off * sc, r: rr * sc });
+  return out;
+}

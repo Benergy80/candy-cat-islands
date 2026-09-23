@@ -304,7 +304,7 @@ function buildGuestHouse(T) {
     x: f.px(gDX, GD / 2 + 0.4), z: f.pz(gDX, GD / 2 + 0.4),
     say: 'unlocked. of course it is unlocked. it is your room.', speaker: 'THE GUEST HOUSE',
   });
-  guestInterior(T, frame(GX, GFY, GZ, GRY), { hw: (GW - GT * 2) / 2, hd: (GD - GT * 2) / 2, doorX: gDX });
+  T.roomDetail('guest', () => guestInterior(T, frame(GX, GFY, GZ, GRY), { hw: (GW - GT * 2) / 2, hd: (GD - GT * 2) / 2, doorX: gDX }));
   T.act('guesthouse', f.px(gDX + 0.6, GD / 2 + 4.6), f.pz(gDX + 0.6, GD / 2 + 4.6), 'The Guest House', [
     'THE GUEST HOUSE. your room is ready. it always was.',
     'the mailbox is a fish, and it says YOU on it, and there is already post in it.',

@@ -141,7 +141,7 @@ export function buildSquare(T) {
     x: pf.px(0, PD / 2 + 0.4), z: pf.pz(0, PD / 2 + 0.4), swing: -1.7,
     say: 'the chamber doors are never locked. "the house sits," says a cat, "more or less permanently."', speaker: 'PURRLIAMENT',
   });
-  purrliamentInterior(T, frame(pf.x, pY, pf.z, 0), { hw: (PW - PT * 2) / 2, hd: (PD - PT * 2) / 2 });
+  T.roomDetail('purrliament', () => purrliamentInterior(T, frame(pf.x, pY, pf.z, 0), { hw: (PW - PT * 2) / 2, hd: (PD - PT * 2) / 2 }));
   T.light(pf.x, pf.y + 5.0, pf.z + PD / 2 + 4.0, 0xffc27a, 1.0, 34);
   // lit portico: the columns stand in a warm pool, the pediment is washed
   pool(b, pf.x, pf.y + 0.2, pf.pz(0, PD / 2 + 4.4), 13.0);

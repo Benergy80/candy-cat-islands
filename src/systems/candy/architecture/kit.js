@@ -119,6 +119,8 @@ export function makeSignAtlas(entries) {
   }
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 16;
+  // mobile tier: every atlas (Candyland's, the palace's, the cave's) ≤ 2048
+  if (TIER.mobile) halveCanvasTexture(tex, 4);
   return { tex, uv };
 }
 
@@ -167,6 +169,54 @@ export function plate(g, w, h, o = {}) {
   }
 }
 
+// ── quality tier ─────────────────────────────────────────────────────────────
+// The kit is shared: Candyland's architecture AND the escape system's palace
+// and cave build with it. candy/architecture.js (created before escape) calls
+// setKitTier(ctx.state.mobile) first thing, and on the MOBILE tier the kit's
+// defaults follow Contract I for every caller:
+//   · createBuilder() merges are frustum-culled unless opts.cull === false
+//     (desktop default is unchanged: never culled). A merged mesh is authored
+//     in place, so its bounds are exact — culling it cannot pop anything;
+//   · makeSignAtlas() hands back the atlas already halved (2048 × 2560 →
+//     1024 × 1280, anisotropy ≤ 4 — textures ≤ 2048), and halveCanvasTexture()
+//     is idempotent, so a caller that halves again changes nothing.
+// createBuilder's optional 4th argument:
+//   opts.cull   true/false: merged meshes keep their bounds and ARE (or are
+//               not) frustum-culled; omitted → the tier default above
+//   opts.split  (x, z) → district id: buckets become "material|district", so
+//               one island-wide merge becomes a handful the camera can cull
+//               (no longer used by Candyland — see architecture.js's header)
+//   opts.forward { key: otherBuilder } — pieces of that material are placed
+//               into the other builder instead (a building's additive halo
+//               decals join the island halo mesh: one draw call, not one
+//               per house)
+const TIER = { mobile: false };
+/** Set once by candy/architecture.js create(), before any builder or atlas. */
+export function setKitTier(mobile) { TIER.mobile = !!mobile; }
+
+/**
+ * Mobile only: halve a CanvasTexture in place (2048×2560 → 1024×1280) and drop
+ * the big canvas's backing store — iOS caps total canvas memory and the atlas
+ * is sampled at a few hundred pixels on a phone screen anyway. UVs are
+ * normalised, so every sign quad maps exactly as before.
+ */
+export function halveCanvasTexture(tex, maxAniso = 4) {
+  if (tex.userData.tierHalved) return tex;       // already done (the kit tier, or a caller)
+  const src = tex.image;
+  if (!src || !src.width) return tex;
+  const w = Math.max(1, src.width >> 1), h = Math.max(1, src.height >> 1);
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const g = cv.getContext('2d');
+  g.imageSmoothingEnabled = true; try { g.imageSmoothingQuality = 'high'; } catch (e) { /* older canvas */ }
+  g.drawImage(src, 0, 0, w, h);
+  try { src.width = 0; src.height = 0; } catch (e) { /* not a canvas */ }
+  tex.image = cv;
+  tex.anisotropy = Math.min(tex.anisotropy, maxAniso);
+  tex.needsUpdate = true;
+  tex.userData.tierHalved = true;
+  return tex;
+}
+
 // ── the merge builder ────────────────────────────────────────────────────────
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
 const _c = new THREE.Color();
@@ -186,12 +236,19 @@ function ensureIndexed(geo) {
  * and still be driven by unchanged building code. One bucket = one draw call, so
  * a per-building group that has to fade (an enterable house) costs 2 calls, not 9.
  */
-export function createBuilder(mats, signUV, keyMap = null) {
+export function createBuilder(mats, signUV, keyMap = null, opts = null) {
   const buckets = new Map();
   const stats = { pieces: 0 };
+  // opts.split(x, z) → district id (mobile tier only): buckets become
+  // "material|district", so one island-wide merge becomes a handful of
+  // district merges the camera can cull.
+  const split = opts && typeof opts.split === 'function' ? opts.split : null;
+  const cull = opts && opts.cull !== undefined && opts.cull !== null ? !!opts.cull : TIER.mobile;
+  const forward = opts && opts.forward ? opts.forward : null;
 
   function place(key, geo, o) {
     if (keyMap && keyMap[key]) key = keyMap[key];
+    if (forward && forward[key]) return forward[key].add(key, geo, o);
     const at = o.at || [0, 0, 0], rot = o.rot || [0, 0, 0];
     let s = o.scale ?? 1; if (typeof s === 'number') s = [s, s, s];
     // YXZ: yaw about world Y is applied LAST, so [pitch, yaw, roll] reads naturally
@@ -212,6 +269,11 @@ export function createBuilder(mats, signUV, keyMap = null) {
     }
     ensureIndexed(geo);
     geo.deleteAttribute('normal'); geo.computeVertexNormals();
+    if (split) {
+      geo.computeBoundingBox();
+      const bb = geo.boundingBox;
+      key = key + '|' + split((bb.min.x + bb.max.x) / 2, (bb.min.z + bb.max.z) / 2);
+    }
     if (!buckets.has(key)) buckets.set(key, []);
     buckets.get(key).push(geo);
     stats.pieces++;
@@ -346,23 +408,26 @@ export function createBuilder(mats, signUV, keyMap = null) {
 
     finish(group) {
       const meshes = {};
-      for (const [key, list] of buckets) {
+      for (const [bkey, list] of buckets) {
         if (!list.length) continue;
+        const bar = bkey.indexOf('|');
+        const key = bar < 0 ? bkey : bkey.slice(0, bar);
+        const district = bar < 0 ? '' : bkey.slice(bar + 1);
         const m = mats[key];
         if (!m) { console.warn('[candy arch] no material for', key); continue; }
         const merged = mergeGeometries(list, false);
         if (!merged) { console.warn('[candy arch] merge failed for', key, list.length); continue; }
         merged.computeBoundingSphere();
         const mesh = new THREE.Mesh(merged, m);
-        mesh.name = 'candyArch_' + key;
+        mesh.name = 'candyArch_' + key + (district ? '_' + district : '');
         // haloDisc MUST NOT cast: a horizontal additive pool quad that casts a
         // shadow paints a hard-rimmed black blob on the ground right under the
         // lamp it is supposed to be lighting. Same for the liquid sheets.
         const noShadow = key === 'sign' || key === 'glowWarm' || key === 'glowSour' || key === 'windowWarm'
           || key === 'windowPink' || key === 'water' || key === 'haloDisc' || key === 'flow';
         mesh.castShadow = !noShadow; mesh.receiveShadow = true;
-        mesh.frustumCulled = false;
-        group.add(mesh); meshes[key] = mesh;
+        mesh.frustumCulled = cull;
+        group.add(mesh); meshes[district ? key + '_' + district : key] = mesh;
         for (const gg of list) gg.dispose();
       }
       buckets.clear();

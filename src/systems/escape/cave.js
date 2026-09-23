@@ -35,7 +35,12 @@ import {
   createMaterials, createBuilder, makeSignAtlas, plate,
   softGlow, lightPool, bench, C, SPRINKLE,
 } from '../candy/architecture/kit.js';
-import { signMesh } from './parts.js';           // vehicles' kit; shared on purpose
+import {
+  signMesh, signAtlas, Site, keyGeo, glowMat, beamField, itemSpot, keySpot, winchSpot,
+  nearestPathPoint, yawTo, readYaw, armYaw, mapMarker, rustyHint, drainRustyHints,
+  B as PB, paint, place, colorGlowMat, nightSign, poolMesh, decorTris, rockUnder, clearanceAt,
+} from './parts.js';           // vehicles' kit; shared on purpose
+import { clearanceClaim } from './ride.js';
 
 const CX = 1400, CZ = 0;            // diorama origin
 // CORRIDOR FLOOR DATUM. Two hard engine limits pin this number:
@@ -653,64 +658,188 @@ export function create(ctx, escape) {
   group.add(fill);
 
   // ── the hatch on Cat Island (a real prop at the yarn ball) ────────────────
-  const hatchGroup = new THREE.Group(); ctx.scene.add(hatchGroup);
+  // It has to read as A LOCKED DOOR from thirty units, which a door-shaped
+  // brown box in a sand plinth never did ("stacked crates"). So: a painted
+  // teal steel door with a brass porthole, iron strap hinges and rivets, set in
+  // a dark steel frame banded with yellow-and-black hazard stripes, with a
+  // GOLD CAT-HEADED PADLOCK on the hasp (the same gold, and the same cat, as
+  // the cave key — that is how you know what the key opens) and a lantern on
+  // each stone cheek that pools real light on the ground after dark. The
+  // padlock is gone once the hatch is unlocked.
+  const hatchGroup = new THREE.Group(); hatchGroup.name = 'cave_hatch'; ctx.scene.add(hatchGroup);
+  const hatchFx = { locked: null, open: null, glowM: null, pools: null, board: null, lockAt: null, sparkT: 0, yard: null };
+  // frame space → world xz (+Z out of the plinth, +X toward the hinge side)
+  const hcs = Math.cos(HATCH_RY), hsn = Math.sin(HATCH_RY);
+  const HW2 = (lx, lz) => [HATCH.x + lx * hcs + lz * hsn, HATCH.z - lx * hsn + lz * hcs];
   {
     const hy = world.height(HATCH.x, HATCH.z);
     const partMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0 });
-    // A doorway in a sand plinth is invisible from the game camera unless it
-    // has a SURROUND that breaks the plinth's silhouette: buttress cheeks, a
-    // stepped threshold out onto the grass, a lintel with a hazard band, and a
-    // lamp. (At r = 7.5 the old frame was simply inside the plinth.)
-    const frame = makePart([
-      { g: new THREE.BoxGeometry(3.0, 2.6, 0.5), at: [0, 1.3, -0.4], color: 0x14100e },     // the dark behind the door
-      { g: new THREE.BoxGeometry(4.4, 0.5, 1.1), at: [0, 2.85, -0.15], color: 0xa89070 },   // lintel
-      { g: new THREE.BoxGeometry(4.6, 0.26, 1.3), at: [0, 3.2, -0.15], color: 0x6f5a44 },   // drip course
-      { g: new THREE.BoxGeometry(0.9, 3.1, 1.0), at: [-1.95, 1.55, -0.15], color: 0x9a8468 }, // jambs
-      { g: new THREE.BoxGeometry(0.9, 3.1, 1.0), at: [1.95, 1.55, -0.15], color: 0x9a8468 },
-      { g: new THREE.BoxGeometry(1.3, 1.5, 1.6), at: [-2.3, 0.75, 0.4], color: 0x8a7358 },  // cheeks
-      { g: new THREE.BoxGeometry(1.3, 1.5, 1.6), at: [2.3, 0.75, 0.4], color: 0x8a7358 },
-      { g: new THREE.BoxGeometry(4.8, 0.34, 1.2), at: [0, 0.1, 0.5], color: 0x8a7358 },     // threshold
-      { g: new THREE.BoxGeometry(5.4, 0.3, 1.2), at: [0, -0.2, 1.6], color: 0x7d6a52 },     // step down to the grass
-      { g: new THREE.BoxGeometry(4.4, 0.18, 0.34), at: [0, 2.62, 0.42], color: 0xd9b36a },  // hazard band
-      { g: new THREE.CylinderGeometry(0.12, 0.16, 2.6, 6), at: [-2.9, 1.3, 0.6], color: 0x3a4a4c },  // lamp post
-      { g: new THREE.SphereGeometry(0.34, 9, 7), at: [-2.9, 2.75, 0.6], color: 0xffd79a },
-    ], partMat);
+    const H = new THREE.Group(); H.name = 'cave_hatch_frame';
+    H.position.set(HATCH.x, hy - 0.25, HATCH.z); H.rotation.y = HATCH_RY;
+    hatchGroup.add(H);
+    const STEEL = 0x2b3a40, STONE = 0xd2b98e, STONE_DK = 0xab916b, IRONK = 0x2a2628;
+    const HAZ_Y = 0xffc414, HAZ_K = 0x1e1b19;
+    const pieces = [
+      { g: new THREE.BoxGeometry(3.0, 2.6, 0.5), at: [0, 1.3, -0.4], color: 0x14100e },      // the dark behind the door
+      // stone surround: jambs, cheeks (+ caps), lintel, drip course, threshold, step
+      { g: new THREE.BoxGeometry(0.75, 3.3, 1.0), at: [-2.02, 1.65, -0.15], color: STONE_DK },
+      { g: new THREE.BoxGeometry(0.75, 3.3, 1.0), at: [2.02, 1.65, -0.15], color: STONE_DK },
+      { g: new THREE.BoxGeometry(1.3, 1.6, 1.6), at: [-2.35, 0.8, 0.35], color: STONE },
+      { g: new THREE.BoxGeometry(1.3, 1.6, 1.6), at: [2.35, 0.8, 0.35], color: STONE },
+      { g: new THREE.BoxGeometry(1.44, 0.16, 1.74), at: [-2.35, 1.66, 0.35], color: STONE_DK },
+      { g: new THREE.BoxGeometry(1.44, 0.16, 1.74), at: [2.35, 1.66, 0.35], color: STONE_DK },
+      { g: new THREE.BoxGeometry(4.9, 0.6, 1.15), at: [0, 3.28, -0.1], color: STONE },
+      { g: new THREE.BoxGeometry(5.1, 0.24, 1.3), at: [0, 3.7, -0.1], color: 0x7d6650 },
+      { g: new THREE.BoxGeometry(4.8, 0.34, 1.2), at: [0, 0.1, 0.5], color: STONE_DK },
+      { g: new THREE.BoxGeometry(5.4, 0.3, 1.2), at: [0, -0.2, 1.6], color: 0x8a7358 },
+      // the steel door frame
+      { g: new THREE.BoxGeometry(0.36, 2.95, 0.66), at: [-1.62, 1.48, 0.05], color: STEEL },
+      { g: new THREE.BoxGeometry(0.36, 2.95, 0.66), at: [1.62, 1.48, 0.05], color: STEEL },
+      { g: new THREE.BoxGeometry(3.6, 0.36, 0.66), at: [0, 2.83, 0.05], color: STEEL },
+      // the hasp the padlock hangs on (frame side)
+      { g: new THREE.BoxGeometry(0.66, 0.2, 0.1), at: [1.52, 1.3, 0.42], color: IRONK },
+      // two iron brackets holding the name board on the drip course
+      { g: new THREE.BoxGeometry(0.12, 0.62, 0.12), at: [-1.7, 4.02, 0.24], color: IRONK },
+      { g: new THREE.BoxGeometry(0.12, 0.62, 0.12), at: [1.7, 4.02, 0.24], color: IRONK },
+      // hazard bands: across the lintel face and down both steel jambs
+      ...stripeQuads(4.7, 0.44, 13, 0.34, HAZ_Y, HAZ_K, [0, 3.28, 0.487]),
+      ...stripeQuads(2.5, 0.24, 7, 0.22, HAZ_Y, HAZ_K, [-1.62, 1.42, 0.392], [0, 0, Math.PI / 2]),
+      ...stripeQuads(2.5, 0.24, 7, 0.22, HAZ_Y, HAZ_K, [1.62, 1.42, 0.392], [0, 0, Math.PI / 2]),
+    ];
+    // a lantern on each cheek: iron post, base plate, cap (the glass glows, below)
+    for (const s of [-1, 1]) {
+      pieces.push(
+        { g: new THREE.BoxGeometry(0.16, 0.8, 0.16), at: [s * 2.35, 2.12, 0.95], color: IRONK },
+        { g: new THREE.CylinderGeometry(0.25, 0.25, 0.08, 6), at: [s * 2.35, 2.54, 0.95], color: IRONK },
+        { g: new THREE.ConeGeometry(0.31, 0.28, 6), at: [s * 2.35, 3.16, 0.95], color: IRONK },
+        { g: new THREE.TorusGeometry(0.08, 0.025, 4, 8), at: [s * 2.35, 3.36, 0.95], color: IRONK },
+      );
+    }
+    const frame = makePart(pieces, partMat);
+    frame.name = 'cave_hatch_surround';
+    H.add(frame);
+
+    // the door leaf, hinged on the −X (south) jamb so the padlock side faces
+    // the default lens (on the other side the CAVE KEY fingerpost hid it)
+    const DOOR = 0x2c8f95, DOOR_DK = 0x1c5b62, BRASS = 0xd9a441;
+    const leafG = new THREE.Group();
+    leafG.position.set(-1.35, 0, 0);
+    H.add(leafG);
+    const lp = [
+      { g: new THREE.BoxGeometry(2.62, 2.5, 0.2), at: [1.35, 1.3, 0.14], color: DOOR },
+      { g: new THREE.BoxGeometry(2.62, 0.2, 0.3), at: [1.35, 0.18, 0.16], color: DOOR_DK },
+      { g: new THREE.BoxGeometry(2.62, 0.2, 0.3), at: [1.35, 2.44, 0.16], color: DOOR_DK },
+      { g: new THREE.BoxGeometry(0.2, 2.1, 0.3), at: [0.14, 1.3, 0.16], color: DOOR_DK },
+      { g: new THREE.BoxGeometry(0.2, 2.1, 0.3), at: [2.56, 1.3, 0.16], color: DOOR_DK },
+      { g: new THREE.BoxGeometry(2.26, 0.14, 0.26), at: [1.35, 1.2, 0.16], color: DOOR_DK },
+      // brass porthole: ring, glass, a glint
+      { g: new THREE.TorusGeometry(0.37, 0.09, 6, 16), at: [1.35, 1.8, 0.3], color: BRASS },
+      { g: new THREE.CircleGeometry(0.33, 14), at: [1.35, 1.8, 0.262], color: 0x78d8da },
+      { g: new THREE.CircleGeometry(0.1, 8), at: [1.23, 1.92, 0.268], color: 0xeafffb },
+      // a big cream paw on the lower panel: the cats' own service door
+      { g: new THREE.CircleGeometry(0.22, 10), at: [1.35, 0.6, 0.252], color: 0xf1e2bf },
+      // the door side of the hasp
+      { g: new THREE.BoxGeometry(0.12, 0.3, 0.14), at: [2.5, 1.3, 0.33], color: IRONK },
+    ];
+    for (const [tx, ty] of [[-0.17, 0.2], [-0.06, 0.29], [0.06, 0.29], [0.17, 0.2]]) {
+      lp.push({ g: new THREE.CircleGeometry(0.075, 8), at: [1.35 + tx, 0.6 + ty, 0.252], color: 0xf1e2bf });
+    }
+    for (const y of [0.55, 2.05]) {       // strap hinges + knuckles
+      lp.push(
+        { g: new THREE.BoxGeometry(1.1, 0.17, 0.07), at: [0.55, y, 0.33], color: IRONK },
+        { g: new THREE.CylinderGeometry(0.1, 0.1, 0.38, 6), at: [-0.02, y, 0.22], color: IRONK },
+      );
+    }
+    for (let i = 0; i < 7; i++) {          // rivets along the rails
+      const x = 0.3 + i * 0.35;
+      lp.push({ g: new THREE.SphereGeometry(0.05, 5, 3), at: [x, 0.18, 0.32], color: 0x9fb7b8 });
+      lp.push({ g: new THREE.SphereGeometry(0.05, 5, 3), at: [x, 2.44, 0.32], color: 0x9fb7b8 });
+    }
+    const leaf = makePart(lp, partMat);
+    leaf.name = 'cave_hatch_door';
+    leafG.add(leaf);
+    hatchGroup.userData.leaf = leafG;
+
+    // the glowing bits: lantern glass (both states) + the padlock (locked only).
+    // Two meshes, one visible at a time → one draw call either way.
+    const glass = new PB();
+    for (const s of [-1, 1]) glass.cyl(0.19, 0.21, 0.5, 6, 0xffe2a8, s * 2.35, 2.83, 0.95);
+    const openGeo = glass.geometry();
+    const lock = new PB().merge(glass);
+    const LG = 0xffc93a, LG_DK = 0xe09a1c, LINK = 0x2a1a0c;
+    const LX = 1.5, LY = 0.92, LZ = 0.52;
+    lock.box(0.7, 0.5, 0.28, LG, LX, LY, LZ);
+    lock.cyl(0.35, 0.35, 0.28, 12, LG, LX, LY - 0.25, LZ, Math.PI / 2);        // rounded chin
+    for (const s of [-1, 1]) lock.add(new THREE.ConeGeometry(0.13, 0.26, 3), LG, LX + s * 0.27, LY + 0.33, LZ, 0, 0, -s * 0.32, [1, 1, 0.55]);   // ears
+    lock.add(new THREE.TorusGeometry(0.14, 0.05, 5, 10, Math.PI), LG_DK, LX, LY + 0.3, LZ);     // shackle through the hasp
+    for (const s of [-1, 1]) lock.sph(0.05, 5, 4, LINK, LX + s * 0.14, LY + 0.08, LZ + 0.15, [1, 1.35, 0.5]);   // eyes
+    lock.add(new THREE.CircleGeometry(0.075, 10), LINK, LX, LY - 0.14, LZ + 0.145);             // keyhole
+    lock.box(0.055, 0.16, 0.02, LINK, LX, LY - 0.25, LZ + 0.145);
+    hatchFx.glowM = colorGlowMat(0xffffff, { intensity: 0.35, roughness: 0.4 });
+    hatchFx.locked = new THREE.Mesh(lock.geometry(), hatchFx.glowM);
+    hatchFx.open = new THREE.Mesh(openGeo, hatchFx.glowM);
+    for (const m of [hatchFx.locked, hatchFx.open]) { m.castShadow = false; m.receiveShadow = false; m.userData.noFade = true; H.add(m); }
+    hatchFx.locked.name = 'cave_hatch_padlock'; hatchFx.open.name = 'cave_hatch_lanterns';
+    hatchFx.open.visible = false;
+    { const [x, z] = HW2(LX, LZ + 0.2); hatchFx.lockAt = { x, y: hy - 0.25 + LY + 0.2, z }; }
+
+    // the name board — hazard yellow, and it FITS now (signMesh shrinks text)
+    try {
+      const board = signMesh(4.3, 1.1, [
+        { text: 'MAINTENANCE HATCH', size: 74, color: '#1e1b19' },
+        { text: 'cave access · staff of cats only', size: 40, color: '#5a3a14', weight: 800 },
+      ], { bg: '#ffd54a', borderColor: '#1e1b19', borderWidth: 12, cw: 640, ch: 164, pad: 16 });
+      board.position.set(0, 4.36, 0.34);
+      board.castShadow = false;
+      H.add(board);
+      hatchFx.board = nightSign(board, 0.5);
+    } catch (e) { /* sign is decoration; never take the route down for it */ }
+
+    // lamplight on the ground in front of the door (after dark)
+    const pools = [];
+    for (const s of [-1, 1]) { const [x, z] = HW2(s * 2.0, 2.3); pools.push({ x, z, r: 2.7 }); }
+    hatchFx.pools = poolMesh(ctx, pools, 0xffb45a, { name: 'cave_hatch_pools' });
+
+    // colliders, part 1: the two cheek circles exactly as they always were —
+    // the hatch fingerpost's ground search (createKeyTrail, below) scores
+    // against them, and its verified spot must not move. Part 2 (the boxes
+    // that close the gaps these circles left) goes in after that search.
     for (const s of [-1, 1]) {
       ctx.colliders.push({
         x: HATCH.x + Math.sin(HATCH_A) * s * 2.3,
         z: HATCH.z - Math.cos(HATCH_A) * s * 2.3, r: 0.85, h: hy + 2.6,
       });
     }
-    frame.position.set(HATCH.x, hy - 0.25, HATCH.z);
-    frame.rotation.y = HATCH_RY;
-    hatchGroup.add(frame);
-    const leafG = new THREE.Group();
-    leafG.position.set(HATCH.x + Math.sin(HATCH_A) * 1.35, hy - 0.25, HATCH.z - Math.cos(HATCH_A) * 1.35);
-    leafG.rotation.y = HATCH_RY;
-    const leaf = makePart([
-      { g: new THREE.BoxGeometry(2.7, 2.5, 0.26), at: [-1.35, 1.3, 0.14], color: 0xb09472 },
-      { g: new THREE.BoxGeometry(2.4, 0.16, 0.32), at: [-1.45, 1.8, 0.14], color: 0x6b5540 },
-      { g: new THREE.BoxGeometry(2.4, 0.16, 0.32), at: [-1.45, 0.5, 0.14], color: 0x6b5540 },
-      // a cat-shaped keyhole: head + two ears
-      { g: new THREE.CircleGeometry(0.19, 12), at: [-1.05, 1.0, 0.27], color: 0x14100e },
-      { g: new THREE.ConeGeometry(0.1, 0.18, 3), at: [-1.18, 1.2, 0.27], color: 0x14100e },
-      { g: new THREE.ConeGeometry(0.1, 0.18, 3), at: [-0.92, 1.2, 0.27], color: 0x14100e },
-    ], partMat);
-    leafG.add(leaf); hatchGroup.add(leafG);
-    hatchGroup.userData.leaf = leafG;
-    // a painted board over the lintel, so the hatch says what it is from the
-    // path (the signs inside the tunnel are no use to anybody out here)
-    try {
-      const board = signMesh(3.9, 1.15, [
-        { text: 'MAINTENANCE HATCH', size: 62, color: '#4a2f18' },
-        { text: 'staff of cats only', size: 40, color: '#7a5a3a', weight: 700 },
-      ], { bg: '#e8d3a8', borderColor: '#6b4a30', cw: 512, ch: 192 });
-      board.position.set(HATCH.x + Math.cos(HATCH_A) * 0.62, hy + 3.55, HATCH.z + Math.sin(HATCH_A) * 0.62);
-      board.rotation.y = HATCH_RY;
-      board.castShadow = false;
-      hatchGroup.add(board);
-    } catch (e) { /* sign is decoration; never take the route down for it */ }
   }
+  /** Part 2: the stone cheeks and the closed door as SOLID oriented boxes.
+   *  The circles alone left the cheek corners walk-through, and the old
+   *  free-standing lamp post (now gone: the lanterns stand on the cheeks)
+   *  had no collider at all — a cat stood inside it. */
+  function hatchSolids() {
+    for (const s of [-1, 1]) {
+      const [x, z] = HW2(s * 2.35, 0.35);
+      ctx.colliders.push({ x, z, w: 1.44, d: 1.74, rot: -HATCH_RY, box: true });
+    }
+    const [x, z] = HW2(0, -0.2);
+    ctx.colliders.push({ x, z, w: 3.3, d: 0.9, rot: -HATCH_RY, box: true });
+  }
+  /** The key turned: the padlock drops off in a puff of gold. */
+  function unlockVisual() {
+    if (!hatchFx.locked || !hatchFx.locked.visible) return;
+    hatchFx.locked.visible = false; hatchFx.open.visible = true;
+    const L = hatchFx.lockAt;
+    ctx.systems.particles?.burst?.({ x: L.x, y: L.y, z: L.z, count: 22, color: [0xffe07a, 0xffffff, 0xffb428], speed: 2.8, up: 1.2, life: 0.9, size: 0.24, sizeEnd: 0.04, gravity: -5, drag: 1.4, spread: 0.5, shape: 'sparkle', blend: 'add' });
+  }
+
+  // ── the cave key: a real object on the Lost Property plinth (Contract D) ──
+  let keyTrail = null;
+  try { keyTrail = createKeyTrail(ctx, escape); }
+  catch (err) { console.error('[escape/cave] key trail failed', err); }
+  hatchSolids();
+  // ── the hatch yard: worn path, apron, paw prints, props (AFTER the key
+  //    trail, so the hatch fingerpost's ground search is exactly as before)
+  try { hatchFx.yard = buildHatchYard(ctx, { HW2, apron: keyTrail?.trail?.apron || null, post: keyTrail?.trail?.hatch || null }); }
+  catch (err) { console.error('[escape/cave] hatch yard failed', err); }
 
   // ═══════════════════════════════════════════════════ walkable + state ═════
   let inCave = false, armCat = true, armPal = true, busy = false;
@@ -837,9 +966,11 @@ export function create(ctx, escape) {
     onInteract(c, self) {
       if (!c.systems.story?.get('helper_5')) {
         c.systems.ui?.say('Locked. A cat-shaped keyhole.', { speaker: 'The Hatch', duration: 5 });
+        keyTrail?.lockedHint();
         return;
       }
       hatchOpen = true;
+      unlockVisual();
       c.systems.ui?.say('The key turns with a sound like a purr. Cold air comes up the steps.', { speaker: 'The Hatch', duration: 5 });
       escape.after(1.1, () => enterCave('cat'));
     },
@@ -874,9 +1005,16 @@ export function create(ctx, escape) {
   ];
   ctx.events.on('world:ready', () => {
     const I = ctx.systems.interaction;
-    if (I?.register) for (const s of capEntries) { try { I.register(s); } catch (e) {} }
-    // keep the hatch label honest once Rusty hands over the key
-    ctx.systems.story?.once?.('helper_5', () => { hatchEntry.label = 'Unlock the hatch'; });
+    // interaction.register() stores a COPY of the spec, so keep the entry it
+    // returns — relabelling our own spec object never reached the prompt
+    let hatchReg = null;
+    if (I?.register) for (const s of capEntries) { try { const e = I.register(s); if (s === hatchEntry) hatchReg = e; } catch (e) {} }
+    // keep the hatch label honest once the key is yours (plinth or Rusty)
+    ctx.systems.story?.once?.('helper_5', () => {
+      hatchEntry.label = 'Unlock the hatch';
+      if (hatchReg) hatchReg.label = 'Unlock the hatch';
+      try { if (I?.nearest?.() === hatchReg) ctx.systems.ui?.prompt?.(hatchReg.label, hatchReg); } catch (e) {}
+    });
   });
 
   // ═══════════════════════════════════════════════════════ update ═══════════
@@ -889,12 +1027,38 @@ export function create(ctx, escape) {
     get inCave() { return inCave; },
     tunnelStart: spawn('cat'), tunnelEnd: spawn('palace'),
     enterCave, leaveCave: leaveTo,
+    keyTrail,
     update(dt, c) {
       const p = c.systems.player?.position;
       const night = 1 - (c.state.daylight ?? 1);
+      if (keyTrail) {
+        try { keyTrail.update(dt, c); }
+        catch (err) { if (!keyTrail.__warned) { keyTrail.__warned = true; console.error('[escape/cave] key trail update', err); } }
+      }
       // hatch leaf swings open once unlocked
       const hl = hatchGroup.userData.leaf;
-      if (hl) hl.rotation.y = damp(hl.rotation.y, HATCH_RY + (hatchOpen ? -1.35 : 0), 4, dt);
+      if (hl) hl.rotation.y = damp(hl.rotation.y, hatchOpen ? 1.35 : 0, 4, dt);
+      // the hatch after dark: lantern glass, the pools they throw, the board;
+      // the padlock glints now and then so the eye finds it
+      {
+        const t = c.state.elapsed;
+        const fl = 0.94 + 0.06 * Math.sin(t * 7.3) * Math.sin(t * 2.9);
+        if (hatchFx.glowM) hatchFx.glowM.emissiveIntensity = (0.32 + 1.3 * night) * fl;
+        hatchFx.pools?.set(night * 0.85 * fl);
+        hatchFx.board?.(night);
+        if (hatchFx.yard) {
+          try { hatchFx.yard.update(dt, c, night); }
+          catch (err) { if (!hatchFx.yard.__warned) { hatchFx.yard.__warned = true; console.error('[escape/cave] hatch yard update', err); } }
+        }
+        if (hatchFx.locked?.visible && p && Math.abs(p.x - HATCH.x) < 40 && Math.abs(p.z - HATCH.z) < 40) {
+          hatchFx.sparkT -= dt;
+          if (hatchFx.sparkT <= 0) {
+            hatchFx.sparkT = 1.7;
+            const L = hatchFx.lockAt;
+            c.systems.particles?.sparkle?.(L.x, L.y, L.z, 0xffe07a, 3);
+          }
+        }
+      }
 
       const near = p ? (Math.abs(p.x - CX) < 60 && Math.abs(p.z - CZ) < 170) : false;
       if (near !== group.visible) show(near);        // renders can just teleport in
@@ -1160,4 +1324,692 @@ function signEntries() {
       }),
     },
   ];
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// THE CAVE KEY (wave 3, Contract D).
+//
+// Rusty's five-candy tier still hands the key over (story flag helper_5), but
+// the key is now also a real object: a golden cat-headed key hovering over a
+// red cushion on a stone plinth — the island's LOST PROPERTY display — on the
+// lawn just below the Welcome Plaza, beside the harbour road. A gold light
+// column + rising sparkles mark it from 40 u, and after dark the key glows.
+// The trail to it: a LOST KEY? notice board on the arrivals road, a fingerpost
+// at the plaza exit (key → plinth, winch → quay), a fingerpost + poster at the
+// hatch pointing back west, one extra line from Rusty, a map marker.
+// E on the plinth → helper_5 (the hatch already keys off it) + a toast that
+// names the hatch; the map marker then moves to the hatch.
+//
+// Draw calls near it: plinth site 1 · key 1 · beam 1 (+ a sign site 1 at each
+// of the arrivals board, the plaza fingerpost and the hatch).
+// ═════════════════════════════════════════════════════════════════════════════
+const KEY_HEX = 0xffc84a;
+
+function createKeyTrail(ctx, escape) {
+  const world = ctx.world;
+  const story = () => ctx.systems.story;
+  const ui = () => ctx.systems.ui;
+  const fx = () => ctx.systems.particles;
+  ctx.colliders = ctx.colliders || [];
+  const atlas = signAtlas();
+  const S = keySpot(ctx);
+  const group = new THREE.Group(); group.name = 'escape_cave_key';
+  ctx.scene.add(group);
+  const cosR = Math.cos(S.ry), sinR = Math.sin(S.ry);
+  /** plinth-local (x right, z toward the road) → world xz */
+  const W = (lx, lz) => [S.x + lx * cosR + lz * sinR, S.z - lx * sinR + lz * cosR];
+
+  // ── the plinth, the cushion, the Lost Property board (one mesh) ────────────
+  const site = new Site();
+  const STONE = 0xd8cfbf, STONE_DK = 0xb3a893, GOLDT = 0xf2c14a, VELVET = 0xd42a3c, WOODD = 0x5b3b24;
+  site.cyl(1.2, 1.32, 0.7, 8, STONE_DK, 0, -0.15, 0, 0, Math.PI / 8);          // footing (sunk)
+  site.cyl(0.92, 1.05, 0.22, 8, STONE, 0, 0.3, 0, 0, Math.PI / 8);             // step
+  site.cyl(0.6, 0.68, 1.0, 8, STONE, 0, 0.9, 0, 0, Math.PI / 8);               // column
+  site.cyl(0.66, 0.66, 0.08, 8, GOLDT, 0, 0.5, 0, 0, Math.PI / 8);             // brass bands
+  site.cyl(0.62, 0.62, 0.08, 8, GOLDT, 0, 1.3, 0, 0, Math.PI / 8);
+  site.cyl(0.9, 0.7, 0.24, 8, STONE_DK, 0, 1.5, 0, 0, Math.PI / 8);            // capital
+  site.sph(0.5, 12, 6, VELVET, 0, 1.77, 0, [1.5, 0.5, 1.5]);                  // the cushion
+  site.torus(0.7, 0.05, 4, 18, GOLDT, 0, 1.72, 0, Math.PI / 2);               // piping
+  for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    site.cone(0.08, 0.26, 5, GOLDT, sx * 0.55, 1.58, sz * 0.55, 0, 0, Math.PI);   // tassels
+  }
+  site.face('plaque', 0.86, 0.4, 0, 0.9, 0.615);                                 // PLEASE DO NOT TOUCH
+  // the Lost Property board: two posts, a roof cap, faces both sides
+  {
+    const bx = -2.5, bz = -0.7, yaw = 0.2;
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+    const P = (ox) => [bx + ox * c, bz - ox * s];
+    for (const ox of [-1.05, 1.05]) { const [px, pz] = P(ox); site.cyl(0.1, 0.12, 2.9, 6, WOODD, px, 1.05, pz); }
+    site.box(2.36, 1.24, 0.12, WOODD, bx, 1.75, bz, 0, yaw);
+    site.box(2.6, 0.14, 0.42, 0x8a3c2c, bx, 2.46, bz, 0, yaw);
+    site.face('lostprop', 2.2, 1.1, bx + s * 0.07, 1.75, bz + c * 0.07, yaw);
+    site.face('poster', 0.8, 1.1, bx - s * 0.07, 1.75, bz - c * 0.07, yaw + Math.PI);
+    for (const ox of [-1.05, 1.05]) { const [px, pz] = W(...P(ox)); ctx.colliders.push({ x: px, z: pz, r: 0.28 }); }
+  }
+  // (the plinth mesh is built below, merged with the plaza fingerpost: one call)
+  const plinthGeo = site.geometry();
+  plinthGeo.applyMatrix4(new THREE.Matrix4().makeRotationY(S.ry).setPosition(S.x, S.gy, S.z));
+  ctx.colliders.push({ x: S.x, z: S.z, r: 1.25 });
+  // nothing grows on the display (nature re-tests its instances on world:ready)
+  clearanceClaim(ctx, S.x - sinR * 0.2, S.z - cosR * 0.2, 7.5, 6.5, S.ry, 'cave_key_plinth');
+
+  // ── the key itself ─────────────────────────────────────────────────────────
+  const keyMat = glowMat(0xffb428, { intensity: 0.5 });
+  const kb = keyGeo();
+  const key = new THREE.Mesh(kb.geometry(), keyMat);
+  key.name = 'cave_key'; key.castShadow = false;   // it floats: a shadow reads as a bug (and costs a pass)
+  key.userData.noFade = true;
+  const KEY_Y = S.gy + 2.95, KEY_S = 1.35;
+  key.position.set(S.x, KEY_Y, S.z);
+  key.scale.setScalar(KEY_S);
+  group.add(key);
+
+  const beams = beamField(ctx);
+  const beamSlot = beams.add(KEY_HEX, { x: S.x, y: S.gy + 0.02, z: S.z, height: 18, width: 3.2, pool: 2.3 });
+
+  // ── the trail ──────────────────────────────────────────────────────────────
+  const trail = [];
+  const WOOD = 0x6b4a30, CAP = 0xd2263a;
+  /** a fingerpost: post, cap, arms [{ name, tx, tz, y }], optional poster */
+  function fingerpost(x, z, arms, o = {}) {
+    const f = new Site();
+    const gy = world.height(x, z);
+    f.cyl(0.15, 0.19, 4.5, 6, WOOD, x, gy + 1.8, z);
+    f.sph(0.26, 8, 6, CAP, x, gy + 4.1, z);
+    for (const a of arms) f.arm(a.name, 2.9, 0.64, x + Math.cos(a.yaw) * 1.3, gy + a.y, z - Math.sin(a.yaw) * 1.3, a.yaw);
+    if (o.poster) {
+      const r = o.posterYaw;
+      f.box(0.92, 1.24, 0.08, WOOD, x + Math.sin(r) * 0.2, gy + 1.25, z + Math.cos(r) * 0.2, 0, r);
+      f.face('poster', 0.82, 1.13, x + Math.sin(r) * 0.25, gy + 1.25, z + Math.cos(r) * 0.25, r);
+      f.face('poster', 0.82, 1.13, x + Math.sin(r) * 0.15, gy + 1.25, z + Math.cos(r) * 0.15, r + Math.PI);
+    }
+    ctx.colliders.push({ x, z, r: 0.35 });
+    if (o.into) { o.into.push(f.geometry()); return null; }   // merged into a bigger mesh
+    const m = f.build(o.name || 'cave_key_post');
+    m.castShadow = false;                           // thin post: not worth a shadow pass
+    group.add(m); trail.push(m);
+    clearanceClaim(ctx, x, z, 3.2, 3.2, 0, (o.name || 'cave_key_post') + '_claim');
+    return m;
+  }
+  const armTo = (x, z, tx, tz, name, y) => ({ name, yaw: armYaw(x, z, tx, tz), y });
+
+  // 1. the plaza exit: the road south out of the Welcome Plaza
+  const WS = winchSpot(ctx);
+  const plazaGeo = [];
+  {
+    const plaza = world.LANDMARKS.welcome_plaza;
+    const sp = itemSpot(ctx, plaza.x + 5.5, plaza.z + 9.5, { radius: 5, need: 0.9, pathMin: 0.6, pathMax: 3.2, minH: 1, pull: 0.2, farSide: true, prefer: { x: plaza.x, z: plaza.z, w: 0.12 }, avoid: [{ x: S.x, z: S.z, r: 5 }] });
+    const np = nearestPathPoint(world, sp.x, sp.z, 'cat');
+    fingerpost(sp.x, sp.z, [
+      armTo(sp.x, sp.z, S.x, S.z, 'key', 3.55),
+      armTo(sp.x, sp.z, WS.x, WS.z, 'quay', 2.75),
+    ], { poster: true, posterYaw: readYaw(sp.x, sp.z, np.x, np.z), name: 'cave_key_plazapost', into: plazaGeo });
+    trail.plaza = sp;
+  }
+  // the display + the plaza fingerpost: ONE mesh (they share a frame)
+  const plinth = new THREE.Mesh(mergeGeometries([plinthGeo, ...plazaGeo], false), atlas.material);
+  plinth.name = 'cave_key_plinth'; plinth.castShadow = true; plinth.receiveShadow = true;
+  plinth.userData.noFade = true;
+  group.add(plinth);
+  // 2. the arrivals road: a notice board you walk straight past off the ferry
+  {
+    const sp = itemSpot(ctx, 66, 16.5, { radius: 6, need: 1.1, pathMin: 0.7, pathMax: 3.2, minH: 1, pull: 0.3, farSide: true });
+    const np = nearestPathPoint(world, sp.x, sp.z, 'cat');
+    const r = readYaw(sp.x, sp.z, np.x, np.z), c = Math.cos(r), s = Math.sin(r);
+    const f = new Site();
+    const gy = world.height(sp.x, sp.z);
+    for (const ox of [-0.85, 0.85]) f.cyl(0.09, 0.11, 2.9, 6, WOOD, sp.x + ox * c, gy + 1.0, sp.z - ox * s);
+    f.box(2.0, 1.55, 0.1, WOOD, sp.x, gy + 1.62, sp.z, 0, r);
+    f.box(2.2, 0.14, 0.4, CAP, sp.x, gy + 2.46, sp.z, 0, r);
+    f.cyl(0.08, 0.08, 0.9, 6, WOOD, sp.x, gy + 2.9, sp.z);
+    // two copies of the poster side by side, both faces (the cats did twelve)
+    for (const ox of [-0.47, 0.47]) for (const side of [1, -1]) {
+      const px = sp.x + ox * c * side, pz = sp.z - ox * s * side;
+      f.face('poster', 0.86, 1.18, px + s * 0.065 * side, gy + 1.62, pz + c * 0.065 * side, side > 0 ? r : r + Math.PI, 0, ox * 0.06);
+    }
+    f.arm('plaza', 2.1, 0.46, sp.x + Math.cos(armYaw(sp.x, sp.z, S.x, S.z)) * 0.3, gy + 2.85, sp.z - Math.sin(armYaw(sp.x, sp.z, S.x, S.z)) * 0.3, armYaw(sp.x, sp.z, S.x, S.z));
+    const m = f.build('cave_key_arrivals'); m.castShadow = false; group.add(m); trail.push(m);
+    clearanceClaim(ctx, sp.x, sp.z, 3.6, 3.6, r, 'cave_key_arrivals_claim');
+    for (const ox of [-0.85, 0.85]) ctx.colliders.push({ x: sp.x + ox * c, z: sp.z - ox * s, r: 0.25 });
+    trail.arrivals = sp;
+  }
+  // the doorway itself: nature's boulders had piled up in front of it. Claimed
+  // BEFORE the hatch post looks for ground, so the search knows the outcrop in
+  // front of the door is going (it used to dodge it straight onto the bluff
+  // boulder, whose lumps carry no collider, and stand the post inside it).
+  const apron = clearanceClaim(ctx, HATCH.x + Math.cos(HATCH_A) * 4.2, HATCH.z + Math.sin(HATCH_A) * 4.2, 8.5, 8.5, 0, 'cave_hatch_apron');
+  // 3. the hatch: "the key is back west, at the plaza" — on the open grass
+  //    beside the door, never on the Yarn Hill boulders (itemSpot's rock test)
+  {
+    const perpX = -Math.sin(HATCH_A), perpZ = Math.cos(HATCH_A);
+    const sp = itemSpot(ctx, HATCH_STAND.x + perpX * 3.6 + Math.cos(HATCH_A) * 0.8, HATCH_STAND.z + perpZ * 3.6 + Math.sin(HATCH_A) * 0.8,
+      { radius: 3.5, need: 0.8, pathMin: -99, pathMax: 999, minH: 0.8, pull: 0.3, foot: 1.0,
+        cleared: [{ x: apron.x, z: apron.z, w: apron.w, d: apron.d, rot: apron.rot }],
+        avoid: [{ x: HATCH_STAND.x, z: HATCH_STAND.z, r: 2.4 }, { x: YARN.x, z: YARN.z, r: 9.6 }] });
+    fingerpost(sp.x, sp.z, [armTo(sp.x, sp.z, S.x, S.z, 'plaza', 3.5)],
+      { poster: true, posterYaw: readYaw(sp.x, sp.z, HATCH_STAND.x + Math.cos(HATCH_A) * 6, HATCH_STAND.z + Math.sin(HATCH_A) * 6), name: 'cave_key_hatchpost' });
+    // the LOST KEY? board hangs 0.2 u off this post and is 0.9 u wide: make the
+    // whole board solid (after the search, so the spot is unchanged), so a
+    // walker stops at the board and not at the thin post behind it
+    ctx.colliders.push({ x: sp.x, z: sp.z, r: 0.62 });
+    trail.hatch = sp;
+  }
+  trail.apron = apron;
+
+
+  // ── state + wiring ─────────────────────────────────────────────────────────
+  let state = 'plinth';            // plinth → flying → taken | gone (Rusty's copy)
+  let marker = 'plinth';           // plinth → hatch → done
+  let entry = null, emitter = null, markerT = -1, flyT = 0, beamK = 1;
+  const flyFrom = new THREE.Vector3();
+  const _kp = { x: 0, y: 0, z: 0 };
+
+  function syncMarker() {
+    if (marker === 'done') { mapMarker(ctx, { id: 'cave_key', remove: true }); return; }
+    if (marker === 'hatch') mapMarker(ctx, { id: 'cave_key', x: HATCH.x, z: HATCH.z, glyph: 'key', label: 'Cave hatch (use the key)' });
+    else mapMarker(ctx, { id: 'cave_key', x: S.x, z: S.z, glyph: 'key', label: 'Cave key' });
+  }
+  function stopSparkles() { if (emitter) { emitter.stop?.(); emitter = null; } }
+  function take() {
+    if (state !== 'plinth') return;
+    const p = ctx.systems.player?.position;
+    state = 'flying'; flyT = 0; flyFrom.copy(key.position);
+    if (entry) entry.enabled = false;
+    stopSparkles();
+    fx()?.sparkle?.(key.position.x, key.position.y, key.position.z, 0xffe07a, 18);
+    fx()?.burst?.({ x: S.x, y: S.gy + 2.2, z: S.z, count: 26, color: [0xffe07a, 0xffffff, 0xffb428], speed: 3.4, up: 1.5, life: 0.9, size: 0.26, sizeEnd: 0.04, gravity: -4, drag: 1.6, spread: 0.6, shape: 'sparkle', blend: 'add' });
+    story()?.set('found_cave_key', true);
+    story()?.set('helper_5', true);                 // the hatch keys off this flag
+    marker = 'hatch'; syncMarker();
+    ui()?.toast('CAVE KEY! It opens the hatch under the Great Ball of Yarn — Yarn Hill, far east.', 6.5, { icon: 'spark' });
+    ui()?.setObjective?.('Unlock the hatch under the Great Ball of Yarn', 'Yarn Hill, east of Catnip Commons · it is on your map (M)');
+    ui()?.say?.('CLAIMED. Please sign here. …There is nobody here to sign for it. There never was.', { speaker: 'Lost Property', duration: 5.5 });
+    ctx.events.emit('escape:item', { item: 'cave_key', x: p?.x ?? S.x, z: p?.z ?? S.z });
+  }
+  function vanish() {                  // Rusty handed over his copy: the display empties
+    if (state !== 'plinth') return;
+    state = 'gone'; key.visible = false;
+    if (entry) entry.enabled = false;
+    stopSparkles();
+    fx()?.burst?.({ x: S.x, y: S.gy + 2.4, z: S.z, count: 10, color: [0xffffff, 0xffe07a], speed: 1.2, life: 0.8, size: 0.3, gravity: 0.5, spread: 0.4 });
+  }
+
+  ctx.events.on('world:ready', () => {
+    const I = ctx.systems.interaction;
+    // PROMPT PRIORITY: inventory pickups report themselves 0.9 u closer than
+    // they are, and the weapons builder's ammo/weapon pickups can land beside
+    // the plinth — the key reports 1.4 u closer, so standing at the display
+    // always offers the key first.
+    const kp = { x: S.x, z: S.z, y: KEY_Y };
+    entry = I?.register?.({
+      id: 'cave_key_plinth', x: S.x, z: S.z, y: KEY_Y, promptH: 1.0, r: 3.0,
+      label: 'Take the cave key', onInteract: () => take(),
+      getPos() {
+        const q = ctx.systems.player?.position;
+        if (!q) return kp;
+        const dx = S.x - q.x, dz = S.z - q.z, d = Math.hypot(dx, dz);
+        if (d < 0.001) return kp;
+        const k = Math.min(1.4, d * 0.5);
+        _kp.x = S.x - dx / d * k; _kp.z = S.z - dz / d * k; _kp.y = KEY_Y;
+        return _kp;
+      },
+    }) || null;
+    if (entry && state !== 'plinth') entry.enabled = false;
+    if (state === 'plinth') {
+      emitter = fx()?.emitter?.({
+        x: S.x, y: S.gy + 2.0, z: S.z, rate: 7, area: 0.55, areaY: 0.6,
+        color: [0xffe27a, 0xffffff, 0xffc84a], shape: 'sparkle', blend: 'add',
+        speed: 0.12, vy: 1.7, vyJitter: 0.6, gravity: 0.3, drag: 0.2,
+        life: 3.4, lifeVar: 0.3, size: 0.3, sizeEnd: 0.06, sizeVar: 0.4, range: 80,
+      }) || null;
+    }
+    story()?.once?.('helper_5', () => { vanish(); if (marker === 'plinth') { marker = 'hatch'; syncMarker(); } });
+    ctx.events.on('escape:start', (e) => { if (e?.route === 'cave') { marker = 'done'; syncMarker(); } });
+    syncMarker();
+    markerT = 2.0;                      // …and once more in case the map lands late
+    rustyHint(ctx, (first) => (state === 'plinth' && !story()?.get('helper_5'))
+      ? (first
+        ? "Oh — and somebody lost a key. Cat-shaped. It's sat on the Lost Property plinth by the Welcome Plaza, glowing like it WANTS to be stolen. Opens the hatch under the Great Ball of Yarn. You didn't hear that from me."
+        : "That key's still on the Lost Property plinth, top of the harbour road by the plaza. Hatch under the yarn ball. Free, which is the worst price.")
+      : null);
+  });
+
+  // ── frame ──────────────────────────────────────────────────────────────────
+  const api = {
+    spot: S, trail,
+    get state() { return state; },
+    /** Same as pressing E at the plinth (tests + views). */
+    take: () => take(),
+    /** The hatch said no: point at the key. */
+    lockedHint() {
+      if (state === 'plinth') {
+        ui()?.toast('The cave key is on the Lost Property plinth by the Welcome Plaza — look for the gold light (M: map).', 6, { icon: 'spark' });
+        syncMarker();
+      }
+    },
+    update(dt, c) {
+      const t = c.state.elapsed;
+      const night = 1 - (c.state.daylight ?? 1);
+      atlas.night(night);
+      if (markerT > 0 && (markerT -= dt) <= 0) syncMarker();
+      drainRustyHints(ctx, dt);
+
+      if (state === 'plinth') {
+        key.position.y = KEY_Y + Math.sin(t * 1.6) * 0.09;
+        const cam = c.camera.position;
+        key.rotation.set(0, Math.atan2(cam.x - S.x, cam.z - S.z) + Math.sin(t * 0.9) * 0.55, Math.sin(t * 0.8) * 0.14);
+      } else if (state === 'flying') {
+        flyT += dt;
+        const k = Math.min(1, flyT / 0.55);
+        const p = c.systems.player?.position;
+        const tx = p ? p.x : S.x, ty = p ? p.y + 1.3 : KEY_Y, tz = p ? p.z : S.z;
+        const e = k * k * (3 - 2 * k);
+        key.position.set(flyFrom.x + (tx - flyFrom.x) * e, flyFrom.y + (ty - flyFrom.y) * e + Math.sin(k * Math.PI) * 1.2, flyFrom.z + (tz - flyFrom.z) * e);
+        key.rotation.y += dt * 14;
+        key.scale.setScalar(KEY_S * (1 - 0.85 * e));
+        if (k >= 1) {
+          state = 'taken'; key.visible = false;
+          fx()?.sparkle?.(tx, ty, tz, 0xffe07a, 12);
+        }
+      }
+      keyMat.emissiveIntensity = 0.45 + 1.0 * night + Math.sin(t * 3.1) * 0.08;
+
+      // the light column (billboarded in its shader): breathe, fade out once taken
+      beamK = damp(beamK, state === 'plinth' ? 1 : 0, 2.5, dt);
+      beams.set(beamSlot, beamK < 0.01 ? 0 : beamK * (0.9 + 0.6 * night) * (0.9 + 0.1 * Math.sin(t * 2.2)));
+    },
+  };
+  console.warn('[escape/key]', JSON.stringify({
+    key: [+S.x.toFixed(1), +S.z.toFixed(1)], clear: +S.clear.toFixed(2), edge: +S.edge.toFixed(2), fallback: S.fallback,
+    plazaPost: [+trail.plaza.x.toFixed(1), +trail.plaza.z.toFixed(1)], arrivals: [+trail.arrivals.x.toFixed(1), +trail.arrivals.z.toFixed(1)],
+    hatchPost: [+trail.hatch.x.toFixed(1), +trail.hatch.z.toFixed(1)], hatchPostRelaxed: trail.hatch.relaxed ?? -1, hatch: [+HATCH.x.toFixed(1), +HATCH.z.toFixed(1)],
+    keyTris: Math.round(kb.tris()), plinthTris: Math.round(site.tris()),
+  }));
+  return api;
+}
+
+/** Yellow/black diagonal hazard stripes as flat quads for makePart (+Z face). */
+function stripeQuads(w, h, n, slant, colA, colB, at, rot = null) {
+  const out = [], sw = w / n, hw = w / 2, hh = h / 2;
+  const cl = (v) => Math.max(-hw, Math.min(hw, v));
+  for (let i = -1; i <= n; i++) {
+    const x0 = -hw + i * sw - slant / 2;
+    const xs = [cl(x0), cl(x0 + sw), cl(x0 + sw + slant), cl(x0 + slant)];
+    if (xs[1] - xs[0] < 1e-3 && xs[2] - xs[3] < 1e-3) continue;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([xs[0], -hh, 0, xs[1], -hh, 0, xs[2], hh, 0, xs[3], hh, 0], 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0], 2));
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    out.push({ g, at, rot, color: (((i % 2) + 2) % 2) ? colB : colA });
+  }
+  return out;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// THE HATCH YARD. The ledge in front of the hatch was one flat grey-olive plane
+// (nature clears its plants off the hatch apron, and nothing replaced them).
+// Now it is an authored patch:
+//   · a worn dirt APRON at the door, and a dirt PATH that leaves it south —
+//     between the hatch frame and the CAVE KEY fingerpost, between the
+//     sea-view bench and the bluff boulder — and runs down toward the gym road,
+//     which is the way back to the Welcome Plaza;
+//   · a trail of cat PAW PRINTS from the apron out to a lookout on the cliff
+//     corner (and some down the path);
+//   · ~70 props in three sizes — moss clumps (their spore beads glow after
+//     dark), pebble clusters, stray yarn balls with loose strands (they rolled
+//     off the Great Ball), grass tufts that sway — bunched thickest along the
+//     cliff edge and lining the path. The big ones are LOW PROPS (Contract A:
+//     numeric h ≤ 1.6), so walkers step onto them instead of through them.
+// Draw calls: ground 1 + props 1 (+ the props' shadow pass).
+// ═════════════════════════════════════════════════════════════════════════════
+const YARD_TAIL = [[200.25, -58.8], [199.85, -55.4], [198.95, -52.8], [199.9, -49.8], [199.4, -46.6], [198.8, -43.6]];
+const YARD_SPUR = [[202.5, -66.9], [205.0, -67.8], [207.6, -69.0], [210.0, -70.1]];
+const YARD_GROUND = 0x6f6d52;          // terrain's cat-ground albedo (terrain/paths.js GROUND_CAT)
+
+function buildHatchYard(ctx, o) {
+  const world = ctx.world;
+  const R = rng(hash('escape:hatchyard'));
+  const isl = world.ISLANDS?.cat;
+  const GSTEP = isl?.radius ? (isl.radius * 2.36) / 208 : 1.34;
+  // The ground mesh is a linear interpolation of a ~GSTEP grid: in hollows it
+  // sits ABOVE world.height. The ring average minus the centre measures that
+  // (slopes cancel out), so decals ride the rendered surface, never under it.
+  const RING6 = [];
+  for (let k = 0; k < 6; k++) RING6.push([Math.cos(k * Math.PI / 3) * GSTEP * 0.55, Math.sin(k * Math.PI / 3) * GSTEP * 0.55]);
+  const surf = (x, z) => {
+    const h = world.height(x, z);
+    let s = 0; for (const [dx, dz] of RING6) s += world.height(x + dx, z + dz);
+    const e = s / 6 - h;
+    return h + (e > 0 ? e * 1.15 : 0);
+  };
+  const cols = ctx.colliders || [];
+  const cleared = o.apron ? [{ x: o.apron.x, z: o.apron.z, w: o.apron.w, d: o.apron.d, rot: o.apron.rot }] : null;
+
+  // ── geometry buffers for the ground mesh ───────────────────────────────────
+  const P = [], CC = [], I = [];
+  const _col = new THREE.Color(), _g = new THREE.Color(YARD_GROUND);
+  const DIRT = new THREE.Color(0x8e714c), RUT = new THREE.Color(0x7c5f41), CROWN = new THREE.Color(0xa68659), SAND = new THREE.Color(0xbb9c6c);
+  const EDGE = DIRT.clone().lerp(_g, 0.35);
+  const CLS = [_g, EDGE, RUT, CROWN];
+  function vert(x, y, z, c, jit = 0.1) {
+    const k = 1 - jit + R() * jit * 2;
+    P.push(x, y, z); CC.push(c.r * k, c.g * k, c.b * k);
+    return P.length / 3 - 1;
+  }
+  function tri(a, b, c) {             // always face +Y
+    const ax = P[a * 3], az = P[a * 3 + 2], bx = P[b * 3], bz = P[b * 3 + 2], cx = P[c * 3], cz = P[c * 3 + 2];
+    const ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+    if (ny >= 0) I.push(a, b, c); else I.push(a, c, b);
+  }
+
+  // ── the path ribbon ────────────────────────────────────────────────────────
+  const start = o.HW2(-1.0, 2.6), pinch = o.HW2(-3.4, 2.07);
+  const pts = [start, pinch, ...YARD_TAIL];
+  const curve = new THREE.CatmullRomCurve3(pts.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, 'centripetal', 0.5);
+  const len = curve.getLength();
+  const n = Math.max(12, Math.round(len / 0.42));
+  const sp = curve.getSpacedPoints(n);
+  const halfW = (s) => {
+    let w = 0.8 + 0.1 * Math.sin(s * 0.83 + 0.4) + 0.05 * Math.sin(s * 2.1 + 1.3);
+    if (s < 2) w += (2 - s) / 2 * 0.25;                    // it opens into the apron
+    const tail = len - s; if (tail < 4) w *= 0.3 + 0.7 * tail / 4;   // and peters out
+    return w;
+  };
+  const ROWS = [[-1.3, 0, -0.06, 0], [-1.0, 1, 0.045, 1], [-0.5, 1, 0.07, 2], [0, 1, 0.08, 3], [0.5, 1, 0.07, 2], [1.0, 1, 0.045, 1], [1.3, 0, -0.06, 0]];
+  const center = [];
+  let along = 0, prev = -1;
+  for (let i = 0; i < sp.length; i++) {
+    if (i > 0) along += Math.hypot(sp[i].x - sp[i - 1].x, sp[i].z - sp[i - 1].z);
+    const a = sp[Math.max(0, i - 1)], b = sp[Math.min(sp.length - 1, i + 1)];
+    const tx = b.x - a.x, tz = b.z - a.z, L = Math.hypot(tx, tz) || 1;
+    const nx = -tz / L, nz = tx / L, hw = halfW(along);
+    center.push({ x: sp[i].x, z: sp[i].z, hw, s: along, tx: tx / L, tz: tz / L });
+    const first = P.length / 3;
+    for (const [f, core, dy, cls] of ROWS) {
+      const x = sp[i].x + nx * f * hw, z = sp[i].z + nz * f * hw;
+      const y = (core ? surf(x, z) : world.height(x, z)) + dy;
+      const c = cls === 3 && R() < 0.14 ? SAND : CLS[cls];
+      vert(x, y, z, c, cls ? 0.09 : 0.04);
+    }
+    if (prev >= 0) for (let r = 0; r < ROWS.length - 1; r++) { tri(prev + r, prev + r + 1, first + r); tri(prev + r + 1, first + r + 1, first + r); }
+    prev = first;
+  }
+
+  // ── the apron: a worn fan at the door ──────────────────────────────────────
+  const [ax, az] = o.HW2(0, 3.7);
+  const AR = 2.2, K = 30;
+  const RINGS = [[0.42, 0.075, 3], [0.78, 0.066, 2], [1.0, 0.045, 1], [1.24, -0.06, 0]];
+  const c0 = vert(ax, surf(ax, az) + 0.075, az, CROWN, 0.05);
+  const ringIdx = [];
+  for (let k = 0; k < RINGS.length; k++) {
+    const row = [];
+    for (let j = 0; j < K; j++) {
+      const a = j / K * Math.PI * 2;
+      const rr = AR * (1 + 0.08 * Math.sin(3 * a + 0.7) + 0.05 * Math.sin(5 * a + 2.1) + (k === RINGS.length - 1 ? 0.06 * Math.sin(11 * a) : 0)) * RINGS[k][0];
+      const x = ax + Math.cos(a) * rr, z = az + Math.sin(a) * rr;
+      row.push(vert(x, (RINGS[k][2] ? surf(x, z) : world.height(x, z)) + RINGS[k][1], z, CLS[RINGS[k][2]], 0.08));
+    }
+    ringIdx.push(row);
+  }
+  for (let j = 0; j < K; j++) tri(c0, ringIdx[0][j], ringIdx[0][(j + 1) % K]);
+  for (let k = 0; k < RINGS.length - 1; k++) for (let j = 0; j < K; j++) {
+    const a = ringIdx[k][j], b = ringIdx[k][(j + 1) % K], c = ringIdx[k + 1][j], d = ringIdx[k + 1][(j + 1) % K];
+    tri(a, c, b); tri(b, c, d);
+  }
+
+  // ── paw prints ─────────────────────────────────────────────────────────────
+  const PAW = new THREE.Color(0x564536), PAW_D = new THREE.Color(0x6a5238);
+  let prints = 0;
+  function fan(cx, cz, rx, rz, fx, fz, y, c, seg) {
+    const m = vert(cx, y, cz, c, 0.03);
+    const ring = [];
+    for (let j = 0; j < seg; j++) {
+      const a = j / seg * Math.PI * 2, u = Math.cos(a) * rx, v = Math.sin(a) * rz;
+      ring.push(vert(cx - fz * u + fx * v, y, cz + fx * u + fz * v, c, 0.03));
+    }
+    for (let j = 0; j < seg; j++) tri(m, ring[j], ring[(j + 1) % seg]);
+  }
+  function paw(x, z, fx, fz, onDirt, sc = 1.0) {
+    const y = surf(x, z) + (onDirt ? 0.1 : 0.05);
+    const c = onDirt ? PAW_D : PAW;
+    fan(x, z, 0.12 * sc, 0.1 * sc, fx, fz, y, c, 8);
+    for (const [u, v] of [[-0.12, 0.12], [-0.045, 0.18], [0.045, 0.18], [0.12, 0.12]]) {
+      fan(x - fz * u * sc + fx * v * sc, z + fx * u * sc + fz * v * sc, 0.045 * sc, 0.05 * sc, fx, fz, y + 0.002, c, 6);
+    }
+    prints++;
+  }
+  function walkPrints(poly, step, side, onDirt, back = false, skip = 0) {
+    const segs = [];
+    let tot = 0;
+    for (let i = 0; i < poly.length - 1; i++) { const L = Math.hypot(poly[i + 1][0] - poly[i][0], poly[i + 1][1] - poly[i][1]); segs.push({ a: poly[i], b: poly[i + 1], L, s0: tot }); tot += L; }
+    let k = 0;
+    for (let s = step * 0.5 + skip; s < tot; s += step, k++) {
+      const S = segs.find((q) => s <= q.s0 + q.L) || segs[segs.length - 1];
+      const t = (s - S.s0) / S.L;
+      let fx = (S.b[0] - S.a[0]) / S.L, fz = (S.b[1] - S.a[1]) / S.L;
+      const x0 = S.a[0] + (S.b[0] - S.a[0]) * t, z0 = S.a[1] + (S.b[1] - S.a[1]) * t;
+      if (back) { fx = -fx; fz = -fz; }
+      const off = (k % 2 ? 1 : -1) * 0.14 + side;
+      paw(x0 - fz * off, z0 + fx * off, fx, fz, onDirt);
+    }
+  }
+  walkPrints(YARD_SPUR, 0.6, 0);                       // out to the lookout
+  const pathPoly = center.filter((c) => c.s > 1.5 && c.s < 9).map((c) => [c.x, c.z]);
+  if (pathPoly.length > 2) walkPrints(pathPoly, 0.7, 0.18, true);
+
+  const gGeo = new THREE.BufferGeometry();
+  gGeo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  gGeo.setAttribute('color', new THREE.Float32BufferAttribute(CC, 3));
+  gGeo.setIndex(I);
+  gGeo.computeVertexNormals();
+  gGeo.computeBoundingSphere();
+  const gMat = new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.95, metalness: 0,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2,
+  });
+  const ground = new THREE.Mesh(gGeo, gMat);
+  ground.name = 'cave_hatch_yard_ground';
+  ground.receiveShadow = true; ground.castShadow = false;
+  ground.userData.noFade = true; ground.userData.noRay = true;
+  ctx.scene.add(ground);
+
+  // ── props ──────────────────────────────────────────────────────────────────
+  const tris = decorTris(ctx, 204, -60, 24);
+  const parts = [], meta = [];
+  const put = (geo, color, x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1, sway = 0, glow = 0, base = 0, h = 1) => {
+    parts.push(place(paint(geo, color), x, y, z, rx, ry, rz, sx, sy, sz));
+    meta.push({ sway, glow, base, h });
+  };
+  const pick = (a) => a[Math.floor(R() * a.length) % a.length];
+  const lowCols = [];
+  function moss(x, z, s, gy) {
+    const cA = pick([0x5c8a3c, 0x6d9a42, 0x527f36]), cB = pick([0x86b04e, 0x7aa848]);
+    const a = R() * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+    put(new THREE.SphereGeometry(0.5, 7, 4), cA, x, gy + 0.02 * s, z, 0, a, 0, s, 0.42 * s, 0.9 * s);
+    put(new THREE.SphereGeometry(0.34, 6, 4), cB, x + ca * 0.42 * s, gy + 0.03 * s, z + sa * 0.42 * s, 0, a, 0, s, 0.55 * s, s);
+    put(new THREE.SphereGeometry(0.27, 6, 3), cA, x - sa * 0.36 * s, gy + 0.02 * s, z + ca * 0.36 * s, 0, a, 0, s, 0.5 * s, s);
+    const beads = 3 + Math.floor(R() * 3);
+    for (let i = 0; i < beads; i++) {
+      const bA = R() * Math.PI * 2, bd = R() * 0.3 * s;
+      const by = gy + 0.02 * s + 0.21 * s * Math.sqrt(Math.max(0, 1 - (bd / (0.5 * s)) ** 2));
+      put(new THREE.SphereGeometry(0.035 + 0.025 * s, 4, 3), 0xd8ff84, x + Math.cos(bA) * bd, by, z + Math.sin(bA) * bd, 0, 0, 0, 1, 1, 1, 0, 1);
+    }
+    if (s >= 1.3) lowCols.push({ x, z, r: 0.48 * s, h: 0.22 * s });
+  }
+  function pebbles(x, z, s, gy) {
+    const k = 2 + Math.floor(R() * 3);
+    for (let i = 0; i < k; i++) {
+      const r = (i === 0 ? 0.3 : 0.12 + R() * 0.12) * s;
+      const a = R() * Math.PI * 2, d = i === 0 ? 0 : (0.3 + R() * 0.22) * s;
+      const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
+      const sy = 0.58 + R() * 0.22;
+      put(new THREE.SphereGeometry(r, 5, 3), pick([0xa39d93, 0x8b857b, 0xbdb3a0, 0x958a78, 0xb2a894]), px, world.height(px, pz) + r * sy * 0.55, pz, (R() - 0.5) * 0.5, R() * 6, (R() - 0.5) * 0.5, 1, sy, 1);
+    }
+    if (s >= 1.3) lowCols.push({ x, z, r: 0.3 * s, h: 0.3 * s * 0.8 });
+  }
+  function yarn(x, z, s, gy) {
+    const r = 0.3 * s;
+    const col = pick([0xff7aa8, 0x5fc8d8, 0xffd24a, 0xb07ae8, 0xff9a4a]);
+    const yc = gy + r * 0.9;
+    put(new THREE.SphereGeometry(r, 9, 6), col, x, yc, z, R(), R() * 6, R());
+    put(new THREE.TorusGeometry(r * 0.99, 0.022 * s + 0.012, 4, 12), 0xfff3f6, x, yc, z, R() * 3, R() * 3, R() * 3);
+    put(new THREE.TorusGeometry(r * 0.99, 0.02 * s + 0.012, 4, 12), 0xfff3f6, x, yc, z, R() * 3, R() * 3, R() * 3);
+    // a loose strand wandering off along the ground
+    // (each segment joins its two ground points, and the strand stops rather
+    // than dangle off a drop — horizontal segments at stepped heights read as
+    // a string floating up the cliff)
+    let a = R() * Math.PI * 2, px = x + Math.cos(a) * r * 0.9, pz = z + Math.sin(a) * r * 0.9;
+    let py = surf(px, pz) + 0.035;
+    const seg = 0.28 * s + 0.1;
+    for (let i = 0; i < 5; i++) {
+      a += (R() - 0.5) * 1.1;
+      const nx = px + Math.cos(a) * seg, nz = pz + Math.sin(a) * seg, ny = surf(nx, nz) + 0.035;
+      if (Math.abs(ny - py) > seg * 0.6) break;
+      const hz = Math.hypot(nx - px, nz - pz);
+      put(new THREE.BoxGeometry(0.05 * s + 0.02, 0.035, Math.hypot(hz, ny - py) * 1.08), col,
+        (px + nx) / 2, (py + ny) / 2, (pz + nz) / 2, -Math.atan2(ny - py, hz), Math.atan2(nx - px, nz - pz), 0);
+      px = nx; pz = nz; py = ny;
+    }
+    if (s >= 0.95) lowCols.push({ x, z, r, h: r * 1.8 });
+  }
+  function tuft(x, z, s, gy) {
+    const k = 5 + Math.floor(R() * 3);
+    for (let i = 0; i < k; i++) {
+      const h = (0.42 + R() * 0.36) * s, a = R() * Math.PI * 2, tilt = 0.14 + R() * 0.32;
+      const bx = x + Math.cos(a) * 0.07 * s, bz = z + Math.sin(a) * 0.07 * s;
+      const lx = Math.sin(tilt) * Math.cos(a), lz = Math.sin(tilt) * Math.sin(a);
+      put(new THREE.ConeGeometry(0.05 * s + 0.02, h, 3), pick([0x9aa64a, 0x80983c, 0xb5b05a, 0x8fae4c, 0xa89c52]),
+        bx + lx * h / 2, gy - 0.03 + Math.cos(tilt) * h / 2, bz + lz * h / 2, tilt * Math.sin(a), 0, -tilt * Math.cos(a), 1, 1, 1, 1, 0, gy - 0.03, h);
+    }
+  }
+  const MAKE = { moss, pebble: pebbles, yarn, tuft };
+  const RAD = { moss: 0.5, pebble: 0.42, yarn: 0.34, tuft: 0.3 };
+  const CAP = { moss: 30, pebble: 34, yarn: 10, tuft: 38 };
+  const SIZE = [0.74, 1.08, 1.6];
+  const counts = { moss: 0, pebble: 0, yarn: 0, tuft: 0 }, bySize = [0, 0, 0];
+  const placed = [];
+  const distPoly = (poly, x, z) => {
+    let d = Infinity;
+    for (let i = 0; i < poly.length - 1; i++) {
+      const [ax0, az0] = poly[i], [bx0, bz0] = poly[i + 1];
+      const vx = bx0 - ax0, vz = bz0 - az0, L2 = vx * vx + vz * vz || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax0) * vx + (z - az0) * vz) / L2));
+      const dd = Math.hypot(x - ax0 - vx * t, z - az0 - vz * t); if (dd < d) d = dd;
+    }
+    return d;
+  };
+  const cPoly = center.map((c) => [c.x, c.z]);
+  const pathHW = (x, z) => { let best = Infinity, hw = 0.8; for (const c of center) { const d = Math.hypot(c.x - x, c.z - z); if (d < best) { best = d; hw = c.hw; } } return hw; };
+  const post = o.post;
+  function tryPlace(kind, si, x, z, strict = true) {
+    if (counts[kind] >= CAP[kind]) return false;
+    const s = SIZE[si] * (0.9 + R() * 0.2), rad = RAD[kind] * s;
+    const h = world.height(x, z);
+    if (h < 1.6) return false;
+    const gx = world.height(x + 0.4, z) - world.height(x - 0.4, z), gz = world.height(x, z + 0.4) - world.height(x, z - 0.4);
+    if (Math.hypot(gx, gz) / 0.8 > 1.3) return false;                    // not on the cliff face
+    if (Math.hypot(x - YARN.x, z - YARN.z) < 9.4 + rad) return false;     // not on the plinth
+    if (Math.hypot(x - ax, z - az) < AR * 1.05 + rad) return false;       // the apron stays walkable
+    if (distPoly(cPoly, x, z) < pathHW(x, z) * 1.12 + rad) return false;
+    if (distPoly(YARD_SPUR, x, z) < 0.45 + rad) return false;            // the prints stay readable
+    if (post && Math.hypot(x - post.x, z - post.z) < 1.3 + rad) return false;
+    if (clearanceAt(cols, x, z, 3, cleared) < rad + 0.12) return false;
+    if (rockUnder(tris, world, x, z, rad * 0.8 + 0.15, 0.3)) return false;
+    for (const q of placed) {
+      const tight = (kind === 'tuft' || q.kind === 'tuft') ? 0.55 : 1;
+      if (Math.hypot(x - q.x, z - q.z) < (rad + q.rad) * tight + 0.12) return false;
+    }
+    MAKE[kind](x, z, s, h);
+    placed.push({ kind, x, z, rad });
+    counts[kind]++; bySize[si]++;
+    return true;
+  }
+  // the lookout at the end of the paw trail: a big yarn ball, a cairn, moss
+  const [ex, ez] = YARD_SPUR[YARD_SPUR.length - 1];
+  tryPlace('yarn', 2, ex - 0.4, ez - 1.25);
+  tryPlace('pebble', 2, ex + 0.2, ez + 1.2);
+  tryPlace('moss', 1, ex + 1.15, ez - 0.2);
+  for (let i = 0; i < 5200 && placed.length < 118; i++) {
+    const x = 194 + R() * 27, z = -79 + R() * 38;
+    const pd = distPoly(cPoly, x, z), hw = pathHW(x, z);
+    const lining = pd > hw * 1.12 && pd < hw + 2.0;
+    const ledge = x > 196.5 && z < -58.2;
+    if (!ledge && !lining) continue;
+    const h = world.height(x, z);
+    if (h < 1.6) continue;
+    let lo = h;
+    for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4; const hh = world.height(x + Math.cos(a) * 2.6, z + Math.sin(a) * 2.6); if (hh < lo) lo = hh; }
+    const drop = h - lo;
+    const edgeW = Math.max(0, Math.min(1, (drop - 1.7) / 1.5));
+    const w = (ledge ? 0.2 : 0) + edgeW * 1.5 + (lining ? (z < -50 ? 0.4 : 0.16) : 0);
+    if (R() > w) continue;
+    const r = R();
+    let kind;
+    if (edgeW > 0.35) kind = r < 0.36 ? 'tuft' : r < 0.68 ? 'moss' : r < 0.92 ? 'pebble' : 'yarn';
+    else if (lining) kind = r < 0.4 ? 'pebble' : r < 0.74 ? 'tuft' : r < 0.88 ? 'moss' : 'yarn';
+    else kind = r < 0.34 ? 'pebble' : r < 0.62 ? 'moss' : r < 0.88 ? 'tuft' : 'yarn';
+    const rs = R();
+    tryPlace(kind, rs < 0.3 ? 0 : rs < 0.72 ? 1 : 2, x, z);
+  }
+  // measured before the props' own low colliders go in
+  let pathMinClear = Infinity, pathInRock = 0, pathTight = null;
+  for (const c of center) {
+    if (c.s < 1.0) continue;                          // the first metre is the apron at the door frame
+    const cl = clearanceAt(cols, c.x, c.z, 6, cleared) - c.hw;
+    if (cl < pathMinClear) { pathMinClear = cl; pathTight = [+c.x.toFixed(1), +c.z.toFixed(1), +c.s.toFixed(1)]; }
+    if (rockUnder(tris, world, c.x, c.z, c.hw * 0.8, 0.3)) pathInRock++;
+  }
+  for (const c of lowCols) cols.push(c);
+
+  let props = null, propTris = 0;
+  const U = { uTime: { value: 0 }, uNight: { value: 0 } };
+  if (parts.length) {
+    const g = mergeGeometries(parts, false);
+    for (const p of parts) p.dispose();
+    const nV = g.attributes.position.count;
+    const sway = new Float32Array(nV), glow = new Float32Array(nV);
+    const pos = g.attributes.position;
+    let v = 0;
+    parts.forEach((p, i) => {
+      const m = meta[i], cnt = p.attributes.position.count;
+      for (let j = 0; j < cnt; j++, v++) {
+        if (m.sway) sway[v] = m.sway * Math.max(0, Math.min(1, (pos.getY(v) - m.base) / m.h));
+        glow[v] = m.glow;
+      }
+    });
+    g.setAttribute('aSway', new THREE.BufferAttribute(sway, 1));
+    g.setAttribute('aGlow', new THREE.BufferAttribute(glow, 1));
+    g.computeVertexNormals();
+    g.computeBoundingSphere();
+    propTris = (g.index ? g.index.count : nV) / 3;
+    const pm = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.86, metalness: 0 });
+    pm.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = U.uTime; sh.uniforms.uNight = U.uNight;
+      sh.vertexShader = 'attribute float aSway;\nattribute float aGlow;\nuniform float uTime;\nuniform float uNight;\nvarying float vGlow;\n' +
+        sh.vertexShader.replace('#include <begin_vertex>', [
+          '#include <begin_vertex>',
+          'transformed.x += sin(uTime * 1.9 + position.x * 0.8 + position.z * 0.6) * 0.07 * aSway;',
+          'transformed.z += cos(uTime * 1.5 + position.z * 0.9 + position.x * 0.3) * 0.05 * aSway;',
+          'vGlow = aGlow * uNight;',
+        ].join('\n'));
+      sh.fragmentShader = 'varying float vGlow;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>',
+        '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += vColor.rgb * vGlow * 1.9;');
+    };
+    pm.customProgramCacheKey = () => 'escape-hatchyard-v1';
+    props = new THREE.Mesh(g, pm);
+    props.name = 'cave_hatch_yard_props';
+    props.castShadow = true; props.receiveShadow = true;
+    props.userData.noFade = true;
+    ctx.scene.add(props);
+  }
+  console.warn('[escape/hatchyard]', JSON.stringify({
+    pathLen: +len.toFixed(1), pathMinClear: +pathMinClear.toFixed(2), pathTight, pathInRock, prints,
+    props: placed.length, counts, sizes: bySize, lowColliders: lowCols.length,
+    groundTris: I.length / 3, propTris: Math.round(propTris),
+  }));
+  return {
+    ground, props, placed, center, lowCols, prints,
+    update(dt, c, night) { U.uTime.value = c.state.elapsed; U.uNight.value = night; },
+  };
 }

@@ -1,0 +1,348 @@
+{
+ "ground_candy_bench": {
+  "pos": [
+   -143.5,
+   39.5
+  ],
+  "time": 11,
+  "az": 0.4,
+  "el": 0.42,
+  "dist": 14,
+  "call": {
+   "player.teleport": [
+    -143.5,
+    39.5
+   ],
+   "camera.snap": []
+  },
+  "frames": 75
+ },
+ "ground_candy_bench_side": {
+  "pos": [
+   -143.5,
+   39.5
+  ],
+  "free": [
+   -143.5,
+   39.5
+  ],
+  "y": 5.9,
+  "az": 1.0,
+  "el": 0.05,
+  "dist": 9,
+  "time": 11,
+  "call": {
+   "player.teleport": [
+    -143.5,
+    39.5
+   ]
+  },
+  "frames": 75
+ },
+ "ground_candy_log": {
+  "pos": [
+   -188.7,
+   -9.6
+  ],
+  "time": 14,
+  "az": 0.9,
+  "el": 0.4,
+  "dist": 14,
+  "call": {
+   "player.teleport": [
+    -188.7,
+    -9.6
+   ],
+   "camera.snap": []
+  },
+  "frames": 75
+ },
+ "ground_candy_log_side": {
+  "pos": [
+   -188.7,
+   -9.6
+  ],
+  "free": [
+   -188.7,
+   -9.6
+  ],
+  "y": 7.9,
+  "az": 0.35,
+  "el": 0.14,
+  "dist": 8,
+  "time": 14,
+  "call": {
+   "player.teleport": [
+    -188.7,
+    -9.6
+   ]
+  },
+  "frames": 75
+ },
+ "ground_candy_rock_side": {
+  "pos": [
+   -172.5,
+   4.74
+  ],
+  "free": [
+   -172.5,
+   4.74
+  ],
+  "y": 5.7,
+  "az": 0.2,
+  "el": 0.05,
+  "dist": 8,
+  "time": 12,
+  "call": {
+   "player.teleport": [
+    -172.5,
+    4.74
+   ]
+  },
+  "frames": 75
+ },
+ "ground_candy_rock2_side": {
+  "pos": [
+   -190.3,
+   -13.0
+  ],
+  "free": [
+   -190.3,
+   -13.0
+  ],
+  "y": 8.2,
+  "az": 0.2,
+  "el": 0.05,
+  "dist": 8,
+  "time": 12,
+  "call": {
+   "player.teleport": [
+    -190.3,
+    -13.0
+   ]
+  },
+  "frames": 75
+ },
+ "ground_cat_steps": {
+  "pos": [
+   152,
+   -12.9
+  ],
+  "time": 12,
+  "az": 0.3,
+  "el": 0.35,
+  "dist": 16,
+  "call": {
+   "player.teleport": [
+    152,
+    -15.5
+   ],
+   "camera.snap": []
+  },
+  "frames": 75
+ },
+ "ground_cat_steps_side": {
+  "pos": [
+   152,
+   -12.9
+  ],
+  "free": [
+   150,
+   -14.2
+  ],
+  "y": 8.6,
+  "az": 1.5708,
+  "el": 0.05,
+  "dist": 12,
+  "time": 12,
+  "call": {
+   "player.teleport": [
+    150,
+    -15.5
+   ]
+  },
+  "frames": 75
+ },
+ "ground_cat_meow_seat_night": {
+  "pos": [
+   128.6,
+   -25.7
+  ],
+  "time": 21.5,
+  "az": 0.6,
+  "el": 0.45,
+  "dist": 14,
+  "call": {
+   "player.teleport": [
+    128.6,
+    -25.7
+   ],
+   "camera.snap": []
+  },
+  "frames": 75
+ },
+ "ground_cat_meow_seat_side": {
+  "pos": [
+   128.6,
+   -25.7
+  ],
+  "free": [
+   128.6,
+   -25.7
+  ],
+  "y": 7.3,
+  "az": 1.5708,
+  "el": 0.05,
+  "dist": 8,
+  "time": 12,
+  "call": {
+   "player.teleport": [
+    128.6,
+    -25.7
+   ]
+  },
+  "frames": 75
+ },
+ "ground_cat_wall_park": {
+  "pos": [
+   149.1,
+   -26.6
+  ],
+  "time": 16,
+  "az": 0.8,
+  "el": 0.4,
+  "dist": 14,
+  "call": {
+   "player.teleport": [
+    149.1,
+    -26.8
+   ],
+   "camera.snap": []
+  },
+  "frames": 75
+ },
+ "ground_cat_wall_park_side": {
+  "pos": [
+   149.1,
+   -26.6
+  ],
+  "free": [
+   149.1,
+   -26.8
+  ],
+  "y": 7.0,
+  "az": 0.0,
+  "el": 0.05,
+  "dist": 8,
+  "time": 16,
+  "call": {
+   "player.teleport": [
+    149.1,
+    -26.8
+   ]
+  },
+  "frames": 75
+ },
+ "ground_cat_plaza_bench_night": {
+  "pos": [
+   76.9,
+   11.5
+  ],
+  "time": 22,
+  "az": 0.9,
+  "el": 0.45,
+  "dist": 14,
+  "call": {
+   "player.teleport": [
+    76.9,
+    11.5
+   ],
+   "camera.snap": []
+  },
+  "frames": 75
+ },
+ "ground_cat_plaza_bench_side": {
+  "pos": [
+   76.9,
+   11.5
+  ],
+  "free": [
+   76.9,
+   11.5
+  ],
+  "y": 5.6,
+  "az": 1.2,
+  "el": 0.08,
+  "dist": 8,
+  "time": 12,
+  "call": {
+   "player.teleport": [
+    76.9,
+    11.5
+   ]
+  },
+  "frames": 75
+ },
+ "ground_ghost_lake_side": {
+  "pos": [
+   -59.365,
+   39.095
+  ],
+  "free": [
+   -59.365,
+   39.095
+  ],
+  "y": 5.3,
+  "az": 0.9,
+  "el": 0.05,
+  "dist": 7,
+  "time": 12,
+  "call": {
+   "player.teleport": [
+    -59.365,
+    39.095
+   ]
+  },
+  "frames": 60
+ },
+ "ground_planter_heights": {
+  "pos": [
+   192.6,
+   26.9
+  ],
+  "time": 12,
+  "az": 0.5,
+  "el": 0.42,
+  "dist": 13,
+  "call": {
+   "player.teleport": [
+    192.6,
+    26.9
+   ],
+   "camera.snap": []
+  },
+  "frames": 75
+ },
+ "ground_planter_heights_side": {
+  "pos": [
+   192.6,
+   26.9
+  ],
+  "free": [
+   192.6,
+   26.9
+  ],
+  "y": 6.6,
+  "az": 1.5708,
+  "el": 0.05,
+  "dist": 9,
+  "time": 12,
+  "call": {
+   "player.teleport": [
+    192.6,
+    26.9
+   ]
+  },
+  "frames": 75
+ }
+}

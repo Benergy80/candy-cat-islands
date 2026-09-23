@@ -205,3 +205,54 @@ export const EATEN_TOAST = [
 ];
 
 export const ARCHETYPES = ['giggler', 'ominous', 'foodie', 'philosopher', 'liar', 'smallest'];
+
+// ── WAVE 3: the new arsenal (Contract C) and the invincibility star (B) ──────
+export const CANNON = [
+  'JAWBREAKER! i\'m SEEING SOUNDS—',
+  'that was a WHOLE jawbreaker. at a CHILD. out of a CANNON.',
+  'i went so far. i saw the sea. i saw my HOUSE.',
+];
+
+export const WHIP = [
+  'OW! licorice! the RED kind! the WORST kind!',
+  'hey! that\'s a snack, not a WHIP—',
+  'you whipped me with CANDY. that\'s just seasoning with extra steps.',
+];
+
+export const POPROCKS = [
+  'IT\'S IN MY FEET IT\'S IN MY FEET IT\'S IN MY—',
+  'POP! POP! why is everything POP—',
+  'i\'m FIZZING! is this puberty?!',
+];
+
+export const GUM = [
+  'i\'m STUCK! i\'m stuck in a GUM!',
+  'this is chewed. somebody CHEWED this.',
+  'my foot. my good foot. it\'s in the gum.',
+];
+
+export const MARSH = [
+  'boing. BOING. boi— that was soft. i\'m still mad.',
+  'you hit me with a PILLOW. a candy pillow. rude AND cosy.',
+  'marshmallow? i\'d eat it if i weren\'t so INSULTED.',
+];
+
+export const SPIN = [
+  'wheeeeeeeee— no. no. NO. WHEEEE—',
+  'the world is a peppermint. it\'s going round.',
+  'i can see the back of my own head. it\'s cute.',
+];
+
+export const WATER = [
+  'eek! WET! i\'m SHRINKING! i\'m fun-size!',
+  'nooo i\'m gonna be a MINI now—',
+  'you watered me. do you know what water DOES to gummies?!',
+];
+
+export const STAR = [
+  'HE\'S SHINY! SHINY IS BAD! RUN!',
+  'he ate a STAR. you can\'t EAT a star. that\'s OUR thing—',
+  'not the sparkly one! NOT THE SPARKLY ONE!',
+  'we\'re sorry about the hat! WE\'RE SORRY ABOUT THE HAT!',
+  'the tourist is GLOWING! mom! MOM!',
+];

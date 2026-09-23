@@ -15,6 +15,7 @@ import { buildGround } from './terrain/ground.js';
 import { buildSea, buildRiver, buildRiverLip, buildWaterfall, buildLake, riverProfile, lakeSurfaceLevel } from './terrain/water.js';
 import { buildPaths } from './terrain/paths.js';
 import { buildCandyDecor, buildCatDecor, buildGumdrops, buildCliffs } from './terrain/decor.js';
+import { createInstanceCuller, triangleTiles } from './terrain/instcull.js';
 
 export function create(ctx) {
   const { scene, world } = ctx;
@@ -58,6 +59,10 @@ export function create(ctx) {
   const lakeSurface = lakeSurfaceLevel(world);
   const candyGround = add('candyGround', buildGround(ctx, 'candy', uniforms, lakeSurface));
   const catGround = add('catGround', buildGround(ctx, 'cat', uniforms, lakeSurface));
+  // mobile tier (Contract I): each island's ground is drawn through the index
+  // runs of the tiles the camera can see — one call, a fraction of the triangles
+  const culler = ctx.state?.mobile ? createInstanceCuller(ctx) : null;
+  if (culler) for (const g of [candyGround, catGround]) if (g?.tiles) culler.addIndexed(g.mesh, g.tiles);
 
   // ── river profile + lake level (needed before the paths can bridge them) ──
   const prof = riverProfile(world);
@@ -87,8 +92,10 @@ export function create(ctx) {
   };
 
   // ── paths ─────────────────────────────────────────────────────────────────
-  add('candyPaths', buildPaths(ctx, 'candy', uniforms, { deckLevel }));
-  add('catPaths', buildPaths(ctx, 'cat', uniforms, { deckLevel }));
+  const candyPaths = add('candyPaths', buildPaths(ctx, 'candy', uniforms, { deckLevel }));
+  const catPaths = add('catPaths', buildPaths(ctx, 'cat', uniforms, { deckLevel }));
+  // the path ribbons cast nothing: same 32 u index-run culling as the ground
+  if (culler) for (const p of [candyPaths, catPaths]) if (p?.mesh?.geometry) culler.addIndexed(p.mesh, triangleTiles(p.mesh.geometry, 32));
 
   // ── water ─────────────────────────────────────────────────────────────────
   const river = add('river', buildRiver(ctx, uniforms, prof));
@@ -103,6 +110,13 @@ export function create(ctx) {
   add('gumdrops', buildGumdrops(ctx, uniforms));
   add('cliffs', buildCliffs(ctx, uniforms));
   add('catDecor', buildCatDecor(ctx, uniforms));
+
+  // Mobile tier (Contract I): small dressing does not cast — the kerb cubes,
+  // decor lumps, gumdrop boulders and the river's sugar lip. The Gumdrop Cliffs
+  // are landform and keep their shadow.
+  if (ctx.state?.mobile) {
+    for (const m of group.children) if (/^terrain_(candy_decor|cat_decor|gumdrops|river_lip)/.test(m.name)) m.castShadow = false;
+  }
 
   // Bake the contact AO after every other system has pushed its colliders.
   ctx.events.on('world:ready', () => {

@@ -1,0 +1,142 @@
+{
+  "touch_fly_day": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "frames": 45,
+    "call": {
+      "touch.enable": [
+        true,
+        {
+          "transient": true
+        }
+      ],
+      "escape.routes.flyer.debugFly": [
+        -140,
+        40,
+        60,
+        0,
+        true
+      ]
+    }
+  },
+  "touch_hud_day": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "frames": 45,
+    "call": {
+      "escape.routes.flyer.stop": [],
+      "player.teleport": [
+        -140,
+        40
+      ],
+      "camera.setParams": [
+        {
+          "azimuth": 0.7853981634
+        }
+      ],
+      "camera.snap": [],
+      "touch.enable": [
+        true,
+        {
+          "transient": true
+        }
+      ],
+      "touch.showHelp": [
+        true
+      ]
+    }
+  },
+  "touch_hud_night_cat": {
+    "pos": [
+      152,
+      6
+    ],
+    "time": 22.5,
+    "frames": 60,
+    "call": {
+      "touch.enable": [
+        true,
+        {
+          "transient": true
+        }
+      ]
+    }
+  },
+  "touch_off_check": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "frames": 20
+  },
+  "touch_fly_help_day": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "frames": 45,
+    "call": {
+      "touch.enable": [
+        true,
+        {
+          "transient": true
+        }
+      ],
+      "escape.routes.flyer.debugFly": [
+        -140,
+        40,
+        60,
+        0,
+        true
+      ],
+      "touch.showHelp": [
+        true
+      ]
+    }
+  },
+  "touch_say_star_day": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "frames": 50,
+    "call": {
+      "escape.routes.flyer.stop": [],
+      "player.teleport": [
+        -140,
+        40
+      ],
+      "camera.setParams": [
+        {
+          "azimuth": 0.7853981634
+        }
+      ],
+      "camera.snap": [],
+      "touch.enable": [
+        true,
+        {
+          "transient": true
+        }
+      ],
+      "powerups.grant": [
+        10
+      ],
+      "ui.say": [
+        "Oh, the cave key? I saw a golden cat-shaped key on a red cushion up by the old fountain in the plaza. No reason. No reason at all.",
+        {
+          "speaker": "Chomp",
+          "duration": 30
+        }
+      ]
+    }
+  }
+}

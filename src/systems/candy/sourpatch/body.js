@@ -79,6 +79,7 @@ const SUGAR_HEAD = /* glsl */`
 uniform float uGummy;
 uniform float uCoat;
 uniform float uRim;
+uniform float uMoon;
 uniform float uGlint;
 uniform float uSSS;
 uniform float uTime;
@@ -150,6 +151,8 @@ export function createRig(ctx, N, rand) {
   const uGummy = { value: 0.14 };
   const uCoat = { value: 1.0 };
   const uRim = { value: 0.24 };
+  const uMoon = { value: 0 };          // night: a cold moonlit rim so the silhouette survives the dark
+  const uGrinGlow = { value: 0 };      // night: the grin is lit from inside (see grinMat)
   const uGlint = { value: 0.3 };
   const uSSS = { value: 0.5 };
   const uTime = { value: 0 };
@@ -160,7 +163,7 @@ export function createRig(ctx, N, rand) {
   const gummy = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.30, metalness: 0.0 });
   gummy.onBeforeCompile = (sh) => {
     sh.uniforms.uGummy = uGummy; sh.uniforms.uCoat = uCoat;
-    sh.uniforms.uRim = uRim; sh.uniforms.uGlint = uGlint; sh.uniforms.uSunW = uSunW;
+    sh.uniforms.uRim = uRim; sh.uniforms.uGlint = uGlint; sh.uniforms.uSunW = uSunW; sh.uniforms.uMoon = uMoon;
     sh.uniforms.uSSS = uSSS; sh.uniforms.uTime = uTime;
 
     sh.vertexShader = ['attribute float aSeed;', 'attribute float aThin;', SUGAR_HEAD, sh.vertexShader].join('\n')
@@ -218,6 +221,11 @@ export function createRig(ctx, N, rand) {
         totalEmissiveRadiance += vColor * ( uGummy
                                           + uRim * spFres * ( 0.55 + 1.05 * spBack )
                                           + uSSS * ( 0.26 * vSugThin + 1.35 * spThru ) );
+        // ── moon rim (critic: "at night they read as dark blobs") ──────────
+        // a thin, cold edge in a moon-washed version of the kid's own hue: the
+        // hunched silhouette separates from the dark ground and from the next
+        // kid, while the face (eyes + lit grin) stays the brightest thing on it.
+        totalEmissiveRadiance += mix( vColor, vec3( 0.78, 0.86, 1.0 ), 0.5 ) * uMoon * pow( spFres, 3.0 );
         // ── crystalline glints ─────────────────────────────────────────────
         // Each grain is a little facet: it fires against a sharp half-vector
         // term (so it catches the sun as the kid turns) and carries its own
@@ -237,6 +245,19 @@ export function createRig(ctx, N, rand) {
   const lidMat = new THREE.MeshStandardMaterial({ color: 0x140b16, roughness: 0.6, metalness: 0.0 });
   const mouthMat = new THREE.MeshStandardMaterial({ color: 0x2c0b18, roughness: 0.55, metalness: 0.0 });
   const grinMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.0, flatShading: true });
+  // THE NIGHT GRIN IS LIT FROM INSIDE (critic: "faces shrink to glowing green
+  // dots on dark bodies"). A dark slit on a dark head vanished at game distance,
+  // so the slit now glows the eyes' acid lime and the teeth glow a little
+  // cream over it: two burning dots and a crescent, a face at any distance.
+  grinMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uGrinGlow = uGrinGlow;
+    sh.fragmentShader = ['uniform float uGrinGlow;', sh.fragmentShader].join('\n')
+      .replace('#include <emissivemap_fragment>', /* glsl */`
+        #include <emissivemap_fragment>
+        totalEmissiveRadiance += vColor.rgb * uGrinGlow;
+      `);
+  };
+  grinMat.customProgramCacheKey = () => 'sp-grin-lit';
 
   // ── ground decals: contact shadow + night glow pool ────────────────────────
   // A 64 px alphaMap with linear gradient stops is what made these read as flat
@@ -352,18 +373,20 @@ export function createRig(ctx, N, rand) {
   const gGrin = (() => {
     const parts = [];
     // the slit: a half torus flipped into a smile and squashed very flat
-    const arcR = 0.175, arcSquash = 0.30;
+    // (0.034 tube, 0.40 squash: the old 0.020 × 0.30 slit was two pixels tall
+    // at the game camera — a mouth nobody could see)
+    const arcR = 0.178, arcSquash = 0.40;
     _e.set(0, 0, Math.PI); _q.setFromEuler(_e);
     _m.compose(_p.set(0, 0, 0), _q, _s.set(1, arcSquash, 0.55));
-    parts.push(tinted(new THREE.TorusGeometry(arcR, 0.020, 4, 15, Math.PI), 0x180510, _m));
+    parts.push(tinted(new THREE.TorusGeometry(arcR, 0.034, 4, 15, Math.PI), 0xa8ff2c, _m));
     // teeth hanging off the upper lip — five little ones plus two corner fangs
     for (let i = 0; i < 7; i++) {
       const f = i / 6, a = Math.PI * (0.10 + 0.80 * f);
       const corner = i === 0 || i === 6;
       const x = Math.cos(a) * arcR, y = -Math.sin(a) * arcR * arcSquash;
       _e.set(0, 0, 0); _q.setFromEuler(_e);
-      _m.compose(_p.set(x, y + (corner ? 0.010 : 0.016), 0.012), _q,
-        _s.set(corner ? 0.030 : 0.024, corner ? 0.058 : 0.040, 0.020));
+      _m.compose(_p.set(x, y + (corner ? 0.012 : 0.020), 0.022), _q,
+        _s.set(corner ? 0.034 : 0.027, corner ? 0.066 : 0.048, 0.022));
       parts.push(tinted(new THREE.ConeGeometry(1, 1, 4), 0xfff2f8, _m));
     }
     return mergeGeometries(parts);
@@ -448,7 +471,9 @@ export function createRig(ctx, N, rand) {
       uCoat.value = 0.82 * (1 - night) + 0.52 * night;
       uGlint.value = 0.30 * daylight * (0.5 + 0.5 * Math.max(0, Math.min(1, sunY))) + 0.05 * night;
       uRim.value = 0.34 * (1 - night) + 0.42 * night;
-      uGummy.value = 0.13 * (1 - night) + 0.22 * night;
+      uGummy.value = 0.13 * (1 - night) + 0.25 * night;
+      uMoon.value = 0.62 * night;
+      uGrinGlow.value = night * 1.05;
       // subsurface: full strength in daylight (a gummy bear on a windowsill),
       // pulled back at night so the body never competes with the eyes
       uSSS.value = 0.62 * (1 - night) + 0.20 * night;
@@ -516,7 +541,8 @@ export function createRig(ctx, N, rand) {
     pose(i, k, t) {
       if (k.vis <= 0.004) { api.hide(i); return; }
       hidden[i] = 0;
-      const sc = k.scale * Math.min(1, k.vis);
+      // k.shrink: the water balloon's fun-size (hit.js), 1 otherwise
+      const sc = k.scale * Math.min(1, k.vis) * (k.shrink > 0 ? k.shrink : 1);
       const sy = 1 + k.squash, sxz = 1 - k.squash * 0.45;
       const crouch = k.crouch || 0;
 
@@ -640,7 +666,9 @@ export function createRig(ctx, N, rand) {
       mouth.setMatrixAt(i, _m);
       // night grin: wide, thin, toothy — and it gapes when they rush you
       _e.set(0.10, 0, 0, 'XYZ'); _q2.setFromEuler(_e);
-      _p.set(0, -0.095, 0.336);
+      // z 0.350 (was 0.336): measured against the skull, the old slit's middle
+      // sat flush with the chin surface and only its corners ever showed
+      _p.set(0, -0.095, 0.350);
       _s.set(nm * (1.0 + k.mouthWide * 0.22), nm * (1.0 + k.mouthOpen * 3.0), nm);
       _m.compose(_p, _q2, _s).premultiply(_mHead);
       grin.setMatrixAt(i, _m);

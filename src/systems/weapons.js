@@ -16,22 +16,44 @@
 //   caramelizer  FIRE   a 25 u heat bolt. burn(point, 2.5): every system's onBurn()
 //                       gets a chance to remove its own props; anything small the ray
 //                       hit shrinks to nothing with fire, ash and a scorch mark
+// WAVE 3 (Contract C) — inventory/volley.js does the flying, this file the arms:
+//   jawbreaker_cannon 'cannon' · licorice_whip 'whip' · poprocks 'poprocks'
+//   bubblegum_blower 'gum' · marshmallow_launcher 'marshmallow'
+//   peppermint_boomerang 'boomerang' · water_balloon 'water'   (id → hit name)
 //
 // PUBLIC API  use() · burn(point, radius) · saltPatches [{x,z,r}] · addSaltPatch(x,z,r)
 //             clearSaltPatches() · isSalted(x,z) · targets() · help · stats()
-// EVENTS      emits 'weapon:use' { weapon, hits, kind } · 'weapon:burn' { x, z, r }
+// EVENTS      emits 'weapon:use' { weapon (item id), hit (name sent to enemies), hits, kind, x, z }
+//             · 'weapon:burn' { x, z, r }
 //             listens 'player:stomp' { x, z, r }
 // Enemy hooks ctx.systems.sourPatch.hit(kid, info) / catCitizens.hit(cat, info) with
 //             { weapon, power, from:{x,z}, kind }. If a system has no hit(), we push
 //             the target away ourselves so something always visibly happens.
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
-import { mat, clamp, lerp } from '../core/util.js';
+import { mat, clamp, lerp, smoothstep, damp } from '../core/util.js';
 import { VISUALS, buildVisual, buildSaltPatch, buildPellet, applyPickupGlow } from './inventory/items.js';
+import { createVolley } from './inventory/volley.js';
+import { createFx } from './inventory/fx.js';
 
-const COOLDOWN = { melee: 0.55, lob: 0.65, shot: 0.45, spray: 0.2, saltgun: 0.5, fire: 0.7 };
-const DUR = { melee: 0.5, lob: 0.46, shot: 0.34, spray: 0.2, saltgun: 0.42, fire: 0.36 };
-const RELEASE = { melee: 0.34, lob: 0.46, shot: 0.42, spray: 0.0, saltgun: 0.3, fire: 0.18 };
+const COOLDOWN = {
+  melee: 0.55, lob: 0.65, shot: 0.45, spray: 0.2, saltgun: 0.5, fire: 0.7,
+  cannon: 1.0, whip: 0.62, poprocks: 0.7, gum: 0.5, marsh: 0.34, boomerang: 0.3, balloon: 0.6,
+};
+const DUR = {
+  melee: 0.5, lob: 0.46, shot: 0.34, spray: 0.2, saltgun: 0.42, fire: 0.36,
+  cannon: 0.6, whip: 0.5, poprocks: 0.46, gum: 0.38, marsh: 0.3, boomerang: 0.46, balloon: 0.46,
+};
+// fraction of DUR at which the thing actually leaves your hand
+const RELEASE = {
+  melee: 0.34, lob: 0.46, shot: 0.42, spray: 0.0, saltgun: 0.3, fire: 0.18,
+  cannon: 0.16, whip: 0.4, poprocks: 0.46, gum: 0.2, marsh: 0.14, boomerang: 0.44, balloon: 0.46,
+};
+const ACTION = { melee: 'swing', whip: 'swing', spray: 'spray' };      // anything else: 'throw'
+const AMMO_WORDS = {
+  salt: 'salt', gumballs: 'gumballs', saltgun: 'salt', fuel: 'fuel', jawbreakers: 'jawbreakers',
+  poprocks: 'Pop Rocks', gum: 'bubblegum', marshmallows: 'marshmallows', balloons: 'water balloons',
+};
 const MELEE_R = 2.2, MELEE_ARC = Math.PI * 110 / 180;
 const LOB_RANGE = 6.0, LOB_AREA = 2.5;
 const SHOT_RANGE = 14, SHOT_SPEED = 26, SHOT_R = 0.85;
@@ -47,6 +69,10 @@ export function create(ctx) {
 
   const warned = new Set();
   const warn = (k, e) => { if (!warned.has(k)) { warned.add(k); console.warn(`[weapons] ${k}:`, e?.message || e); } };
+
+  // muzzle bursts, trail ribbons, impact splats (inventory/fx.js): ≤ 2 calls
+  let fx = null;
+  try { fx = createFx(ctx, group); } catch (err) { warn('fx init', err); }
 
   // ── the thing in your right hand ───────────────────────────────────────────
   // Same geometry builders AND the same rim/heat shader as the pickup pools, so
@@ -64,7 +90,15 @@ export function create(ctx) {
     if (!heldGeos.has(key)) heldGeos.set(key, buildVisual(key).geo);
     return heldGeos.get(key);
   }
+  // Drawn AFTER the visitor's through-geometry silhouette (renderOrder 9990,
+  // player/visitor.js): a big weapon carried in front of the chest is ≥ 0.75 u
+  // in front of the torso, so as an ordinary opaque it would trip that pass
+  // and get a cream-orange ghost of the body painted over it. In the
+  // transparent queue at 9995 (opacity 1, depth write on) it looks identical
+  // but is not in the depth buffer yet when the silhouette tests.
+  heldMat.transparent = true; heldMat.opacity = 1; heldMat.depthWrite = true;
   const heldMesh = new THREE.Mesh(new THREE.BufferGeometry(), heldMat);
+  heldMesh.renderOrder = 9995;
   heldMesh.castShadow = true; heldMesh.visible = false;
   heldMesh.userData.noFade = true; heldMesh.userData.noRay = true;
   let heldKey = null, heldParent = null;
@@ -74,20 +108,37 @@ export function create(ctx) {
     const hand = pl?.visitor?.nodes?.armR?.el || pl?.visitor?.nodes?.armR?.sh || pl?.group;
     if (hand && hand !== heldParent) { hand.add(heldMesh); heldParent = hand; }
   }
+  let releasedT = 0;
   function syncHeld() {
     const inv = ctx.systems.inventory;
     const d = inv?.heldDef?.();
     const key = d?.visual || null;
-    if (key === heldKey) return;
-    heldKey = key;
-    if (!key || !VISUALS[key]) { heldMesh.visible = false; return; }
-    heldMesh.geometry = geoFor(key);
-    const h = VISUALS[key].hold || { pos: [0, -0.28, 0.04], rot: [2.5, 0, 0], scale: 1 };
-    heldMesh.position.set(...h.pos);
-    heldMesh.rotation.set(...h.rot);
-    heldMesh.scale.setScalar(h.scale ?? 1);
-    heldMesh.visible = true;
-    attachHeld();
+    if (key !== heldKey) {
+      heldKey = key;
+      if (key && VISUALS[key]) {
+        heldMesh.geometry = geoFor(key);
+        const h = VISUALS[key].hold || { pos: [0, -0.28, 0.04], rot: [2.5, 0, 0], scale: 1 };
+        heldMesh.position.set(...h.pos);
+        heldMesh.rotation.set(...h.rot);
+        heldMesh.scale.setScalar(h.scale ?? 1);
+        attachHeld();
+      }
+    }
+    // What is actually in the fist this frame: nothing while the boomerang is
+    // out, nothing for a beat after a throw, nothing once the last balloon /
+    // pouch is gone.
+    let show = !!(key && VISUALS[key]);
+    if (show && d) {
+      if (volley?.handEmpty(d.mode)) show = false;
+      else if (d.throwable && (releasedT > 0 || (d.ammo && (inv.ammo?.[d.ammo] || 0) <= 0))) show = false;
+    }
+    heldMesh.visible = show;
+  }
+  /** World position of the right fist (for the whip's lash). */
+  function handPos(v) {
+    if (heldParent && heldMesh.parent) { heldParent.updateWorldMatrix(true, false); return v.setFromMatrixPosition(heldParent.matrixWorld); }
+    const p = ctx.systems.player?.position;
+    return p ? v.set(p.x, p.y + 1.0, p.z) : v.set(0, 1, 0);
   }
 
   // ── instanced decals: salt patches + scorch marks ──────────────────────────
@@ -141,17 +192,25 @@ export function create(ctx) {
   const shots = [];
 
   // ── targets ────────────────────────────────────────────────────────────────
+  // Recycled target records: projectiles sweep against these every frame, so
+  // building fresh objects here was the one per-frame allocation in the file.
   const _targets = [];
+  const _tpool = [];
+  function tslot(ref, sys, sysName, x, z, name) {
+    const t = _tpool[_targets.length] || (_tpool[_targets.length] = {});
+    t.ref = ref; t.sys = sys; t.sysName = sysName; t.x = x; t.z = z; t.name = name;
+    _targets.push(t);
+  }
   function targets() {
     _targets.length = 0;
     const sp = ctx.systems.sourPatch;
     if (sp?.kids) for (const k of sp.kids) {
       if (k.vis !== undefined && k.vis < 0.25) continue;
-      _targets.push({ ref: k, sys: sp, sysName: 'sourPatch', x: k.x ?? k.pos?.x ?? 0, z: k.z ?? k.pos?.z ?? 0, name: k.name || 'kid' });
+      tslot(k, sp, 'sourPatch', k.x ?? k.pos?.x ?? 0, k.z ?? k.pos?.z ?? 0, k.name || 'kid');
     }
     const cc = ctx.systems.catCitizens;
     if (cc?.cats) for (const c of cc.cats) {
-      _targets.push({ ref: c, sys: cc, sysName: 'catCitizens', x: c.x ?? c.pos?.x ?? 0, z: c.z ?? c.pos?.z ?? 0, name: c.name || 'cat' });
+      tslot(c, cc, 'catCitizens', c.x ?? c.pos?.x ?? 0, c.z ?? c.pos?.z ?? 0, c.name || 'cat');
     }
     return _targets;
   }
@@ -314,29 +373,93 @@ export function create(ctx) {
         { const k = (u - 0.7) / 0.3; return { sx: lerp(-0.25, 0, k), sz: 0, ex: lerp(-0.1, 0, k), tw: lerp(-0.3, 0, k) }; }
       }
       case 'saltgun': case 'fire': {
+        // hip-fire: forearm raised 35° so the forward-carried gun sits level
+        // (the same pose the gun is CARRIED in, so a shot starts and ends there)
         const kick = Math.exp(-u * 9) * (u < 0.1 ? u * 10 : 1);
-        return { sx: -1.02 - kick * 0.45, sz: -0.14, ex: -0.30, tw: -0.10 };
+        return { sx: -0.46 - kick * 0.45, sz: -0.14, ex: -0.16 + kick * 0.2, tw: -0.10 * (1 - u) };
       }
       case 'spray': return { sx: -1.05, sz: -0.18, ex: -0.38, tw: -0.1 };
+      // ── wave 3 ─────────────────────────────────────────────────────────────
+      case 'cannon': case 'gum': case 'marsh': {
+        // already aimed (the carry pose), fire at RELEASE, the recoil throws
+        // the arm up, and it settles back to the carry
+        const r = RELEASE[name], big = name === 'cannon' ? 1 : 0.45;
+        const kick = u >= r ? Math.exp(-(u - r) * 9) * Math.min(1, (u - r) * 30) : 0;
+        const w = 1 - smoothstep(0.72, 1, u);
+        return {
+          sx: -0.46 - kick * 0.8 * big, sz: -0.14,
+          ex: -0.16 + kick * 0.3 * big, tw: (-0.12 - kick * 0.3 * big) * w,
+        };
+      }
+      case 'whip': {
+        // a big overhead wind-up, then the crack comes down and across
+        if (u < 0.36) { const k = u / 0.36; return { sx: lerp(0, -2.7, k * k), sz: lerp(0, 0.7, k), ex: lerp(0, -1.3, k), tw: lerp(0, 0.6, k) }; }
+        if (u < 0.56) { const k = (u - 0.36) / 0.2; return { sx: lerp(-2.7, 0.9, k), sz: lerp(0.7, -0.3, k), ex: lerp(-1.3, 0, k), tw: lerp(0.6, -0.7, k) }; }
+        { const k = (u - 0.56) / 0.44; return { sx: lerp(0.9, 0, k), sz: lerp(-0.3, 0, k), ex: 0, tw: lerp(-0.7, 0, k) }; }
+      }
+      case 'poprocks': case 'balloon': case 'boomerang': return pose('lob', u);
       default: return REST;
     }
   }
 
-  function applyPose() {
+  // ── carrying: a gun rides level at the hip (its hip-fire pose), a balloon /
+  // pouch / boomerang is held up at the chest, so what is in your hand reads
+  // as IN YOUR HAND at the game camera instead of dangling at knee height ──
+  const CARRY = {
+    gun: { sx: -0.46, sz: -0.14, ex: -0.16 },
+    throw: { sx: -0.32, sz: -0.12, ex: -1.3 },
+  };
+  let carryK = 0, carryPose = null;
+  function carryWanted() {
+    const pl = ctx.systems.player;
+    if (!pl || !heldMesh.visible || pl.onVehicle || pl.onFerry || ctx.state.vehicle) return null;   // (a scruff-carry sets onFerry)
+    const d = ctx.systems.inventory?.heldDef?.();
+    const V = d ? VISUALS[d.visual] : null;
+    if (!V) return null;
+    if (V.gun) return CARRY.gun;
+    if (d.throwable || d.mode === 'boomerang') return CARRY.throw;
+    return null;
+  }
+  function applyPose(dt) {
     const n = ctx.systems.player?.visitor?.nodes;
     if (!n?.armR) return;
-    if (!anim) return;
+    const want = carryWanted() || (anim && carryPose && carryK > 0.01 ? carryPose : null);
+    if (want) carryPose = want;
+    carryK = damp(carryK, want ? 1 : 0, 10, dt);
+    const c = carryPose, ck = c ? carryK : 0;
+    if (!anim) {
+      if (ck < 0.005) return;
+      n.armR.sh.rotation.x += (c.sx - n.armR.sh.rotation.x) * ck;
+      n.armR.sh.rotation.z += (c.sz + 0.34 - n.armR.sh.rotation.z) * ck;
+      n.armR.el.rotation.x += (c.ex - n.armR.el.rotation.x) * ck;
+      return;
+    }
     const u = clamp(anim.t / anim.dur, 0, 1);
     const p = pose(anim.name, u);
-    n.armR.sh.rotation.x = p.sx;
-    n.armR.sh.rotation.z = (p.sz ?? 0) + 0.34;
-    n.armR.el.rotation.x = p.ex ?? 0;
+    // an action starts from, and settles back into, the carry pose
+    const a = ck > 0 ? smoothstep(0, 0.14, u) * (1 - smoothstep(0.74, 1, u)) : 1;
+    const bx = ck > 0 ? c.sx * ck : 0, bz = ck > 0 ? c.sz * ck : 0, be = ck > 0 ? c.ex * ck : 0;
+    n.armR.sh.rotation.x = lerp(bx, p.sx, a);
+    n.armR.sh.rotation.z = lerp(bz, p.sz ?? 0, a) + 0.34;
+    n.armR.el.rotation.x = lerp(be, p.ex ?? 0, a);
     if (n.torso && p.tw) n.torso.rotation.y += p.tw * 0.5;
   }
 
   // ── firing ─────────────────────────────────────────────────────────────────
   const cd = {};
   let firstUse = true, shotSeq = 0;
+  // The first-use hint names ONE weapon ("fire a jawbreaker"); the moment you
+  // hold something else it is wrong, so it leaves (ui.toast returns the spec,
+  // whose .live is the on-screen toast once it shows).
+  let hintToast = null, hintFor = null;
+  function expireHint(nowHeld) {
+    if (!hintToast || nowHeld === hintFor) return;
+    try {
+      if (hintToast.live && hintToast.live.life > 0.15) hintToast.live.life = 0.15;
+      else if (!hintToast.live) hintToast.secs = 0.01;
+    } catch { /* the toast shape is ui.js's business */ }
+    hintToast = null;
+  }
   const GUMBALLS = [0xff3355, 0x5be27a, 0x3aa8ff, 0xffe23a, 0xb35bff, 0xff8c1a];
   const _from = { x: 0, z: 0 };
 
@@ -345,15 +468,26 @@ export function create(ctx) {
     const f = pl?.facing ?? 0;
     return { x: Math.sin(f), z: Math.cos(f) };
   }
+  const _mz = new THREE.Vector3();
   function muzzle() {
     const pl = ctx.systems.player?.position || { x: 0, y: 0, z: 0 };
     const d = facing();
+    // a GUN fires from its own muzzle (VISUALS[key].gun, item space), so the
+    // jawbreaker leaves the barrel you can see; anything else from the chest
+    const g = heldKey && heldMesh.visible && heldMesh.parent ? VISUALS[heldKey]?.gun : null;
+    if (g) {
+      heldMesh.updateWorldMatrix(true, false);
+      _mz.set(g[0], g[1], g[2]).applyMatrix4(heldMesh.matrixWorld);
+      const dx = _mz.x - pl.x, dz = _mz.z - pl.z;
+      // never behind the body (a stale pose right after a turn): clamp to the front
+      if (dx * d.x + dz * d.z > 0.2 && Math.abs(_mz.y - pl.y - 1.0) < 0.9) return { x: _mz.x, y: _mz.y, z: _mz.z, d };
+    }
     return { x: pl.x + d.x * 0.5, y: pl.y + 1.08, z: pl.z + d.z * 0.5, d };
   }
 
   function beginUse(mode) {
     anim = { name: mode, t: 0, dur: DUR[mode] || 0.4, fired: false };
-    ctx.systems.player?.playAction?.(mode === 'melee' ? 'swing' : mode === 'spray' ? 'spray' : 'throw');
+    ctx.systems.player?.playAction?.(ACTION[mode] || 'throw', DUR[mode] || 0.45);
   }
 
   /** Actually make the weapon do its thing (at the release frame of the animation). */
@@ -376,13 +510,16 @@ export function create(ctx) {
         if (dot < Math.cos(MELEE_ARC / 2)) continue;
         strike(t, { weapon: id, power: def.power ?? 3, from: { x: _from.x, z: _from.z }, kind: 'melee' });
         stars(t.x, world.height(t.x, t.z) + 1.0, t.z);
+        fx?.bonk(t.x, world.height(t.x, t.z) + 1.2, t.z, 0xff2d4a, 1.6);
         hits++;
       }
       P()?.burst({ x: m.x + d.x * 1.2, y: m.y - 0.2, z: m.z + d.z * 1.2, count: 7, shape: 'puff', color: [0xffffff, 0xffe6f2], speed: 2.4, life: 0.32, size: 0.18, sizeEnd: 0.5, gravity: -1.5, drag: 3, spread: 0.7, alpha: 0.4 });
     } else if (mode === 'lob') {
-      shots.push(makeArc(m, d, LOB_RANGE, 0.55, 0xffffff, 'salt', aimAt(pl, d, LOB_RANGE + 1.5, 0.7)));
+      const s = makeArc(m, d, LOB_RANGE, 0.55, 0xffffff, 'salt', aimAt(pl, d, LOB_RANGE + 1.5, 0.7));
+      shots.push(s); launchFx(s, m, d, 0x5fd8ff, 0x8fdcff, 0.44);
     } else if (mode === 'saltgun') {
-      shots.push(makeArc(m, d, LOB_RANGE, 0.42, 0xf2f6ff, 'saltgun', null));
+      const s = makeArc(m, d, LOB_RANGE, 0.42, 0xf2f6ff, 'saltgun', null);
+      shots.push(s); launchFx(s, m, d, 0x23e0c6, 0x4fe8d8, 0.44);
     } else if (mode === 'shot') {
       const a = aimAt(pl, d, SHOT_RANGE, 0.45);
       let dx = d.x, dz = d.z;
@@ -392,15 +529,20 @@ export function create(ctx) {
         vx: dx * SHOT_SPEED, vy: 1.2, vz: dz * SHOT_SPEED,
         life: SHOT_RANGE / SHOT_SPEED, t: 0, r: 0.16, color: GUMBALLS[shotSeq++ % GUMBALLS.length],
       });
+      launchFx(shots[shots.length - 1], m, d, 0xffa22a, shots[shots.length - 1].color, 0.4);
     } else if (mode === 'fire') {
       _o.set(m.x, m.y, m.z); _d.set(d.x, -0.06, d.z).normalize();
       const hit = castOne(_o, _d, FIRE_RANGE);
       const dist = hit ? hit.distance : FIRE_RANGE;
       const end = { x: m.x + _d.x * dist, y: m.y + _d.y * dist, z: m.z + _d.z * dist };
       shots.push({ kind: 'bolt', x: m.x, y: m.y, z: m.z, vx: _d.x * FIRE_SPEED, vy: _d.y * FIRE_SPEED, vz: _d.z * FIRE_SPEED, life: Math.max(0.04, dist / FIRE_SPEED), t: 0, r: 0.22, color: 0xffb03a, end, hit });
+      launchFx(shots[shots.length - 1], m, d, 0xff8a14, 0xff8a14, 0.62, 0.2);
       P()?.burst({ x: m.x + d.x * 0.5, y: m.y, z: m.z + d.z * 0.5, count: 8, shape: 'sparkle', blend: 'add', color: [0xffd23a, 0xff6a1a], speed: 3, life: 0.25, size: 0.4, sizeEnd: 0.05, gravity: 0, drag: 4, spread: 0.2 });
     } else if (mode === 'spray') {
       hits = sprayTick(d, id, def);
+    } else if (volley) {
+      hits = volley.fire(mode, id, def, d, m, pl);
+      releasedT = 0.28;                             // the hand is empty for a beat after a throw
     }
     // projectiles announce themselves when they LAND, so 'weapon:use' always
     // carries the real hit count.
@@ -429,6 +571,14 @@ export function create(ctx) {
       kind, x: m.x, y: m.y, z: m.z, t: 0, life: flight, r: 0.18, color,
       x0: m.x, y0: m.y, z0: m.z, x1: tx, y1: ty, z1: tz, arc: 1.6,
     };
+  }
+
+  /** Muzzle burst at the tip + a trail ribbon that follows the shot. */
+  function launchFx(s, m, d, flash, trail, width, age = 0.26) {
+    if (!fx) return;
+    fx.muzzle(m.x + d.x * 0.3, m.y, m.z + d.z * 0.3, flash, 1.35);
+    s.tr = fx.trail(trail, width, age);
+    fx.trailPush(s.tr, s.x, s.y, s.z);
   }
 
   function sprayTick(d, id, def) {
@@ -467,10 +617,13 @@ export function create(ctx) {
     const mode = def?.mode;
     if (!mode) return false;
     if ((cd[mode] || 0) > 0) return false;
+    if (volley?.busy(mode)) return false;
     if (def.ammo && !inv.useAmmo(def.ammo, 1)) {
       if ((cd.dry || 0) <= 0) {
         cd.dry = 1.2;
-        ctx.systems.ui?.toast(def.ammo === 'fuel' ? 'The Caramelizer is out of fuel.' : `Out of ${def.ammo} — find more candy.`, 2.6, { warn: true, icon: 'warn' });
+        const word = AMMO_WORDS[def.ammo] || def.ammo;
+        ctx.systems.ui?.toast(def.ammo === 'fuel' ? 'The Caramelizer is out of fuel.'
+          : `Out of ${word}! Look for a glowing ${word} cache, or pick up candy.`, 2.8, { warn: true, icon: 'warn' });
         P()?.burst({ x: ctx.systems.player.position.x, y: ctx.systems.player.position.y + 1.1, z: ctx.systems.player.position.z, count: 4, shape: 'puff', color: 0xcccccc, speed: 1, life: 0.3, size: 0.1, gravity: -2, spread: 0.2, alpha: 0.4 });
       }
       return false;
@@ -478,7 +631,8 @@ export function create(ctx) {
     cd[mode] = COOLDOWN[mode] || 0.5;
     if (firstUse) {
       firstUse = false;
-      ctx.systems.ui?.toast(`Click or X: ${def.hint || 'use'}. F swaps what you are holding.`, 4.5, { icon: 'spark' });
+      hintToast = ctx.systems.ui?.toast(`Click or X: ${def.hint || 'use'}. F swaps what you are holding.`, 4.5, { icon: 'spark' }) || null;
+      hintFor = id;
     }
     if (mode === 'spray') { beginUse('spray'); release('spray', facing()); }
     else beginUse(mode);
@@ -513,6 +667,8 @@ export function create(ctx) {
   const _m4 = new THREE.Matrix4(), _pv = new THREE.Vector3(), _qv = new THREE.Quaternion(), _sv = new THREE.Vector3(), _cv = new THREE.Color();
 
   function update(dt, ctx) {
+    if (releasedT > 0) releasedT -= dt;
+    if (hintToast) expireHint(ctx.systems.inventory?.held ?? null);
     syncHeld();
     attachHeld();
     for (const k in cd) if (cd[k] > 0) cd[k] = Math.max(0, cd[k] - dt);
@@ -537,9 +693,9 @@ export function create(ctx) {
         anim.fired = true;
         release(anim.name, facing());
       }
-      applyPose();
+      applyPose(dt);
       if (anim.t > anim.dur * (anim.name === 'spray' ? 1 : 1.25)) anim = null;
-    }
+    } else applyPose(dt);
 
     // projectiles
     let pn = 0;
@@ -555,6 +711,7 @@ export function create(ctx) {
         s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
       }
       let done = s.t >= s.life;
+      if (fx && s.tr !== undefined) fx.trailPush(s.tr, s.x, s.y, s.z);
       if (s.kind === 'gumball') {
         if (!done) {
           // swept test: at 26 u/s a frame is nearly a metre, so sample the step
@@ -567,6 +724,7 @@ export function create(ctx) {
             if (!near) continue;
             strike(t, { weapon: 'slingshot', power: 2, from: { x: s.x0 ?? s.x, z: s.z0 ?? s.z }, kind: 'throw' });
             P()?.burst({ x: s.x, y: s.y, z: s.z, count: 10, shape: 'confetti', color: [s.color, 0xffffff], speed: 3.4, life: 0.5, size: 0.16, gravity: -9, spread: 0.3, spin: 9 });
+            fx?.bonk(s.x, s.y + 0.3, s.z, s.color, 1.5);
             ctx.events.emit('weapon:use', { weapon: 'slingshot', hits: 1, kind: 'throw', x: s.x, z: s.z });
             s.scored = true; done = true; break;
           }
@@ -576,13 +734,16 @@ export function create(ctx) {
       }
       if (done) {
         shots.splice(i, 1);
+        fx?.trailEnd(s.tr);
         if (s.kind === 'salt') {
           saltBurst(s.x1, (s.y1 ?? s.y) + 0.25, s.z1, 1.1);
+          if (fx) { fx.puff(s.x1, (s.y1 ?? s.y) + 0.45, s.z1, 0xe6f6ff, 2.0, 0.6); fx.ring(s.x1, s.y1 ?? s.y, s.z1, 0x5fd8ff, LOB_AREA * 2, 0.5); }
           const n = hitArea(s.x1, s.z1, LOB_AREA, { weapon: 'salt', power: 2, kind: 'throw', from: { x: s.x0, z: s.z0 } });
           addSaltPatch(s.x1, s.z1, 0.95);
           ctx.events.emit('weapon:use', { weapon: 'salt', hits: n, kind: 'throw', x: s.x1, z: s.z1 });
         } else if (s.kind === 'saltgun') {
           saltBurst(s.x1, (s.y1 ?? s.y) + 0.2, s.z1, 0.9);
+          fx?.ring(s.x1, s.y1 ?? s.y, s.z1, 0x23e0c6, SALT_R * 2.4, 0.4);
           addSaltPatch(s.x1, s.z1, SALT_R);
           ctx.events.emit('weapon:use', { weapon: 'saltgun', hits: 0, kind: 'throw', x: s.x1, z: s.z1 });
         } else if (s.kind === 'gumball') {
@@ -593,6 +754,7 @@ export function create(ctx) {
         } else if (s.kind === 'bolt') {
           const e = s.end || { x: s.x, y: s.y, z: s.z };
           const r = burn(new THREE.Vector3(e.x, e.y, e.z), BURN_R, s.hit);
+          if (fx) { fx.sprite(fx.CELL.burst, e.x, e.y + 0.4, e.z, 0xff8a14, 0.8, 2.6, 0.3, false, 1, 0, 0.45); fx.ring(e.x, world.height(e.x, e.z), e.z, 0xff6a1a, BURN_R * 2, 0.5); }
           ctx.events.emit('weapon:use', { weapon: 'caramelizer', hits: r.hits, kind: 'throw', x: e.x, z: e.z });
         }
         continue;
@@ -610,6 +772,7 @@ export function create(ctx) {
     }
     pellets.count = pn;
     pellets.visible = pn > 0;
+    try { volley?.update(dt); } catch (err) { warn('volley', err); }
     if (pn) { pellets.instanceMatrix.needsUpdate = true; if (pellets.instanceColor) pellets.instanceColor.needsUpdate = true; }
 
     // knockback fallback
@@ -670,18 +833,27 @@ export function create(ctx) {
     scorchMesh.count = cn; scorchMesh.visible = cn > 0;
     if (cn) scorchMesh.instanceMatrix.needsUpdate = true;
     void t;
+    try { fx?.update(dt); } catch (err) { warn('fx', err); }
   }
   const UP = new THREE.Vector3(0, 1, 0);
 
+  // ── wave 3 ─────────────────────────────────────────────────────────────────
+  let volley = null;
+  try {
+    volley = createVolley(ctx, { group, targets, strike, hitArea, aimAt, saltPatches, fizz, warn, handPos, fx });
+  } catch (err) { warn('volley init', err); }
+
   const api = {
     group, saltPatches, scorches, shots,
+    get volley() { return volley; },
+    get fx() { return fx; },
     addSaltPatch, clearSaltPatches: () => { saltPatches.length = 0; }, isSalted,
     burn, targets, strike, hitArea,
     /** Fire the held item now (used by tests/debug). */
     use: () => tryUse(),
     get held() { return ctx.systems.inventory?.held || null; },
     help: [
-      { keys: ['Click', 'X'], text: 'swing / throw / spray / burn' },
+      { keys: ['Click', 'X'], text: 'swing / throw / fire / spray / burn' },
       { keys: ['F'], text: 'cycle held item' },
     ],
     stats() {
@@ -690,14 +862,16 @@ export function create(ctx) {
       if (scorchMesh.visible) calls++;
       if (pellets.visible) calls++;
       if (heldMesh.visible) calls++;
-      return { calls, salt: saltPatches.length, scorch: scorches.length, shots: shots.length };
+      const v = volley?.stats?.() || { calls: 0, inAir: 0 };
+      const f = fx?.stats?.() || { calls: 0 };
+      return { calls: calls + v.calls + f.calls, salt: saltPatches.length, scorch: scorches.length, shots: shots.length, volley: v, fx: f };
     },
     update,
   };
 
   ctx.events.on('world:ready', () => {
     for (const line of api.help) ctx.events.emit('ui:help', line);
-    console.warn('[weapons] click or X to use · melee/lob/shot/spray/salt-gun/caramelizer'
+    console.warn('[weapons] click or X to use · melee/lob/shot/spray/salt-gun/caramelizer + wave 3: cannon/whip/poprocks/gum/marshmallow/boomerang/water'
       + ` · salt patches cap ${SALT_MAX} · burn() → onBurn(point,r) on every system`);
   });
 

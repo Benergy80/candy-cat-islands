@@ -36,6 +36,33 @@ import { buildArrival, buildPlaza } from './architecture/arrival.js';
 import { buildStreet, buildMeowDonalds } from './architecture/mainstreet.js';
 import { buildSquare } from './architecture/square.js';
 import { buildHeights, buildGym, buildHarbor, buildWatchtower, buildYarnHill, buildCommons } from './architecture/outskirts.js';
+import { getLampPool } from '../terrain/lamppool.js';
+import { createInstanceCuller, triangleTiles } from '../terrain/instcull.js';
+
+// ── MOBILE TIER (docs/BRIEF.md Contract I) ───────────────────────────────────
+// The town is authored identically on both tiers. On ctx.state.mobile:
+//   · sign-atlas pages are halved to 1024² after they are painted, then laid
+//     side by side on ONE 2048² page (textures ≤ 2048, a quarter of the
+//     memory, the 2048 canvases released): every sign in town is one `sign0`
+//     + one `signglow0` material, so the town pools and each shell pay one
+//     sign call instead of one per page;
+//   · a shell's ironwork folds into the shell's own matte (one call per shell
+//     instead of two — a 1 m railing does not need its own sheen on a phone);
+//   · every district's bulk matte (the casting town masses) is drawn through
+//     the index runs of the 32 u tiles in view + the tiles its shadow needs
+//     (terrain/instcull.js) — same calls, a fraction of the triangles;
+//   · the six street PointLights become anchors of the shared constant LAMP
+//     POOL (terrain/lamppool.js);
+//   · the additive night spill is culled and skipped entirely by day;
+//   · shadows come from the buildings only — the town-wide ironwork pool and
+//     the small animated parts (signs, vanes, clock hands) do not cast;
+//   · interior furniture (T.roomDetail) merges into a per-room mesh that is only
+//     drawn while you can actually see into that room;
+//   · the seven string-light spans over Main Street share one part (2 draw
+//     calls instead of 14);
+//   · the town-wide pools that cast no shadow (ironwork, bulbs, lamps, glass,
+//     signs, spill) are drawn through the index runs of the 32 u tiles in view
+//     (terrain/instcull.js) — still one call each, a fraction of the triangles.
 
 export function create(ctx) {
   const { world } = ctx;
@@ -44,6 +71,8 @@ export function create(ctx) {
   const group = new THREE.Group();
   group.name = 'catArchitecture';
   ctx.scene.add(group);
+  const MOBILE = !!ctx.state?.mobile;
+  const lampPool = MOBILE ? getLampPool(ctx, 3) : null;
 
   const atlas = new SignAtlas(2048);
   const kit = new Kit();
@@ -112,6 +141,9 @@ export function create(ctx) {
       side: THREE.DoubleSide, roughness: 1, metalness: 0,
     }),
   };
+
+  // mobile: an additive decal needs no back-face pass (one draw, not two)
+  if (MOBILE) mats.spill.forceSinglePass = true;
 
   // ── the shared authoring context handed to every district ──────────────────
   const T = {
@@ -196,6 +228,11 @@ export function create(ctx) {
     // ── night lights (budget: 6) ─────────────────────────────────────────────
     light(x, y, z, color = 0xffb055, intensity = 1, dist = 26) {
       if (lights.length >= 6) return null;
+      if (lampPool) {
+        const a = lampPool.add({ x, y, z, color, dist, decay: 1.5 });
+        a.peak = intensity; lights.push(a);
+        return null;
+      }
       const L = new THREE.PointLight(color, 0, dist, 1.5);
       L.position.set(x, y, z);
       L.userData.peak = intensity;
@@ -204,6 +241,20 @@ export function create(ctx) {
 
     // ── animation ────────────────────────────────────────────────────────────
     anim(fn) { anims.push(fn); return fn; },
+    /** true on the mobile quality tier (see the header) */
+    mobile: MOBILE,
+    /**
+     * Author a room's FURNITURE. Desktop: straight into the district kit, as
+     * always. Mobile: the matte masses go to their own 'int_<id>' bucket, which
+     * the update loop only draws while that room can be seen into (you are
+     * inside, a door is open, or the shell is faded/ghosted).
+     */
+    roomDetail(id, fn) {
+      if (!MOBILE) return fn();
+      const prev = kit.d;
+      kit.at('int_' + id);
+      try { return fn(); } finally { kit.at(prev); }
+    },
     /** A standalone merged object that can be moved/rotated each frame.
      *  Geometry is authored now, merged after the sign atlas is finalised. */
     part(build, name = 'part') {
@@ -294,6 +345,7 @@ export function create(ctx) {
       const p = new Part();
       p.at(id);
       p.overflow = kit;
+      if (MOBILE) p.collapse = { metal: 'matte' };
       const holder = new THREE.Group();
       holder.name = 'cat_shell_' + id;     // camera.js: cat_*_ is structural, never auto-faded
       group.add(holder);
@@ -422,6 +474,13 @@ export function create(ctx) {
 
   // sign materials, one pair per atlas page (pages are allocated lazily)
   atlas.commit();
+  if (MOBILE) {
+    atlas.halve(4);
+    const grid = atlas.combine();          // all pages → one (see the header)
+    kit.remapPages(grid);
+    for (const sh of shells) sh.p.remapPages(grid);
+    for (const { p } of parts) p.remapPages(grid);
+  }
   atlas.pages.forEach((p, i) => {
     mats['sign' + i] = new THREE.MeshStandardMaterial({ map: p.tex, vertexColors: true, roughness: 0.86, metalness: 0.0 });
     mats['signglow' + i] = new THREE.MeshStandardMaterial({ map: p.tex, emissiveMap: p.tex, emissive: 0xffffff, emissiveIntensity: 0.0, vertexColors: true, roughness: 0.8, metalness: 0.0 });
@@ -451,6 +510,48 @@ export function create(ctx) {
     // `noShadow` parts are hair-thin things (the string-light cords) whose
     // shadow is pure aliasing across a lit street.
     if (holder.userData.noShadow) for (const m of r.meshes) m.castShadow = false;
+    // mobile: of the small moving parts only the door leaves (building) cast
+    if (MOBILE && !/^cat_door_/.test(holder.name)) for (const m of r.meshes) m.castShadow = false;
+  }
+
+  // ── mobile packaging (see the header) ─────────────────────────────────────
+  const spillMeshes = [];
+  const roomDetail = [];      // { room, meshes, shown }
+  if (MOBILE) {
+    for (const m of out.meshes) {
+      if (m.material === mats.metal) m.castShadow = false;
+    }
+    group.traverse((o) => {
+      if (o.isMesh && o.material === mats.spill) { o.frustumCulled = true; spillMeshes.push(o); }
+    });
+    for (const r of rooms) {
+      const list = out.meshes.filter((m) => m.name === 'cat_int_' + r.id + '_matte');
+      if (!list.length) continue;
+      for (const m of list) m.visible = false;
+      roomDetail.push({ room: r, meshes: list, shown: false });
+    }
+    for (const sh of shells) sh.meshMats = sh.meshes.map((m) => m.material);
+    const culler = createInstanceCuller(ctx);
+    for (const m of out.meshes) {
+      // (not the spill: its visibility is the day/night switch above; not the
+      // room furniture: roomDetail owns its visibility)
+      if (m.material === mats.spill || /^cat_int_/.test(m.name)) continue;
+      const pool = /^cat_town_/.test(m.name) && !m.castShadow;   // ironwork, bulbs, lamps, glass, signs
+      const mass = m.material === mats.matte;                     // a district's casting bulk
+      if (!pool && !mass) continue;
+      try { culler.addIndexed(m, triangleTiles(m.geometry, 32)); } catch (e) { console.warn('[cat/arch] tile cull skipped', m.name, e.message); }
+    }
+  }
+  /** can the camera see into this room right now? (mobile only) */
+  function roomOpen(r) {
+    if (r.inside || r.fade > 0.001) return true;
+    for (const d of r.doors) if (d.open || d.t > 0.01) return true;
+    const sh = r.shell;
+    if (sh && sh.meshMats) for (let i = 0; i < sh.meshes.length; i++) {
+      const m = sh.meshes[i];
+      if (!m.visible || m.material !== sh.meshMats[i]) return true;   // ghosted or culled by the camera
+    }
+    return false;
   }
 
   // ── walkable pier deck ─────────────────────────────────────────────────────
@@ -589,7 +690,17 @@ export function create(ctx) {
         // the fadeable shells own private copies of whatever they use: keep the
         // night glow on those in step with the town-wide originals
         for (const sh of shells) for (const k in sh.clones) if (mats[k].emissiveIntensity !== undefined) sh.clones[k].emissiveIntensity = mats[k].emissiveIntensity;
-        for (const L of lights) L.intensity = L.userData.peak * ev * 34;
+        if (lampPool) { for (const a of lights) a.level = a.peak * ev * 34; }
+        else for (const L of lights) L.intensity = L.userData.peak * ev * 34;
+        // mobile: additive spill × opacity 0 is invisible by day — skip the draw
+        for (let i = 0; i < spillMeshes.length; i++) spillMeshes[i].visible = ev > 0.004;
+      }
+      if (lampPool) lampPool.update(dt);
+      // mobile: interior furniture only while the room can be seen into
+      // (edge-triggered, so the camera's own per-mesh culling is never fought)
+      for (let i = 0; i < roomDetail.length; i++) {
+        const R = roomDetail[i], want = roomOpen(R.room);
+        if (want !== R.shown) { R.shown = want; for (const m of R.meshes) m.visible = want; }
       }
       const t = c.state.elapsed;
       for (let i = 0; i < anims.length; i++) anims[i](t, dt, dl, c, ev);

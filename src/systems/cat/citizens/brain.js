@@ -5,12 +5,23 @@
 // 14:00 nap wave, 18:00 promenade, night watch) → role SCHEDULE → act handler
 // (post / wander / patrol / promenade / sprint / kitten / shadow / watch) →
 // pose targets → damped rig application.
+//
+// WAVE 3 (Contract A — ground & collision): the act handlers only PROPOSE a
+// move. `S.settle(c, dt, plan)` (citizens.js) then runs the move through the
+// player's shared ground core — pushOut against every SOLID collider, feet on
+// groundInfo().h (terrain, deck, or the TOP of a low prop) — before the rig is
+// posed, so what is drawn is always the resolved position. A push reports back
+// as `c.bumped` (+ the push normal c.bnx/c.bnz) and the planners here treat it
+// as "turn around": wander re-picks a target away from the obstacle, patrols
+// swap lanes and then reverse, a walk to a mark that stays blocked gives up
+// and idles where it stands.
 // ─────────────────────────────────────────────────────────────────────────────
 import { damp, lerp, clamp, smoothstep } from '../../../core/util.js';
 import { TAIL_REST } from './rig.js';
 import { applyTiger } from './tiger.js';
 
 const TAU = Math.PI * 2;
+const TIGER_PS = 3.6;         // a tiger walks round the visitor inside this (centre to centre)
 const wrapPi = (a) => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
 const dampAngle = (a, b, l, dt) => a + wrapPi(b - a) * (1 - Math.exp(-l * dt));
 
@@ -71,6 +82,12 @@ export const POSES = {
           tailCurl: 0.72, tailSwish: 0.22, armFwdL: -0.1, armFwdR: -0.1 },
   dizzy: { rootDY: -0.07, roll: 0.1, headRoll: 0.32, earBack: 0.55, eyeOpen: 0.4,
            armFwdL: -0.5, armOutL: 0.7, armFwdR: -0.5, armOutR: 0.7, tailSwish: 0.7, tailLift: -0.4 },
+  // wave 3 weapons (Contract C): the licorice whip STAGGERS, bubblegum STICKS
+  stagger: { pitch: -0.14, roll: 0.2, headRoll: -0.3, headPitch: -0.12, earBack: 0.85, eyeOpen: 1.12,
+             armFwdL: -0.35, armOutL: 1.05, armFwdR: -0.35, armOutR: 1.05, tailLift: 0.35, tailCurl: 0.08, tailSwish: 2.2 },
+  stuck: { pitch: 0.22, rootDY: -0.05, earBack: 0.8, eyeOpen: 1.12, headPitch: 0.18,
+           armFwdL: -1.25, armOutL: 0.55, armFwdR: -1.25, armOutR: 0.55, legFwd: 0.2,
+           tailLift: -0.2, tailCurl: 0.1, tailSwish: 2.6 },
 };
 
 // ── world helpers ────────────────────────────────────────────────────────────
@@ -113,7 +130,7 @@ export const SCHEDULES = {
     return post(c, 'stand', c.face);
   },
   officer(c, h, ctx, S) {
-    if (h >= 19.5 || h < 5.5) return { act: 'post', x: 44, z: 24, pose: 'sit', face: 3.9, speed: 2.3 };
+    if (h >= 19.5 || h < 5.5) { const m = mark(S, 44, 24); return { act: 'post', x: m.x, z: m.z, pose: 'sit', face: 3.9, speed: 2.3 }; }
     return { act: 'patrol', path: 'cat_main', t0: 0.02, t1: 0.42, speed: 2.0, pose: 'stand' };
   },
   jog(c, h) {
@@ -139,8 +156,8 @@ export const SCHEDULES = {
     const slot = Math.floor(h * 1.5 + c.seed * 7) % 3;
     return post(c, slot === 0 ? 'lift' : slot === 1 ? 'flex' : 'spot', c.face);
   },
-  keeper(c, h) {
-    if (h >= 18.3 || h < 6.2) return { act: 'post', x: 216.5, z: 29.5, pose: 'stand', face: 1.1, speed: 2.1 };
+  keeper(c, h, ctx, S) {
+    if (h >= 18.3 || h < 6.2) { const m = mark(S, 216.5, 29.5); return { act: 'post', x: m.x, z: m.z, pose: 'stand', face: 1.1, speed: 2.1 }; }
     return post(c, h % 3 < 1.2 ? 'sit' : 'stand', c.face);
   },
   beach(c, h) {
@@ -164,21 +181,44 @@ export const SCHEDULES = {
 };
 
 const post = (c, pose, face, speed) => ({ act: 'post', x: c.home[0], z: c.home[1], pose, face, speed: speed ?? 1.8 });
+/** A hard-coded schedule spot, pushed clear of whatever was built on it (S.mark
+ *  caches citizens.js's resolveSpot); without S the authored spot is used. */
+const _mk = { x: 0, z: 0 };
+function mark(S, x, z) {
+  if (S && typeof S.mark === 'function') return S.mark(x, z);
+  _mk.x = x; _mk.z = z; return _mk;
+}
 
 /**
  * What a cat does for the next few seconds after somebody sprays / bats / salts
  * it (see catCitizens.hit). Overrides staging, schedules and beats.
  */
 function hitPlan(c, S) {
-  if (c.fxKind === 'stun') return { act: 'post', x: c.x, z: c.z, pose: 'dizzy', face: c.faceDir };
-  if (c.fxKind === 'sulk') return { act: 'post', x: c.x, z: c.z, pose: 'sulk', face: c.faceDir };
-  if (c.fxKind === 'hiss') {
-    const a = Math.atan2(c.fxX - c.x, c.fxZ - c.z);
-    return { act: 'post', x: c.x, z: c.z, pose: 'hiss', face: a };
+  // `hold`: react ON THE SPOT, wherever a knockback carries you — the spot is
+  // not a mark to walk back to (a bonked cat used to stroll back to where it
+  // was standing when the marshmallow landed)
+  switch (c.fxKind) {
+    case 'stun': case 'spin': case 'bonk':
+      return { act: 'post', x: c.x, z: c.z, pose: 'dizzy', face: c.faceDir, hold: 1 };
+    case 'stagger': return { act: 'post', x: c.x, z: c.z, pose: 'stagger', face: c.faceDir, hold: 1 };
+    // gum: feet glued to a pink puddle
+    case 'stuck': return { act: 'post', x: c.x, z: c.z, pose: 'stuck', face: c.faceDir, hold: 1 };
+    case 'sulk': return { act: 'post', x: c.x, z: c.z, pose: 'sulk', face: c.faceDir, hold: 1 };
+    case 'hiss': {
+      const a = Math.atan2(c.fxX - c.x, c.fxZ - c.z);
+      return { act: 'post', x: c.x, z: c.z, pose: 'hiss', face: a, hold: 1 };
+    }
+    case 'panic': {
+      // pop rocks: fizzing scatter — away from the pop, zig-zagging, fast
+      const a = Math.atan2(c.x - c.fxX, c.z - c.fxZ) + Math.sin(S.elapsed * 3.3 + c.ph * 5) * 1.15;
+      return { act: 'post', x: c.x + Math.sin(a) * 6, z: c.z + Math.cos(a) * 6, pose: 'flee', speed: 5.4 };
+    }
+    default: {
+      // flee / scared (invincible visitor): straight away from the source, fast, tail down
+      const a = Math.atan2(c.x - c.fxX, c.z - c.fxZ);
+      return { act: 'post', x: c.x + Math.sin(a) * 9, z: c.z + Math.cos(a) * 9, pose: 'flee', speed: c.fxKind === 'scared' ? 5.4 : 4.7 };
+    }
   }
-  // flee: straight away from whoever did it, fast, tail down
-  const a = Math.atan2(c.x - c.fxX, c.z - c.fxZ);
-  return { act: 'post', x: c.x + Math.sin(a) * 9, z: c.z + Math.cos(a) * 9, pose: 'flee', speed: 4.7 };
 }
 
 /** Island-wide beats that override a cat's normal day. */
@@ -202,7 +242,7 @@ export function globalBeat(c, h, ctx, S) {
  * straight through it. Boxes are reduced to their nearest surface point here.
  */
 function solidPush(o, x, z, out) {
-  if (o.solid === false) return 0;
+  if (o.solid === false) return 1e9;                   // an open door: not there at all
   if (o.box) {
     const dx = x - o.x, dz = z - o.z;
     const cs = Math.cos(o.rot || 0), sn = Math.sin(o.rot || 0);
@@ -226,29 +266,68 @@ function solidPush(o, x, z, out) {
   return d - o.r;
 }
 const _push = { x: 0, z: 0 };
+const _st = { x: 0, z: 0 };
 
-function step(c, tx, tz, speed, dt, ctx) {
+function step(c, tx, tz, speed, dt, ctx, S) {
   const dx = tx - c.x, dz = tz - c.z;
   const d = Math.hypot(dx, dz);
   if (d < 0.28) { c.moving = false; return true; }
   let ux = dx / d, uz = dz / d;
-  const cols = ctx.colliders;
-  // Boxes are only steered around by TIGERS. A house cat's daytime marks are
-  // authored right up against counters, shopfronts and decks, and teaching the
-  // day brain about walls would evict half the cast from its own shop. A tiger
-  // has no marks, prowls everywhere, and was walking through awnings and
-  // sprawling through the harbour railing.
-  const boxes = c.tigerK > 0.5;
-  const pad = boxes ? 1.25 : 0.8;
+  // Only the solids near this cat (citizens.js keeps a coarse hash of
+  // ctx.colliders with LOW props left out — those are walked ON, not around).
+  // Scanning all ~3,800 colliders per walking cat per frame was most of the
+  // brain's cost.
+  const cols = S && S.solidsNear ? S.solidsNear(c.x, c.z) : ctx.colliders;
+  const tiger = c.tigerK > 0.5;
+  // A tiger has no marks, prowls everywhere and gets a wide berth round
+  // everything. A house cat's marks are authored right up against counters,
+  // shopfronts and decks, so walls only ever DEFLECT it (the into-the-wall part
+  // of its heading is removed) — they never push it away from where it is
+  // going. Near the goal avoidance fades out: the hard pushOut in S.settle is
+  // what keeps bodies out of props; steering only keeps them from grinding.
+  const padC = tiger ? 1.25 : 0.8;
+  const near = Math.min(1, d / 1.6);
   if (cols) for (let i = 0; i < cols.length; i++) {
     const o = cols[i];
-    if (o.box && !boxes) continue;
+    if (!S?.solidsNear && S?.isLow && S.isLow(o)) continue;
     const gap = solidPush(o, c.x, c.z, _push);
-    if (gap < pad) { const w = (pad - Math.max(gap, 0)) / pad * 2.2; ux += _push.x * w; uz += _push.z * w; }
+    if (o.box && !tiger) {
+      const pad = 0.5 + (c.rad || 0.3);
+      if (gap < pad) {
+        const dn = ux * _push.x + uz * _push.z;
+        if (dn < 0) { const k = Math.min(1, (pad - Math.max(gap, 0)) / pad * 1.7); ux -= dn * _push.x * k; uz -= dn * _push.z * k; }
+      }
+      continue;
+    }
+    if (gap < padC) { const w = (padC - Math.max(gap, 0)) / padC * 2.2 * near; ux += _push.x * w; uz += _push.z * w; }
   }
-  // personal space from the player (a tiger has no such manners)
+  // one tiger ahead in its lane (a narrow passage, a pack on the move): step
+  // aside early — head-on, both keep to their right — instead of meeting nose
+  // to nose and shoving until the watchdog sits one of them down
+  if (tiger && S && S.tigerSteer) {
+    const l0 = Math.hypot(ux, uz) || 1; _st.x = ux / l0; _st.z = uz / l0;
+    S.tigerSteer(c, _st); ux = _st.x; uz = _st.z;
+  }
+  // personal space from the player. A house cat edges away inside 1.5 u. A
+  // tiger (unless it is springing at him) WALKS ROUND him inside TIGER_PS:
+  // the part of its heading that points at him turns into a sidestep, on the
+  // side its goal lies — so a prowler bound for the far end of Main Street
+  // passes him at arm's length instead of shouldering through (or, with the
+  // hard exclusion in citizens.js, walking in place against it).
   const p = ctx.systems.player?.position;
-  if (p && !(c.tigerK > 0.5)) { const ox = c.x - p.x, oz = c.z - p.z; const od = Math.hypot(ox, oz); if (od < 1.5 && od > 1e-3) { ux += ox / od * 1.4; uz += oz / od * 1.4; } }
+  if (p && !tiger) { const ox = c.x - p.x, oz = c.z - p.z; const od = Math.hypot(ox, oz); if (od < 1.5 && od > 1e-3) { ux += ox / od * 1.4; uz += oz / od * 1.4; } }
+  else if (p && tiger && !(c.plan && (c.plan.spring || c.plan.catch)) && !c.carryTo) {
+    const ox = c.x - p.x, oz = c.z - p.z, od = Math.hypot(ox, oz);
+    if (od < TIGER_PS && od > 1e-3) {
+      const nx = ox / od, nz = oz / od, dn = ux * nx + uz * nz;
+      if (dn < 0) {
+        let tx = -nz, tz = nx; const along = tx * ux + tz * uz;
+        if (along < 0 || (Math.abs(along) < 0.05 && c.seed < 0.5)) { tx = -tx; tz = -tz; }
+        ux += -dn * nx + tx * -dn; uz += -dn * nz + tz * -dn;
+      }
+      if (od < 2.8) { const w = (2.8 - od) / 2.8 * 0.8; ux += nx * w; uz += nz * w; }
+    }
+  }
   const l = Math.hypot(ux, uz) || 1; ux /= l; uz /= l;
   const s = Math.min(speed * dt, d);
   const nx = c.x + ux * s, nz = c.z + uz * s;
@@ -259,6 +338,10 @@ function step(c, tx, tz, speed, dt, ctx) {
   c.gaitSpeed = speed;
   return false;
 }
+
+/** True once this cat has been blocked long enough on its way to (x,z) to give
+ *  up and idle where it stands (S.settle counts the blocked time). */
+const gaveUp = (c, x, z) => c.giveX === x && c.giveZ === z;
 
 // ── per-cat update ───────────────────────────────────────────────────────────
 export function updateCat(c, dt, ctx, S) {
@@ -275,7 +358,7 @@ export function updateCat(c, dt, ctx, S) {
     if (!plan && c.fxUntil > S.elapsed) plan = hitPlan(c, S);
     if (!plan && c.talkUntil > S.elapsed) plan = { act: 'talk', pose: c.talkPose || 'stand' };
     // authored social staging wins: pairs, queues, the gym crew, the night watch
-    if (!plan && S.stage) plan = S.stage(c, h);
+    if (!plan && S.stage) plan = S.stage(c, h, S.elapsed);
     if (!plan) plan = globalBeat(c, h, ctx, S);
     if (!plan && c.tags?.curious && S.playerNear(c, 22) && h > 7 && h < 20) plan = { act: 'shadow', pose: 'stand', speed: 2.6 };
     if (!plan) plan = (SCHEDULES[c.sched] || SCHEDULES.wander)(c, h, ctx, S);
@@ -290,6 +373,10 @@ export function updateCat(c, dt, ctx, S) {
   c.lookKey = plan.look || null;
 
   // 2. act --------------------------------------------------------------------
+  // (every move below is only a proposal: S.settle resolves it against the
+  //  solids and puts the feet on the ground before the rig is posed)
+  const bump = c.bumped && S.elapsed >= (c.bumpCool || 0);
+  if (bump) c.bumpCool = S.elapsed + 1.1;
   switch (plan.act) {
     case 'talk': {
       const p = ctx.systems.player.position;
@@ -297,14 +384,19 @@ export function updateCat(c, dt, ctx, S) {
       break;
     }
     case 'post': {
+      if (plan.hold) { if (plan.face !== undefined) c.faceDir = plan.face; break; }
+      // blocked for too long on the way here: stop pushing, idle where we are
+      if (gaveUp(c, plan.x, plan.z)) { if (plan.face !== undefined) c.faceDir = plan.face; break; }
       // Sunbathers claim a real rooftop / sill / bench and staged cats claim an
-      // authored mark: once close enough they glide onto it instead of being
-      // shoved off by the prop's own collider.
+      // authored mark: once close enough they glide onto it (S.settle lets a
+      // cat bound for a raised mark climb onto the prop it touches).
       if (plan.perch || plan.glide) {
         const d = Math.hypot(plan.x - c.x, plan.z - c.z);
         if (d < 5.5) {
-          const k = Math.min(1, dt * 3.0);
-          c.x += (plan.x - c.x) * k; c.z += (plan.z - c.z) * k;
+          // (arrive EXACTLY: an endless asymptotic creep would count as a move
+          //  every frame and re-run the collision resolve for nothing)
+          if (d < 0.03) { c.x = plan.x; c.z = plan.z; }
+          else { const k = Math.min(1, dt * 3.0); c.x += (plan.x - c.x) * k; c.z += (plan.z - c.z) * k; }
           c.onPerch = !!plan.perch && d < 1.4;
           if (d > 0.45) { c.moving = true; pose = 'stand'; c.faceDir = Math.atan2(plan.x - c.x, plan.z - c.z); }
           else if (plan.face !== undefined) c.faceDir = plan.face;
@@ -312,12 +404,20 @@ export function updateCat(c, dt, ctx, S) {
         }
       }
       c.onPerch = false;
-      const done = step(c, plan.x, plan.z, plan.speed ?? 1.8, dt, ctx);
+      const done = step(c, plan.x, plan.z, plan.speed ?? 1.8, dt, ctx, S);
       if (done) { if (plan.face !== undefined) c.faceDir = plan.face; }
-      else if (!(c.tigerK > 0.5)) pose = 'stand';   // prowl/stalk/rush ARE walks
+      else if (!(c.tigerK > 0.5) && pose !== 'flee') pose = 'stand';   // prowl/stalk/rush ARE walks; so is running away
       break;
     }
     case 'wander': {
+      // bumped into something: turn around — a fresh target on the far side
+      // of the push, so the cat walks AWAY from the prop it just met
+      if (bump && !c.wIdle) {
+        const a = Math.atan2(c.bnx || 0, c.bnz || 1) + (S.rand() - 0.5) * 1.7;
+        const r = 2 + S.rand() * 3;
+        c.wx = c.x + Math.sin(a) * r; c.wz = c.z + Math.cos(a) * r;
+        c.wanderT = 2 + S.rand() * 3;
+      }
       if (!c.wanderT || c.wanderT <= 0) {
         c.wanderT = 3 + S.rand() * 6;
         const a = S.rand() * TAU, r = S.rand() * (plan.r || 6);
@@ -326,19 +426,25 @@ export function updateCat(c, dt, ctx, S) {
       }
       c.wanderT -= dt;
       if (c.wIdle) { pose = c.idlePose; }
-      else { const done = step(c, c.wx, c.wz, plan.speed ?? 1.5, dt, ctx); if (!done) pose = 'stand'; else pose = c.idlePose; }
+      else { const done = step(c, c.wx, c.wz, plan.speed ?? 1.5, dt, ctx, S); if (!done) pose = 'stand'; else pose = c.idlePose; }
       break;
     }
     case 'patrol': case 'promenade': {
       const path = pathById(world, plan.path || 'cat_main');
       const t0 = plan.t0 ?? 0.2, t1 = plan.t1 ?? 0.8;
       if (c.pathT === undefined || c.pathId !== (plan.path || 'cat_main')) { c.pathId = plan.path || 'cat_main'; c.pathT = t0 + (t1 - t0) * c.seed; c.pathDir = c.seed > 0.5 ? 1 : -1; }
+      // bumped: first try the other side of the street, and if that is
+      // blocked too inside a few seconds, turn round and walk back
+      if (bump) {
+        if (S.elapsed - (c.laneSwapAt ?? -99) < 3.5) { c.pathDir = -(c.pathDir || 1); c.laneSwapAt = -99; }
+        else { c.lane = c.lane > 0 ? -0.9 : 0.9; c.laneSwapAt = S.elapsed; }
+      }
       const sp = plan.speed ?? 1.6;
       c.pathT += c.pathDir * sp * dt * 0.0045;
       if (c.pathT > t1) { c.pathT = t1; c.pathDir = -1; }
       if (c.pathT < t0) { c.pathT = t0; c.pathDir = 1; }
       const q = ptOn(world, path, c.pathT);
-      step(c, q.x + c.lane, q.z + c.lane * 0.4, sp * 1.4, dt, ctx);
+      step(c, q.x + c.lane, q.z + c.lane * 0.4, sp * 1.4, dt, ctx, S);
       if (sp > 3.4) pose = 'stand';
       break;
     }
@@ -350,7 +456,7 @@ export function updateCat(c, dt, ctx, S) {
       const R = 2.8 + (c.kitIdx % 2) * 1.5;
       const a = S.elapsed * 1.15 - (c.kitIdx || 0) * 0.62;
       const tx = hub.x + Math.cos(a) * R, tz = hub.z + Math.sin(a) * R;
-      step(c, tx, tz, plan.speed ?? 3.4, dt, ctx);
+      step(c, tx, tz, plan.speed ?? 3.4, dt, ctx, S);
       if (c.moving) pose = 'chase';
       break;
     }
@@ -360,18 +466,24 @@ export function updateCat(c, dt, ctx, S) {
       const seen = Math.cos(wrapPi(toCat - (ctx.systems.player.facing || 0))) > 0.55;
       const d = Math.hypot(c.x - p.x, c.z - p.z);
       if (seen) { pose = c.seed < 0.5 ? 'groom' : 'sit'; c.faceDir = toCat + Math.PI * 0.55; c.busted = 1; }
-      else if (d > 6.5) { step(c, p.x, p.z, plan.speed ?? 2.6, dt, ctx); c.busted = 0; }
+      else if (d > 6.5) { step(c, p.x, p.z, plan.speed ?? 2.6, dt, ctx, S); c.busted = 0; }
       else { c.faceDir = Math.atan2(p.x - c.x, p.z - c.z); pose = 'stand'; }
       break;
     }
     case 'watch': {
       const p = ctx.systems.player?.position;
-      const done = step(c, c.home[0], c.home[1], 1.9, dt, ctx);
+      const done = gaveUp(c, c.home[0], c.home[1]) || step(c, c.home[0], c.home[1], 1.9, dt, ctx, S);
       if (done && p) c.faceDir = Math.atan2(p.x - c.x, p.z - c.z);
       if (!done) pose = 'stand';
       break;
     }
   }
+
+  // boomerang: spun on the spot, winding down (animate skips the yaw damping)
+  c.spinning = c.fxKind === 'spin' && c.fxUntil > S.elapsed;
+
+  // 3. settle: resolve against solids, feet on the ground (citizens.js) ------
+  if (S.settle) S.settle(c, dt, plan);
 
   // idle flavour: swap in sit/groom/stretch now and then when just standing
   if (pose === 'stand' && !c.moving) {
@@ -432,6 +544,8 @@ function animate(c, dt, ctx, S) {
   if (c.pose === 'dizzy') { t.headRoll = 0.30 * Math.sin(el * 7.0 + c.ph); t.headYaw = 0.26 * Math.sin(el * 4.4 + c.ph); t.roll = 0.10 * Math.sin(el * 5.0); }
   if (c.pose === 'flee') { t.headYaw = Math.sin(el * 2.6 + c.ph) * 0.34; t.tailSwish = 0.5 + Math.abs(Math.sin(el * 4)) * 0.3; }
   if (c.pose === 'hiss') { const s = Math.abs(Math.sin(el * 9 + c.ph)); t.sx = 1.12 + s * 0.06; t.headPitch = -0.14 - s * 0.06; }
+  if (c.pose === 'stagger') { t.roll = 0.24 * Math.sin(el * 6.5 + c.ph); t.headRoll = -0.3 * Math.sin(el * 6.5 + c.ph + 0.8); t.pitch = -0.14 + 0.08 * Math.sin(el * 4.1); }
+  if (c.pose === 'stuck') { const s = Math.sin(el * 11 + c.ph); t.roll = 0.10 * s; t.pitch = 0.22 + 0.06 * Math.abs(s); t.armFwdL = -1.25 + s * 0.35; t.armFwdR = -1.25 - s * 0.35; }
 
   // breathing
   const breath = Math.sin(el * (c.pose === 'sleep' || c.pose === 'loaf' ? 1.1 : 2.0) + c.ph);
@@ -476,8 +590,12 @@ function animate(c, dt, ctx, S) {
 
   // ── apply ──
   const groundY = c.y;
-  const bob = c.moving ? Math.abs(Math.sin(c.gait)) * 0.045 : 0;
-  c.yaw = dampAngle(c.yaw, c.faceDir, c.moving ? 7 : 5, dt);
+  const bob = (c.moving ? Math.abs(Math.sin(c.gait)) * 0.045 : 0) + (c.air || 0);
+  // (yawLock: S.settle found that the turn it was about to make would put a
+  //  tiger's head or haunches into a wall, and chose this heading instead)
+  if (c.yawLock !== undefined) { c.yaw = wrapPi(c.yawLock); c.yawLock = undefined; if (c.spinning) c.faceDir = c.yaw; }
+  else if (c.spinning) { c.yaw = wrapPi(c.yaw + dt * (6 + 14 * clamp((c.fxUntil - el) / 1.4, 0, 1))); c.faceDir = c.yaw; }
+  else c.yaw = dampAngle(c.yaw, c.faceDir, c.moving ? 7 : 5, dt);
   r.root.rotation.set(a.pitch, c.yaw, a.roll, 'YXZ');
   r.root.position.set(c.x + Math.sin(c.yaw) * a.offZ, groundY + a.rootDY + bob, c.z + Math.cos(c.yaw) * a.offZ);
 

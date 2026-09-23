@@ -29,6 +29,26 @@
 //   Water: the sea AND the Chocolate Lake (world.LAKE, surface 2.0) are both
 //     wading surfaces — groundAt() reports {water, limit, floor} per point, so
 //     nobody walks into the lake bowl and stands in chocolate up to the hat.
+// Wave 3 (Contract A — ground & collision core, player/ground.js):
+//   groundInfo(x, z, out?) → { h, deck, water, limit, floor, prop, top, base }
+//     h = where FEET rest: terrain | walkable deck | the TOP of a LOW PROP
+//     (a collider whose height above the ground is ≤ 1.6), ramped over the
+//     outer 0.3 u. prop = the collider stood on or null. Pass `out` in hot
+//     loops (zero allocation); without it a fresh object comes back.
+//   groundHeight(x, z) → number — the same h, no object at all.
+//   pushOut(x, z, r = 0.45, out?) → { x, z, hit } — circle vs every SOLID
+//     collider (circles + oriented boxes) through a spatial hash rebuilt when
+//     ctx.colliders changes. hit = "turn around". LOW props never block NPCs.
+//   speedBoost — multiplies walk/run speed (default 1; powerups sets 1.25).
+//   colliderAudit — the counts printed once at world:ready (see ground.js),
+//     plus .calibration: what player/calibrate.js did to each low prop
+//     (lowered / raised to the drawn surface, kept SOLID because drawn
+//     geometry would be inside a walker, ghosts retired) and a centre-ray
+//     audit of standing tops vs drawn surfaces. ?caltrace keeps the per-point
+//     crossings for debugging.
+//   The visitor steps onto low props: ≤ 0.45 u just by walking (ramped), taller
+//   ones with an automatic hop when he walks INTO them; he falls off ledges
+//   with gravity instead of floating down; walls/trunks/houses never let him in.
 // Also here: a per-foot ground clamp (no shoe ever sinks into a step or deck),
 //   a soft contact shadow + wide-zoom marker (player/decal.js), and one dim
 //   warm PointLight riding the visitor after dark.
@@ -41,6 +61,8 @@ import * as THREE from 'three';
 import { damp, clamp } from '../core/util.js';
 import { createVisitor } from './player/visitor.js';
 import { createGroundDecals } from './player/decal.js';
+import { createGroundCore, LOW_MAX } from './player/ground.js';
+import { calibrateLowTops } from './player/calibrate.js';
 
 const RADIUS = 0.36;          // collision radius
 const SEA_WADE = 0.85;        // deepest SEA water we will wade into; past it, blocked
@@ -50,10 +72,16 @@ const SEA_WADE = 0.85;        // deepest SEA water we will wade into; past it, b
 // level is LAKE.surface and the wading limit is shin-deep: the lake is opaque,
 // so anything past that is a body double for drowning.
 const LAKE_WADE = 0.32;
-const DECK_LIFT = 0.035;      // clearance so shoes never sink into pier planks / steps
+const DECK_LIFT = 0.035;      // clearance so shoes never sink into pier planks, steps or a prop top
 const ACCEL = 17;             // damping lambda toward target velocity
 const DECEL = 11;
 const TURN_RATE = 13;
+// ── ground core (wave 3) ─────────────────────────────────────────────────────
+const FOOT_PAD = 0.22;        // shoe reach past the body centre: he stands on a ledge until his heel leaves it
+const STEP_FREE = 0.45;       // props up to this tall are walked onto; taller ones are hopped onto
+const HOP_MARGIN = 0.2;       // the auto-hop clears the top by this much, then settles onto it
+const HOP_STEP = 0.15;        // mid-hop the ledge stays solid until the feet are this close to its top
+const MAX_SUBSTEP = 0.3;      // longest collision step (no tunnelling through a 0.26-u fence at a sprint)
 
 // ── moves ────────────────────────────────────────────────────────────────────
 const GRAV = 17;
@@ -125,6 +153,8 @@ export function create(ctx) {
   let slideT = 0, slideDir = { x: 0, z: 1 }, slideDust = 0;
   let rollT = 0, rollDir = { x: 0, z: 1 }, iframe = 0;
   let stomping = false;
+  let autoHop = false;                          // airborne because we hopped up onto a low prop
+  let lastHopRise = 0;
   let pose = 'stand', poseK = 0;
   let action = null;                            // { kind, t, dur, resolve }
 
@@ -135,89 +165,32 @@ export function create(ctx) {
   const burst = (o) => { const f = ctx.systems.particles?.burst; if (typeof f === 'function') { try { f.call(ctx.systems.particles, o); } catch { /* dust is optional */ } } };
   const puff = (o) => { if (!hasListeners(o.ev)) burst(o.p); ctx.events.emit(o.ev, o.d); };
 
-  /**
-   * Terrain height OR the highest walkable deck under (x,z), plus WHICH water is
-   * over that point:
-   *   water  — the surface level of the water here (0 = the sea, LAKE.surface
-   *            inside the Chocolate Lake basin). NaN-free, always a number.
-   *   limit  — how deep we are willing to wade in that water.
-   *   floor  — the lowest y the feet may stand at here (ground, or the wading
-   *            floor when the ground under the water is below it).
-   */
-  const LAKE = world.LAKE;
-  function groundAt(x, z) {
-    let h = world.height(x, z); let deck = false;
-    const ws = ctx.walkables;
-    for (let i = 0; i < ws.length; i++) {
-      const t = ws[i] && ws[i].test && ws[i].test(x, z);
-      if (typeof t === 'number' && Number.isFinite(t) && t > h - 0.05) { h = Math.max(h, t); deck = true; }
-    }
-    let water = 0, limit = SEA_WADE;
-    if (!deck && LAKE) {
-      const dx = x - LAKE.x, dz = z - LAKE.z;
-      if (dx * dx + dz * dz < (LAKE.r + 8) * (LAKE.r + 8) && h < LAKE.surface) { water = LAKE.surface; limit = LAKE_WADE; }
-    }
-    return { h, deck, water, limit, floor: deck ? h : Math.max(h, water - limit) };
-  }
+  // ── ground & collision core (player/ground.js): terrain, decks, water, low
+  // props to stand on, and a spatial hash over ctx.colliders for the solids.
+  const core = createGroundCore(ctx, world, { seaWade: SEA_WADE, lakeWade: LAKE_WADE });
+  const _g = {}, _gT = {}, _gF = {};
+  /** Ground under the VISITOR at (x,z): he may stand on tall tops he has
+   *  already cleared, and his shoe reach (FOOT_PAD) keeps him on a ledge. */
+  let stepFree = STEP_FREE;     // HOP_STEP while an auto-hop is rising: no shin through the bench edge
+  const groundAt = (x, z, out = _gT) => core.groundAt(x, z, position.y, FOOT_PAD, out, stepFree);
   /** Standing here would put the water over `limit`: the shore says no. */
   const passable = (x, z) => { const g = groundAt(x, z); return g.deck || g.water - g.h <= g.limit; };
-
-  /**
-   * Push the body out of every solid it overlaps, then let it slide along the
-   * surface. Two collider shapes, both from ctx.colliders:
-   *   circle { x, z, r, h? }                       trunks, posts, rocks, cats
-   *   box    { x, z, w, d, rot, h?, box:true }     walls, crates, long benches
-   * A collider that publishes `h` is only solid while the feet are below it, so
-   * a fence can be jumped and a cat house cannot. Writes into `out`.
-   */
+  const _res = { x: 0, z: 0, hit: false, low: null, lowTop: 0, lowNx: 0, lowNz: 0 };
+  let bumpLow = null, bumpTop = 0, bumpNx = 0, bumpNz = 0;
+  /** Push the body out of every solid it overlaps and slide along the face;
+   *  a low prop taller than a stride blocks too, until the feet clear it, and
+   *  is remembered so update() can hop up onto it. */
   function resolve(nx, nz, feetY, out) {
-    const cols = ctx.colliders;
-    for (let i = 0; i < cols.length; i++) {
-      const c = cols[i];
-      if (!c || c.solid === false) continue;
-      if (c.h != null && feetY > c.h - 0.05) continue;       // cleared it — jump over
-      let px, pz, nxw, nzw;                                  // contact point + outward normal
-      if (c.box) {
-        const rot = c.rot || 0, cs = Math.cos(rot), sn = Math.sin(rot);
-        const dx = nx - c.x, dz = nz - c.z;
-        const lx = dx * cs + dz * sn, lz = -dx * sn + dz * cs;   // into box space
-        const hw = (c.w || 0) * 0.5, hd = (c.d || 0) * 0.5;
-        if (hw <= 0 || hd <= 0) continue;
-        const qx = clamp(lx, -hw, hw), qz = clamp(lz, -hd, hd);
-        let ox = lx - qx, oz = lz - qz;
-        const d2 = ox * ox + oz * oz;
-        let nlx, nlz, pen;
-        if (d2 > 1e-10) {
-          if (d2 >= RADIUS * RADIUS) continue;
-          const d = Math.sqrt(d2); nlx = ox / d; nlz = oz / d; pen = RADIUS - d;
-        } else {
-          // dead centre inside the box (spawned in a wall): out the nearest face
-          const ex = hw - Math.abs(lx), ez = hd - Math.abs(lz);
-          if (ex < ez) { nlx = lx < 0 ? -1 : 1; nlz = 0; pen = ex + RADIUS; }
-          else { nlx = 0; nlz = lz < 0 ? -1 : 1; pen = ez + RADIUS; }
-        }
-        nxw = nlx * cs - nlz * sn; nzw = nlx * sn + nlz * cs;    // back to world
-        px = nx + nxw * pen; pz = nz + nzw * pen;
-      } else {
-        const rr = (c.r || 0) + RADIUS;
-        if (rr <= RADIUS) continue;
-        const dx = nx - c.x, dz = nz - c.z; const d2 = dx * dx + dz * dz;
-        if (d2 >= rr * rr) continue;
-        if (d2 < 1e-8) { nxw = 1; nzw = 0; px = c.x + rr; pz = c.z; }
-        else { const d = Math.sqrt(d2); nxw = dx / d; nzw = dz / d; px = c.x + nxw * rr; pz = c.z + nzw * rr; }
-      }
-      nx = px; nz = pz;
-      const vn = velocity.x * nxw + velocity.z * nzw;
-      if (vn < 0) { velocity.x -= vn * nxw; velocity.z -= vn * nzw; }   // slide along the face
-    }
-    out.x = nx; out.z = nz;
+    core.pushOut(nx, nz, RADIUS, feetY, velocity, out, stepFree);
+    if (out.low && !bumpLow) { bumpLow = out.low; bumpTop = out.lowTop; bumpNx = out.lowNx; bumpNz = out.lowNz; }
     return out;
   }
-  const _res = { x: 0, z: 0 };
+  let auditDone = false;
+  const _pOut = { x: 0, z: 0, hit: false };
 
   function land() {
     const wasStomp = stomping;
-    hopY = 0; hopV = 0; airborne = false; jumps = 0; flipT = -1; stomping = false;
+    hopY = 0; hopV = 0; airborne = false; jumps = 0; flipT = -1; stomping = false; autoHop = false;
     ctx.events.emit('player:land', { x: position.x, y: groundY, z: position.z, stomp: wasStomp });
     if (wasStomp) {
       ctx.events.emit('player:stomp', { x: position.x, y: groundY, z: position.z, r: STOMP_R });
@@ -263,8 +236,23 @@ export function create(ctx) {
     /** The through-geometry silhouette pass on/off (see the header). */
     setSilhouette(on) { return visitor.setSilhouette(on); },
     get silhouetteOn() { return visitor.silhouetteOn; },
-    /** What the feet are standing in at (x,z): { h, deck, water, limit, floor }. */
-    groundInfo(x, z) { return groundAt(x, z); },
+    /** Contract A. Where feet rest at (x,z) for any WALKER (NPC rules: low
+     *  props are stood on, ramped; nothing taller is). Pass `out` to reuse an
+     *  object: { h, deck, water, limit, floor, prop, top, base }. */
+    groundInfo(x, z, out) { return core.groundAt(x, z, -Infinity, 0, out || {}); },
+    /** Contract A, allocation-free: just the height the feet rest at. */
+    groundHeight(x, z) { return core.groundAt(x, z, -Infinity, 0, _gF).h; },
+    /** Contract A. Resolve a walker's circle against every SOLID collider.
+     *  Returns { x, z, hit } (pass `out` to reuse one). ≤ 0.02 ms per call. */
+    pushOut(x, z, r = 0.45, out) { return core.pushOut(x, z, r, -Infinity, null, out || {}); },
+    /** Multiplies walk/run speed; read every frame (powerups: 1.25 while a star runs). */
+    speedBoost: 1,
+    /** Filled once at world:ready: collider counts + the most common unheighted solids. */
+    colliderAudit: null,
+    /** The ground core itself (stats, audit(), lowPropsNear(x,z,r), kindOf(c)). */
+    ground: core,
+    /** Debug snapshot of the vertical state (tests / the verifier). */
+    get groundDebug() { return { groundY, hopY, hopV, airborne, autoHop, jumps, bumpTop: bumpLow ? bumpTop : null, lastHopRise }; },
 
     /** Riding pose. 'stand' hands the body back to the walk cycle. */
     setPose(p) { pose = ['sit', 'paddle', 'fly', 'flail'].includes(p) ? p : 'stand'; return pose; },
@@ -292,7 +280,7 @@ export function create(ctx) {
       if (rollT > 0 || jumps >= 2) return false;
       const dbl = jumps >= 1;
       hopV = dbl ? JUMP2_V : JUMP_V;
-      airborne = true; stomping = false; slideT = 0; jumps = dbl ? 2 : 1; justJumped = true;
+      airborne = true; stomping = false; slideT = 0; jumps = dbl ? 2 : 1; justJumped = true; autoHop = false;
       if (dbl) flipT = 0;
       ctx.events.emit('player:jump', { x: position.x, y: position.y, z: position.z, double: dbl });
       burst({
@@ -317,11 +305,12 @@ export function create(ctx) {
     },
 
     teleport(x, z) {
-      const g = groundAt(x, z);
-      position.set(x, g.floor, z);
+      // land on a crate or a rock if there is one here, never on a wall top
+      const g = core.groundAt(x, z, core.baseAt(x, z) + LOW_MAX + 0.05, FOOT_PAD, _gT, STEP_FREE);
+      position.set(x, g.floor + ((g.deck || g.prop) ? DECK_LIFT : 0), z);
       velocity.set(0, 0, 0);
       groundY = position.y; hopY = 0; hopV = 0; airborne = false; wade = 0;
-      jumps = 0; flipT = -1; stomping = false; slideT = 0; rollT = 0; iframe = 0; duck = 0; ducking = false;
+      jumps = 0; flipT = -1; stomping = false; slideT = 0; rollT = 0; iframe = 0; duck = 0; ducking = false; autoHop = false;
       prevSpeed = 0; turnRate = 0; slopePitch = slopeRoll = 0;
       visitor.reset();
       group.position.copy(position);
@@ -330,6 +319,7 @@ export function create(ctx) {
     },
 
     update(dt, ctx) {
+      if (!auditDone) { auditDone = true; runAudit(); }
       if (dt <= 0) return;
       const vehicle = !!api.onVehicle;
       const frozen = ctx.state.paused || api.onFerry || api.locked || vehicle;
@@ -362,13 +352,15 @@ export function create(ctx) {
       api.running = !frozen && !ducking && slideT <= 0 && (inp.down('ShiftLeft') || inp.down('ShiftRight'));
 
       // speed modifiers: running, ducking, wading, uphill
-      let sp = api.speed * (api.running ? 1.58 : 1) * (ducking ? DUCK_SPEED : 1);
+      const boost = Number.isFinite(api.speedBoost) ? clamp(api.speedBoost, 0.2, 3) : 1;
+      let sp = api.speed * boost * (api.running ? 1.58 : 1) * (ducking ? DUCK_SPEED : 1);
       sp *= 1 - wade * 0.42;
       if (ax.active) {
         const dx = b.fx * ax.y + b.rx * ax.x, dz = b.fz * ax.y + b.rz * ax.x;
         const l = Math.hypot(dx, dz) || 1;
         const ahead = 1.3;
-        const grade = (groundAt(position.x + dx / l * ahead, position.z + dz / l * ahead).h - groundY) / ahead;
+        // terrain grade only — a crate ahead is hopped onto, not trudged up
+        const grade = (core.baseAt(position.x + dx / l * ahead, position.z + dz / l * ahead) - core.baseAt(position.x, position.z)) / ahead;
         sp *= clamp(1 - Math.max(0, grade) * 0.62, 0.52, 1);
       }
       const tx = ax.active ? (b.fx * ax.y + b.rx * ax.x) * sp : 0;
@@ -402,27 +394,61 @@ export function create(ctx) {
       }
 
       // ── integrate + collide ─────────────────────────────────────────────
+      bumpLow = null;
+      stepFree = (airborne && autoHop) ? HOP_STEP : STEP_FREE;
+      core.sweep(192);                        // catch colliders moved / regrown in place (full pass ≈ 20 frames)
       if (!vehicle) {
-        let nx = position.x + velocity.x * dt, nz = position.z + velocity.z * dt;
-        // water / sea edge: block, but slide along the shoreline so you don't stick
-        if (!passable(nx, nz)) {
-          if (passable(nx, position.z)) { nz = position.z; velocity.z *= 0.25; }
-          else if (passable(position.x, nz)) { nx = position.x; velocity.x *= 0.25; }
-          else { nx = position.x; nz = position.z; velocity.x *= 0.12; velocity.z *= 0.12; }
+        const moveLen = Math.hypot(velocity.x, velocity.z) * dt;
+        const sub = Math.min(4, Math.max(1, Math.ceil(moveLen / MAX_SUBSTEP)));
+        const sdt = dt / sub;
+        for (let si = 0; si < sub; si++) {
+          let nx = position.x + velocity.x * sdt, nz = position.z + velocity.z * sdt;
+          // water / sea edge: block, but slide along the shoreline so you don't stick
+          if (!passable(nx, nz)) {
+            if (passable(nx, position.z)) { nz = position.z; velocity.z *= 0.25; }
+            else if (passable(position.x, nz)) { nx = position.x; velocity.x *= 0.25; }
+            else { nx = position.x; nz = position.z; velocity.x *= 0.12; velocity.z *= 0.12; }
+          }
+          // solid props and walls — push out, then slide along the surface
+          resolve(nx, nz, position.y, _res);
+          position.x = _res.x; position.z = _res.z;
         }
-        // solid props and walls — push out, then slide along the surface
-        resolve(nx, nz, position.y, _res);
-        position.x = _res.x; position.z = _res.z;
       }
 
-      // ── ground follow (terrain or walkable deck), no jitter ─────────────
-      const g = groundAt(position.x, position.z);
+      // ── ground follow (terrain, deck or prop top), no jitter ────────────
+      const g = groundAt(position.x, position.z, _g);
+      const hsMove = Math.hypot(velocity.x, velocity.z);
       if (vehicle || (api.onFerry && !g.deck)) {
         groundY = position.y - hopY;            // the vehicle / ferry owns vertical placement
       } else {
-        const targetGround = g.floor + (g.deck ? DECK_LIFT : 0);
-        const stepUp = targetGround - groundY;
-        groundY = damp(groundY, targetGround, Math.abs(stepUp) > 0.9 ? 9 : 20, dt);
+        const targetGround = g.floor + ((g.deck || g.prop) ? DECK_LIFT : 0);
+        if (airborne) {
+          // In the air the BODY keeps its height; only the ground under it
+          // changes (a crate slid under the feet, a ledge fell away).
+          const absY = groundY + hopY;
+          groundY = targetGround; hopY = absY - targetGround;
+        } else {
+          const stepUp = targetGround - groundY;
+          if (-stepUp > 0.45 + hsMove * dt * 0.9) {
+            // walked off a crate / wall / deck edge: FALL, don't float down
+            airborne = true; hopY = -stepUp; hopV = 0; groundY = targetGround;
+            stomping = false; flipT = -1; slideT = 0; autoHop = false;
+          } else if (bumpLow && !frozen && ax.active && rollT <= 0 && slideT <= 0 && !ducking) {
+            // walked INTO a low prop taller than a stride: hop up onto it
+            const il = Math.hypot(tx, tz) || 1;
+            const into = -(tx / il * bumpNx + tz / il * bumpNz);
+            const rise = bumpTop - groundY;
+            if (into > 0.5 && rise > 0.05 && rise < LOW_MAX + 0.4) {
+              lastHopRise = rise;
+              hopV = Math.sqrt(2 * GRAV * (rise + HOP_MARGIN));
+              airborne = true; jumps = 1; justJumped = true; stomping = false; flipT = -1; autoHop = true;
+              ctx.events.emit('player:jump', { x: position.x, y: position.y, z: position.z, double: false, auto: true });
+            }
+            groundY = damp(groundY, targetGround, Math.abs(stepUp) > 0.9 ? 9 : 20, dt);
+          } else {
+            groundY = damp(groundY, targetGround, Math.abs(stepUp) > 0.9 ? 9 : 20, dt);
+          }
+        }
       }
 
       // wading
@@ -446,10 +472,19 @@ export function create(ctx) {
       let landed = false;
       const tookOff = justJumped; justJumped = false;
       if (!vehicle && airborne) {
+        const wasUnder = hopY < -0.02;          // the ground rose into us (a ledge we are hopping up)
         hopV -= (stomping ? GRAV * 2.2 : GRAV) * dt;
         hopY += hopV * dt;
         if (flipT >= 0) flipT += dt;
-        if (hopY <= 0) { landed = true; land(); }
+        // an auto-hop is a MANTLE: the moment the feet are over the top at
+        // its height — rising or falling — settle onto it right there, instead
+        // of sailing across a one-metre bench and dropping off the far side
+        const mantle = autoHop && !!g.prop && hopY >= -0.06 && hopY <= HOP_MARGIN + 0.05;
+        if ((hopY <= 0 && hopV <= 0) || mantle) {
+          const under = hopY;
+          landed = true; land();
+          if (wasUnder) groundY += under;       // stay put; the ground follow lifts us the rest
+        }
       }
       if (vehicle) { hopY = 0; airborne = false; }
       position.y = groundY + hopY;
@@ -466,7 +501,7 @@ export function create(ctx) {
 
       // ── terrain slope under the feet (subtle body tilt) ─────────────────
       let gn = UP;
-      if (!g.deck && !vehicle) {
+      if (!g.deck && !g.prop && !vehicle) {
         gn = world.normal(position.x, position.z, 0.6);
         const s = Math.sin(visFacing), c = Math.cos(visFacing);
         slopePitch = damp(slopePitch, clamp(-(gn.x * s + gn.z * c) / Math.max(0.2, gn.y), -0.5, 0.5), 7, dt);
@@ -531,8 +566,8 @@ export function create(ctx) {
         const lift = [0, 0];
         for (let i = 0; i < 2; i++) {
           const f = feet[i];
-          const fg = groundAt(f.x, f.z);
-          const fy = fg.floor + (fg.deck ? DECK_LIFT : 0);
+          const fg = core.groundAt(f.x, f.z, position.y, 0, _gF, STEP_FREE);
+          const fy = fg.floor + ((fg.deck || fg.prop) ? DECK_LIFT : 0);
           lift[i] = f.lift + (fy - f.y);
         }
         visitor.setFootLift(lift[0], lift[1]);
@@ -541,7 +576,7 @@ export function create(ctx) {
       decals.update(dt, {
         // riding something: drop the contact shadow onto the real ground below
         x: position.x, y: vehicle ? world.height(position.x, position.z) : groundY, z: position.z,
-        normal: gn, hop: vehicle ? Math.max(0, position.y - world.height(position.x, position.z)) : hopY, speed: hs,
+        normal: gn, hop: vehicle ? Math.max(0, position.y - world.height(position.x, position.z)) : Math.max(0, hopY), speed: hs,
         zoom: ctx.systems.camera?.current?.distance || 0, elapsed: ctx.state.elapsed,
         night: nightK,          // the dark contact disc hands over to the warm pool
       });
@@ -551,6 +586,37 @@ export function create(ctx) {
       ctx.state.playerAirborne = airborne;
     },
   };
+
+  /** Once, at world:ready (the first frame after it, when every system —
+   *  including the ones created after the player — has pushed its colliders). */
+  function runAudit() {
+    try {
+      let cal = null;
+      try { cal = calibrateLowTops(ctx, core, { skip: group, budgetMs: 600, trace: !!ctx.params?.has?.('caltrace') }); } catch (e) { cal = { error: e?.message }; }
+      const A = core.audit();
+      A.calibration = cal;
+      api.colliderAudit = A;
+      const t0 = performance.now(); let k = 0;
+      for (let i = 0; i < 2000; i++) { core.pushOut(-140 + (i % 40) * 0.9, 40 + ((i / 40) | 0) * 0.9, 0.45, -Infinity, null, _pOut); k += _pOut.hit ? 1 : 0; }
+      A.pushOutMs = +((performance.now() - t0) / 2000).toFixed(5);
+      console.info(`[player] ground core: ${A.total} colliders · ${A.withH} carry h · ${A.low} LOW props (standable: ${A.lowLegacy} legacy absolute-h, ${A.lowRelative} contract h) · ` +
+        `${A.tall} solid with a top (hurdles/walls, jumpable) · ${A.solidNoH} solid without h · ${A.nonSolid} solid:false · hash build ${core.stats.lastBuildMs.toFixed(1)} ms · pushOut ${A.pushOutMs} ms/call`);
+      if (cal) {
+        console.info(`[player] low props calibrated to their meshes: ${cal.props} low props · ${cal.lowered} lowered (mean ${cal.meanDrop} u) · ${cal.raised} raised · ${cal.sloped || 0} follow their slope · ${cal.solid} kept SOLID (drawn geometry at body height) · ${cal.ghosts} ghost colliders retired · ${cal.kept} kept · ${cal.unreached || 0} unreached · ` +
+          `${cal.bigMeshes || 0} merged meshes walked (${cal.walkedTris || 0} tris, ${cal.phase2Ms} ms) + ${cal.smallMeshes || 0} meshes / ${cal.instances || 0} instances ray-cast (${cal.phase1Ms} ms) · ${cal.ms} ms${cal.error ? ' · ERROR ' + cal.error : ''}`);
+        const au = cal.audit;
+        if (au) console.info(`[player] low-prop audit (centre ray): ${au.within} of ${au.n} standable props within ±0.25 u of the drawn surface · ${au.float} float > 0.25` +
+          (au.grooved ? ` (${au.grooved} of them: the centre line falls in a groove between chocolate squares; ${au.groovedWithin} within ±0.25 of the squares either side)` : '') + ` · ${au.sink} sink > 0.25` +
+          (au.worstFloat.length ? ` · worst float ${au.worstFloat.slice(0, 4).map((w) => `(${w[0]},${w[1]}) +${w[2]}${w[3] ? ' ' + w[3] : ''}`).join(' ')}` : '') +
+          (au.worstSink.length ? ` · worst sink ${au.worstSink.slice(0, 3).map((w) => `(${w[0]},${w[1]}) ${w[2]}`).join(' ')}` : ''));
+        if (cal.solidList?.length) console.info('[player] low props kept SOLID (walkers would stand inside drawn geometry; add a taller h or trim the mesh):\n' +
+          cal.solidList.slice(0, 40).map((q) => `  (${q.at.join(',')}) ${q.why === 'clutter' ? `drawn geometry +${q.rise} u above the standing top${q.centre ? ' at the centre' : ` at ${q.sides} of 4 side points`}` : 'no surface under it, drawn geometry around it'}${q.top != null ? ' · perch top ' + q.top : ' · no top'}`).join('\n'));
+      }
+      console.info('[player] most common SOLID colliders without h (add h ≤ 1.6 to make the low ones standable):\n' +
+        A.groups.map((g, i) => `  ${i + 1}. ${g.n}× ${g.kind} (mean size ${g.meanSize}) e.g. ${g.example.join(',')}`).join('\n'));
+    } catch (e) { console.info('[player] collider audit skipped', e?.message); }
+  }
+  ctx.events.on('world:ready', () => { core.sync(); });
 
   api.teleport(start.x, start.z);
   return api;

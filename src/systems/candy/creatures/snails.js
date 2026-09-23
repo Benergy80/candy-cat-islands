@@ -4,7 +4,10 @@
 import * as THREE from 'three';
 import { rng, hash } from '../../../core/util.js';
 import { CANDY } from '../../../core/palette.js';
-import { Pool, part, mergeParts, shadeAxis, TAU, walkable, turnToward, pathShoulder, uiSay } from './common.js';
+import { Pool, part, mergeParts, shadeAxis, TAU, walkable, turnToward, pathShoulder, uiSay, HIT, WET } from './common.js';
+
+// Contract A body (units of the snail's scale): shell + foot fit one circle.
+export const SNAIL_BODY = { r: 0.4 };
 
 const ZONES = [
   { x: -200, z: -20, r: 28, n: 6, path: 0.8 },   // Gummy Forest floor + forest path
@@ -37,7 +40,7 @@ function bodyGeo() {
 }
 
 export function create(env) {
-  const { ctx, world, scene, shadowField } = env;
+  const { ctx, world, scene, shadowField, ground } = env;
   const r = rng(hash('candy-snails'));
   const shellMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0 });
   const bodyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0 });
@@ -52,10 +55,11 @@ export function create(env) {
         if (r() < zone.path) { const q = pathShoulder(world, x, z, 'candy', 1.0, 3.6, r); if (q) { x = q.x; z = q.z; } }
         ok = walkable(world, x, z, 2.4);
       }
-      snails.push({ x, z, y: world.height(x, z), head: r() * TAU, curve: (r() - 0.5) * 0.3, scale: 1.45 + r() * 0.45, ph: r() * TAU, retract: 0, trail: r() * 0.5, yTimer: 0 });
+      snails.push({ x, z, y: world.height(x, z), head: r() * TAU, curve: (r() - 0.5) * 0.3, scale: 1.45 + r() * 0.45, ph: r() * TAU, retract: 0, trail: r() * 0.5, turnLeft: 0, turnDir: 1, bump: 0, kind: 'snail' });
     }
   }
   const N = snails.length;
+  for (const s of snails) { s.r = SNAIL_BODY.r * s.scale; s.sc = s.scale; s.yaw = s.head; s.body = SNAIL_BODY; }
   const shells = new Pool(scene, shellGeo(), shellMat, N, { name: 'snail-shells' });
   const bodies = new Pool(scene, bodyGeo(), bodyMat, N, { name: 'snail-bodies', cast: false });
   snails.forEach((s, i) => { shells.tint(i, SHELL_HUES[Math.floor(r() * SHELL_HUES.length)]); bodies.tint(i, 0xfff3e8); });
@@ -90,10 +94,16 @@ export function create(env) {
         const crawl = (1 - hiding) * 0.26;
         s.head += s.curve * dt;
         if ((s.ph += dt) > 6) { s.ph = 0; s.curve = (r() - 0.5) * 0.4; }
-        const nx = s.x + Math.sin(s.head) * crawl * dt;
-        const nz = s.z + Math.cos(s.head) * crawl * dt;
-        if (walkable(world, nx, nz, 2.0)) { s.x = nx; s.z = nz; } else s.head = turnToward(s.head, s.head + 1.8, dt * 2);
-        if ((s.yTimer -= dt) <= 0) { s.yTimer = 0.4; s.y = world.height(s.x, s.z); }
+        // turning round after a bump: a slow sincere U-turn, not a flip
+        if (s.turnLeft > 0) { const k = Math.min(s.turnLeft, dt * 1.1); s.head += k * s.turnDir; s.turnLeft -= k; }
+        s.bump = Math.max(0, s.bump - dt);
+        const go = crawl * (s.turnLeft > 0 ? 0.35 : 1);
+        const nx = s.x + Math.sin(s.head) * go * dt;
+        const nz = s.z + Math.cos(s.head) * go * dt;
+        // Contract A, every frame: solids push it round, low props are climbed
+        const res = ground.step(s, nx, nz, s.head, s.scale, SNAIL_BODY, 2.0);
+        if (res & WET) s.head = turnToward(s.head, s.head + 1.8, dt * 2);
+        else if ((res & HIT) && s.bump <= 0) { s.bump = 4; s.turnLeft = Math.PI * (0.75 + r() * 0.3); s.turnDir = r() < 0.5 ? -1 : 1; }
 
         const sc = s.scale;
         const bob = Math.sin(t * 1.6 + i) * 0.012;

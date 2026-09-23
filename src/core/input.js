@@ -7,7 +7,8 @@
 //   pointer.dragDX/DY   px dragged this frame with ANY button held (camera orbit)
 //   pointer.mdx/mdy     px the mouse moved this frame with NO button held (the camera's V look)
 //   axis() · virtual    movement; both read zero while moveLock > 0
-//   axisRaw() · virtualRaw   the same, ignoring moveLock (the camera's look pan reads these)
+//   axisRaw() · virtualRaw   the same, ignoring moveLock (the camera's look pan reads these);
+//                       axisRaw(out) fills `out` instead of allocating
 //   moveLock            frames of "the visitor stands still"; endFrame() counts it down, so
 //                       whoever wants it held (the camera, while looking) sets it every frame
 // touch.js writes virtual.x/.y, pointer.down/.orbit and dragDX/dragDY directly; all of that still works.
@@ -25,13 +26,17 @@ export function createInput(canvas) {
     get y() { return 0; }, set y(v) { stick.y = v; },
   };
   const setStick = (v) => { stick.x = Number(v?.x) || 0; stick.y = Number(v?.y) || 0; };
-  const axisRaw = () => {         // movement axis from WASD/arrows (x right, y forward)
+  // movement axis from WASD/arrows (x right, y forward); axisRaw(out) fills `out` instead of
+  // allocating (the camera reads it every frame)
+  const axisRaw = (out) => {
     let x = 0, y = 0;
     if (keys.has('KeyA') || keys.has('ArrowLeft')) x -= 1;
     if (keys.has('KeyD') || keys.has('ArrowRight')) x += 1;
     if (keys.has('KeyW') || keys.has('ArrowUp')) y += 1;
     if (keys.has('KeyS') || keys.has('ArrowDown')) y -= 1;
-    const l = Math.hypot(x, y) || 1; return { x: x / l, y: y / l, active: x !== 0 || y !== 0 };
+    const l = Math.hypot(x, y) || 1, active = x !== 0 || y !== 0;
+    if (out && typeof out === 'object') { out.x = x / l; out.y = y / l; out.active = active; return out; }
+    return { x: x / l, y: y / l, active };
   };
   const input = {
     keys,

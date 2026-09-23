@@ -19,6 +19,8 @@ import { tileUV, TIGER_OF } from './fur.js';
 import { TP, goHome, tigerEyeHex } from './tigerrig.js';
 
 export const TIGER_ON = 20, TIGER_OFF = 5.5;
+/** Off-duty tigers (all but the three hunters) keep at least this far from the visitor, centre to centre. */
+export const BERTH = 7.0;
 export const MORPH_SECS = 2.0;
 
 /** True between 20:00 and 05:30 — the hours the island grows stripes. */
@@ -92,26 +94,30 @@ export function mouthPoint(cat, out) {
 // crouch lowers the spine · sit folds the hind legs · tail is an offset from
 // "back and slightly down" · ear is how far the ears pin back · mouth opens
 // the jaw · stride/freq drive the gait · roll is the shoulder-blade swagger.
+// The TAIL is a J, never a pole: the base droops back and DOWN from the rump
+// (tail < 0), and every segment after it curls the tip back up (curl > 0).
+// Laid straight back at hip height a 1.8-u tail read as a broom handle
+// sticking out of the tiger. `wrap` (sitting, lying) sweeps it round the flank.
 const TREST = {
-  crouch: 0, sit: 0, rear: 0, tail: 0, curl: 0.06, swish: 0.8, freq: 1.35, stride: 0.38,
-  roll: 1, mouth: 0.02, ear: 0, headY: 0, headZ: 0, pitch: 0, eye: 1, wiggle: 0, bound: 0, chest: 0,
+  crouch: 0, sit: 0, rear: 0, tail: -0.9, curl: 0.28, swish: 0.8, freq: 1.35, stride: 0.38,
+  roll: 1, mouth: 0.02, ear: 0, headY: 0, headZ: 0, pitch: 0, eye: 1, wiggle: 0, bound: 0, chest: 0, wrap: 0,
 };
 const TPOSE = {
-  prowl:  { crouch: 0.10, tail: -0.30, swish: 0.55, freq: 1.30, stride: 0.42, roll: 1.30 },
-  stalk:  { crouch: 0.28, tail: -0.52, swish: 1.7, freq: 0.92, stride: 0.30, roll: 1.75, headY: -0.14, headZ: 0.10, ear: 0.30, pitch: 0.12 },
-  crouch: { crouch: 0.46, tail: -0.62, swish: 3.0, freq: 0, stride: 0, roll: 0, headY: -0.20, headZ: 0.15, ear: 0.55, pitch: 0.16, wiggle: 1, mouth: 0.15 },
-  rush:   { crouch: 0.04, tail: -0.40, swish: 0.9, freq: 3.2, stride: 0.66, roll: 0.7, mouth: 0.55, ear: 0.70, bound: 1, pitch: 0.06 },
-  roar:   { crouch: -0.05, tail: 0.62, swish: 2.2, freq: 0, stride: 0, roll: 0, mouth: 1, ear: 1, headY: 0.17, pitch: -0.36, rear: 0.12, chest: 1 },
-  sit:    { sit: 1, tail: 0.34, curl: 0.50, swish: 0.35, freq: 0, stride: 0, chest: 0.25 },
-  watch:  { sit: 1, tail: 0.30, curl: 0.46, swish: 0.24, freq: 0, stride: 0, eye: 1.12, chest: 0.30 },
-  carry:  { crouch: 0.02, tail: 0.36, swish: 0.8, freq: 1.65, stride: 0.44, roll: 1.0, mouth: 0.55, headY: 0.11, pitch: -0.14 },
-  yawn:   { sit: 0.9, tail: 0.40, curl: 0.42, swish: 0.3, freq: 0, stride: 0, mouth: 1, pitch: -0.32, eye: 0.04, ear: 0.22 },
-  flinch: { crouch: -0.07, rear: 0.24, tail: 0.66, swish: 2.4, freq: 1.2, stride: 0.30, ear: 1, pitch: -0.20, mouth: 0.45 },
-  hiss:   { crouch: 0.08, tail: 0.58, swish: 2.8, freq: 0, stride: 0, ear: 1, mouth: 0.9, chest: 0.6, pitch: -0.12 },
-  flee:   { crouch: 0.05, tail: -0.66, swish: 0.6, freq: 3.0, stride: 0.58, roll: 0.6, ear: 0.9 },
-  stun:   { crouch: 0.22, tail: -0.10, swish: 0.5, freq: 0, stride: 0, ear: 0.55, eye: 0.42, pitch: 0.20 },
-  sulk:   { sit: 1, tail: 0.24, curl: 0.58, swish: 0.2, freq: 0, stride: 0, ear: 0.6, eye: 0.5, pitch: 0.28 },
-  sleep:  { crouch: 0.60, tail: 0.30, curl: 0.55, swish: 0.14, freq: 0, stride: 0, eye: 0.02, pitch: 0.26 },
+  prowl:  { crouch: 0.10, tail: -1.20, curl: 0.38, swish: 0.55, freq: 1.30, stride: 0.42, roll: 1.30 },
+  stalk:  { crouch: 0.28, tail: -0.95, curl: 0.22, swish: 1.7, freq: 0.92, stride: 0.30, roll: 1.75, headY: -0.14, headZ: 0.10, ear: 0.30, pitch: 0.12 },
+  crouch: { crouch: 0.46, tail: -0.90, curl: 0.16, swish: 3.0, freq: 0, stride: 0, roll: 0, headY: -0.20, headZ: 0.15, ear: 0.55, pitch: 0.16, wiggle: 1, mouth: 0.15 },
+  rush:   { crouch: 0.04, tail: -0.62, curl: 0.12, swish: 0.9, freq: 3.2, stride: 0.66, roll: 0.7, mouth: 0.55, ear: 0.70, bound: 1, pitch: 0.06 },
+  roar:   { crouch: -0.05, tail: 0.62, curl: 0.20, swish: 2.2, freq: 0, stride: 0, roll: 0, mouth: 1, ear: 1, headY: 0.17, pitch: -0.36, rear: 0.12, chest: 1 },
+  sit:    { sit: 1, tail: -0.55, curl: 0.30, wrap: 1, swish: 0.35, freq: 0, stride: 0, chest: 0.25 },
+  watch:  { sit: 1, tail: -0.55, curl: 0.28, wrap: 1, swish: 0.24, freq: 0, stride: 0, eye: 1.12, chest: 0.30 },
+  carry:  { crouch: 0.02, tail: -0.70, curl: 0.34, swish: 0.8, freq: 1.65, stride: 0.44, roll: 1.0, mouth: 0.55, headY: 0.11, pitch: -0.14 },
+  yawn:   { sit: 0.9, tail: -0.55, curl: 0.30, wrap: 1, swish: 0.3, freq: 0, stride: 0, mouth: 1, pitch: -0.32, eye: 0.04, ear: 0.22 },
+  flinch: { crouch: -0.07, rear: 0.24, tail: 0.66, curl: 0.10, swish: 2.4, freq: 1.2, stride: 0.30, ear: 1, pitch: -0.20, mouth: 0.45 },
+  hiss:   { crouch: 0.08, tail: 0.58, curl: 0.10, swish: 2.8, freq: 0, stride: 0, ear: 1, mouth: 0.9, chest: 0.6, pitch: -0.12 },
+  flee:   { crouch: 0.05, tail: -1.00, curl: 0.10, swish: 0.6, freq: 3.0, stride: 0.58, roll: 0.6, ear: 0.9 },
+  stun:   { crouch: 0.22, tail: -1.10, curl: 0.18, swish: 0.5, freq: 0, stride: 0, ear: 0.55, eye: 0.42, pitch: 0.20 },
+  sulk:   { sit: 1, tail: -0.60, curl: 0.30, wrap: 1, swish: 0.2, freq: 0, stride: 0, ear: 0.6, eye: 0.5, pitch: 0.28 },
+  sleep:  { crouch: 0.60, tail: -0.70, curl: 0.20, wrap: 1.2, swish: 0.14, freq: 0, stride: 0, eye: 0.02, pitch: 0.26 },
 };
 const POSE_OF = {
   prowl: 'prowl', stalk: 'stalk', crouch: 'crouch', rush: 'rush', roar: 'roar', carry: 'carry',
@@ -165,7 +171,7 @@ export function applyTiger(c, k, el, dt, ctx) {
 
   // ── root ───────────────────────────────────────────────────────────────────
   const root = TG.root;
-  root.position.set(c.x, c.y, c.z);
+  root.position.set(c.x, c.y + (c.air || 0), c.z);
   root.rotation.set(0, c.yaw, 0);
   root.scale.setScalar(T * lerp(0.52, 1, k) * vis);
 
@@ -251,12 +257,15 @@ export function applyTiger(c, k, el, dt, ctx) {
   if (TG.hat) { TG.hat.position.set(0.018, 0.300, 0.300); TG.hat.rotation.set(0.46, 0.05, 0.11); TG.hat.scale.setScalar(0.66); }
 
   // ── tail: long, heavy, black-tipped, and never still ───────────────────────
+  // (base: droop back-and-down; segments: the tip curls up and lashes. A
+  //  sitting tiger's tail reaches the ground and sweeps round one flank.)
   const swish = Math.sin(tg.swishPh) * a.swish;
-  TG.tailBase.rotation.set(TAIL_BACK + a.tail * 0.62 - a.curl * 0.30, 0, swish * 0.16);
+  const side = c.seed > 0.5 ? 1 : -1;
+  TG.tailBase.rotation.set(TAIL_BACK + a.tail * 0.62 - a.curl * 0.30, 0, swish * 0.16 + a.wrap * side * 0.30);
   for (let i = 1; i < TG.tailSegs.length; i++) {
-    const s = TG.tailSegs[i];
-    s.rotation.set(a.curl * (i === 1 ? 0.7 : 1.0) + Math.sin(tg.swishPh * 0.8 - i * 0.5) * 0.05,
-      0, Math.sin(tg.swishPh - i * 0.55) * 0.13 * a.swish);
+    const s = TG.tailSegs[i], w = i / (TG.tailSegs.length - 1);   // the tip does most of the lashing
+    s.rotation.set(a.curl * (i === 1 ? 0.7 : 1.0) * (1 - a.wrap * 0.35) + Math.sin(tg.swishPh * 0.8 - i * 0.5) * 0.06,
+      0, Math.sin(tg.swishPh - i * 0.55) * (0.10 + 0.10 * w) * a.swish + a.wrap * side * 0.34);
   }
 
   root.updateMatrixWorld(true);
@@ -277,27 +286,49 @@ export function applyTiger(c, k, el, dt, ctx) {
 // ═══ THE BRAIN ═══════════════════════════════════════════════════════════════
 const TAU = Math.PI * 2;
 
-/** Shared prowl state: a handful of packs drifting along the island's streets. */
+/** Shared prowl state: a handful of packs drifting along the island's streets,
+ *  and one that LURKS: it owns Purrliament Square after dark, working slowly
+ *  round the edge of the flagstones and sitting down to stare at intervals
+ *  (a lit square with nobody in it at 22:00 was the least frightening place
+ *  on the island). `ring` = [inner, outer] slot radius round a fixed centre. */
 export function createPackState(world, rand) {
   const ROUTES = ['cat_main', 'cat_park', 'cat_gym', 'cat_harbor'];
   const packs = [];
+  const SQ = world.LANDMARKS && world.LANDMARKS.town_square;
   for (let i = 0; i < 6; i++) {
+    if (i === 5 && SQ) {
+      packs.push({ id: i, route: 'square', path: null, ring: [10.5, 15.0], t: 0, dir: rand() < 0.5 ? -1 : 1,
+        x: SQ.x, z: SQ.z, wait: 0, rot: rand() * TAU, cyc: rand() * 10 });
+      continue;
+    }
     // one pack always works Main Street — that is where the visitor walks — but
     // only one: twenty tigers converging on the same paving slab was a rug.
     const route = i === 0 ? 'cat_main' : ROUTES[i % ROUTES.length];
     const path = world.PATHS.find((p) => p.id === route);
-    const t = i === 0 ? 0.52 : rand();
+    // the harbour pack turns round at the top of the harbour road instead of
+    // halting on Welcome Plaza, where the Main Street pack already passes (two
+    // packs parked round one fountain was the heap by the MISSING board)
+    const t0 = route === 'cat_harbor' ? 0.24 : 0.04;
+    const t = i === 0 ? 0.52 : t0 + rand() * (0.96 - t0);
     const q = world.pointOnPolyline(path.points, t);
-    packs.push({ id: i, route, path, t, dir: rand() < 0.5 ? -1 : 1, x: q.x, z: q.z, wait: 0 });
+    packs.push({ id: i, route, path, t, t0, dir: rand() < 0.5 ? -1 : 1, x: q.x, z: q.z, wait: 0 });
   }
   return {
     packs,
     update(dt) {
       for (const p of packs) {
+        if (p.ring) {
+          // round the square at a slow walk (~0.7 u/s at the edge), then a halt
+          if (p.wait > 0) { p.wait -= dt; continue; }
+          p.rot += p.dir * dt * 0.05;
+          p.cyc += dt;
+          if (p.cyc > 16) { p.cyc = 0; p.wait = 6 + rand() * 6; if (rand() < 0.3) p.dir = -p.dir; }
+          continue;
+        }
         if (p.wait > 0) { p.wait -= dt; continue; }
         p.t += p.dir * dt * 0.012;
         if (p.t > 0.96) { p.t = 0.96; p.dir = -1; p.wait = 3 + rand() * 7; }
-        if (p.t < 0.04) { p.t = 0.04; p.dir = 1; p.wait = 3 + rand() * 7; }
+        if (p.t < p.t0) { p.t = p.t0; p.dir = 1; p.wait = 3 + rand() * 7; }
         const q = world.pointOnPolyline(p.path.points, p.t);
         p.x = q.x; p.z = q.z;
       }
@@ -314,44 +345,93 @@ export function tigerPlan(c, h, ctx, S, T) {
   const pack = T.packs.packs[c.packIdx % T.packs.packs.length];
   // phyllotaxis, not a fraction of TAU: slots 0, 3, 6 … used to land on exactly
   // the same angle AND the same radius, and seven tigers stood inside each other
-  const ang = c.packSlot * 2.39996 + S.elapsed * 0.10;
-  const spread = 4.2 + ((c.packSlot * 7) % 5) * 2.6 + c.seed * 1.2;
-  const hx = pack.x + Math.cos(ang) * spread, hz = pack.z + Math.sin(ang) * spread;
+  // slotRot: S.settle turns a tiger's place in the formation when its spot
+  // keeps landing inside a building (it turns around and tries elsewhere)
+  const ang = c.packSlot * 2.39996 + (pack.ring ? pack.rot : S.elapsed * 0.10) + (c.slotRot || 0);
+  const spread = pack.ring
+    ? pack.ring[0] + (((c.packSlot * 7) % 5) / 4) * (pack.ring[1] - pack.ring[0]) + c.seed * 0.6
+    : 4.2 + ((c.packSlot * 7) % 5) * 2.6 + c.seed * 1.2;
+  let hx = pack.x + Math.cos(ang) * spread, hz = pack.z + Math.sin(ang) * spread;
+  // Off duty, a tiger gives the visitor a WIDE berth: a place in the pack that
+  // would put it within BERTH of him slides out to that ring. Only the three
+  // hunters come closer (a pack halted on the plaza he is standing in used to
+  // sit down all round him, a metre off, and the frame was fur).
+  // (out on the tiger's OWN side of him: told to go round him to the far side
+  //  of the ring, a tiger in a narrow street walked back and forth past him)
+  if (p && c.huntRank >= 3) {
+    const ox = hx - p.x, oz = hz - p.z, od = Math.hypot(ox, oz);
+    if (od < BERTH) {
+      let ux = c.x - p.x, uz = c.z - p.z; const ul = Math.hypot(ux, uz);
+      if (ul > 1e-3) { ux /= ul; uz /= ul; } else { ux = Math.sin(ang); uz = Math.cos(ang); }
+      hx = p.x + ux * BERTH; hz = p.z + uz * BERTH;
+    }
+  }
 
   // currently carrying the visitor home by the scruff
   if (c.carryTo) return { act: 'post', x: c.carryTo.x, z: c.carryTo.z, pose: 'carry', speed: 3.4 };
 
   // dawn: one big yawn on the spot before the stripes go away
-  if (c.yawnUntil > S.elapsed) return { act: 'post', x: c.x, z: c.z, pose: 'yawn', face: c.faceDir };
+  if (c.yawnUntil > S.elapsed) return { act: 'post', x: c.x, z: c.z, pose: 'yawn', face: c.faceDir, hold: 1 };
   // just transformed: announce it
   if (c.roarUntil > S.elapsed) {
     const f = p ? Math.atan2(p.x - c.x, p.z - c.z) : c.faceDir;
     return { act: 'post', x: c.x, z: c.z, pose: 'roar', face: f };
   }
 
-  // spooked by a spray bottle / a bat: back off, and keep backing off
+  // spooked by a spray bottle / a bat / the wave-3 arsenal / a visitor who is
+  // currently a STAR: back off, and keep backing off (see catCitizens.hit)
   if (c.fxUntil > S.elapsed && c.fxKind) {
-    if (c.fxKind === 'stun') return { act: 'post', x: c.x, z: c.z, pose: 'stun', face: c.faceDir };
-    const a = Math.atan2(c.x - c.fxX, c.z - c.fxZ);
-    return { act: 'post', x: c.x + Math.sin(a) * 10, z: c.z + Math.cos(a) * 10, pose: 'flinch', speed: 5.0 };
+    const k = c.fxKind;
+    // (`hold`: on the spot, wherever a knockback has carried it)
+    if (k === 'stun' || k === 'spin' || k === 'bonk') return { act: 'post', x: c.x, z: c.z, pose: 'stun', face: c.faceDir, hold: 1 };
+    if (k === 'stuck') return { act: 'post', x: c.x, z: c.z, pose: 'crouch', face: c.faceDir, hold: 1 };
+    if (k === 'stagger' || k === 'hiss') return { act: 'post', x: c.x, z: c.z, pose: k === 'hiss' ? 'hiss' : 'flinch', face: c.faceDir, hold: 1 };
+    let a = Math.atan2(c.x - c.fxX, c.z - c.fxZ);
+    if (k === 'panic') a += Math.sin(S.elapsed * 3.1 + c.ph * 5) * 1.1;
+    const run = k === 'flee' || k === 'scared' || k === 'panic';
+    return { act: 'post', x: c.x + Math.sin(a) * 10, z: c.z + Math.cos(a) * 10, pose: run ? 'flee' : 'flinch', speed: run ? 5.6 : 5.0 };
   }
 
   // Only the three nearest tigers work the visitor. Twenty of them converging
   // at once was a pile of fur with a hat in it, and you could not see the town.
-  const hunting = p && ctx.state.island === 'cat' && !ctx.systems.player.onFerry
-    && !T.carrying && S.elapsed > T.graceUntil && c.huntRank < 3;
+  //
+  // PERSONAL SPACE. A tiger does not stand on you. The hunters hold a RING
+  // round the visitor — 4 to 6 u out, centre to centre, so a muzzle stays 2–3
+  // m off him — circling low, crouching, sitting to stare. Only the nearest
+  // one ever closes the gap, and only in one committed spring (gather, wiggle,
+  // LAUNCH) when it can actually catch him: never while he is a star, rolling
+  // (i-frames), already caught, or in the grace after arriving / waking up /
+  // a jumped clock — then it stays on the ring with the others, crouched and
+  // lashing its tail, which is the frightening part anyway. (citizens.js
+  // separateTigers() backs this with a hard 2-u exclusion round him.)
+  const pl = ctx.systems.player;
+  const hunting = p && ctx.state.island === 'cat' && !pl.onFerry
+    && !T.carrying && c.huntRank < 3
+    && !ctx.systems.powerups?.active;              // nobody hunts a STAR (Contract B)
   if (hunting) {
     const d = Math.hypot(p.x - c.x, p.z - c.z);
     const toP = Math.atan2(p.x - c.x, p.z - c.z);
-    if (d < 2.4 && c.huntRank === 0) return { act: 'post', x: p.x, z: p.z, pose: 'rush', catch: true, speed: 5.4 };
-    if (d < 8.5) {
+    const canCatch = S.elapsed > T.graceUntil && !pl.invulnerable && !pl.locked;
+    const R = 4.8 + c.huntRank * 0.7 + c.seed * 0.5;
+    if (canCatch && c.huntRank === 0 && d < 8.5) {
+      if (d < 2.4) return { act: 'post', x: p.x, z: p.z, pose: 'rush', catch: true, spring: 1, speed: 5.4 };
       // gather, then spring. A cat that walks calmly into you is not a threat;
       // a cat that goes flat, wiggles, and LAUNCHES is the whole scene.
       const phase = (S.elapsed * 0.42 + c.seed * 3) % 1;
       if (phase < 0.30) return { act: 'post', x: c.x, z: c.z, pose: 'crouch', face: toP };
-      const oa = c.huntRank * 2.3 + S.elapsed * 0.5;
-      const off = c.huntRank === 0 ? 0 : 1.9;
-      return { act: 'post', x: p.x + Math.sin(oa) * off, z: p.z + Math.cos(oa) * off, pose: 'rush', speed: 4.4 + (c.spec.size ?? 1) * 0.6 };
+      return { act: 'post', x: p.x, z: p.z, pose: 'rush', spring: 1, speed: 4.4 + (c.spec.size ?? 1) * 0.6 };
+    }
+    if (d < R + 3.5) {
+      // on the ring: crouch, sit and stare, then pad a little way round him
+      const cyc = (S.elapsed * 0.15 + c.seed * 3.7) % 1;
+      const inside = d < R - 0.8;
+      if (!inside && cyc < 0.30) return { act: 'post', x: c.x, z: c.z, pose: 'crouch', face: toP };
+      if (!inside && cyc < 0.48) return { act: 'post', x: c.x, z: c.z, pose: 'watch', face: toP };
+      const b = Math.atan2(c.x - p.x, c.z - p.z), da = (inside ? 0.15 : 0.55) * (c.seed > 0.5 ? 1 : -1);
+      // (ax, az: the same step the other way round him — navigate() takes it
+      //  when this side is a shopfront, and sits the tiger down if both are)
+      return { act: 'post', x: p.x + Math.sin(b + da) * R, z: p.z + Math.cos(b + da) * R, pose: 'stalk', speed: inside ? 2.4 : 1.2,
+        ring: 1, ax: p.x + Math.sin(b - da) * R, az: p.z + Math.cos(b - da) * R };
     }
     if (d < 18) {
       // stalk: circle in, slow, low, never in a straight line — and every few
@@ -359,13 +439,14 @@ export function tigerPlan(c, h, ctx, S, T) {
       const cyc = (S.elapsed * 0.14 + c.seed * 2) % 1;
       if (cyc < 0.20) return { act: 'post', x: c.x, z: c.z, pose: 'watch', face: toP };
       const a = Math.atan2(c.x - p.x, c.z - p.z) + 0.42 * (c.seed > 0.5 ? 1 : -1);
-      const r = Math.max(3.4, d - 5.0);
+      const r = Math.max(R, d - 5.0);
       return { act: 'post', x: p.x + Math.sin(a) * r, z: p.z + Math.cos(a) * r, pose: 'stalk', speed: 1.5 };
     }
   }
   // off duty: prowl the pack's beat, and about a third of them sit and stare
   // whenever the pack halts, which is the bit that makes a street feel watched
-  if (pack.wait > 0 && c.seed < 0.38 && Math.hypot(hx - c.x, hz - c.z) < 2.6) {
+  // (the square's lurkers sit more often than they walk)
+  if (pack.wait > 0 && c.seed < (pack.ring ? 0.62 : 0.38) && Math.hypot(hx - c.x, hz - c.z) < 2.6) {
     const f = p && Math.hypot(p.x - c.x, p.z - c.z) < 40 ? Math.atan2(p.x - c.x, p.z - c.z) : c.faceDir;
     return { act: 'post', x: c.x, z: c.z, pose: 'watch', face: f };
   }

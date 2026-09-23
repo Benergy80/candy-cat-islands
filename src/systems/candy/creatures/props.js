@@ -35,9 +35,12 @@ export function create(env) {
 
   // ── the dropped lollipop the ants are eating ──────────────────────────────
   const ch = world.height(CRUMBS[0], CRUMBS[1]);
-  put(new THREE.CylinderGeometry(0.95, 0.95, 0.2, 12), { pos: [CRUMBS[0], ch + 0.16, CRUMBS[1]], rot: [1.35, 0, 0.3], color: CANDY.gummyRed });
-  put(new THREE.CylinderGeometry(0.5, 0.5, 0.24, 10), { pos: [CRUMBS[0] + 0.02, ch + 0.17, CRUMBS[1] - 0.03], rot: [1.35, 0, 0.3], color: CANDY.cream });
-  put(new THREE.CylinderGeometry(0.07, 0.07, 1.5, 5), { pos: [CRUMBS[0] + 0.9, ch + 0.09, CRUMBS[1] + 0.9], rot: [0, 0.6, 1.5708], color: CANDY.cream });
+  // lying FLAT on the road (it used to stand on its edge like a red plank),
+  // propped a little on its stick, cream swirl up
+  put(new THREE.CylinderGeometry(0.95, 0.95, 0.2, 14), { pos: [CRUMBS[0], ch + 0.2, CRUMBS[1]], rot: [0.1, 0, -0.06], color: CANDY.gummyRed });
+  put(new THREE.TorusGeometry(0.52, 0.09, 4, 14), { pos: [CRUMBS[0], ch + 0.31, CRUMBS[1]], rot: [Math.PI / 2 + 0.1, 0, -0.06], color: CANDY.cream });
+  put(new THREE.CylinderGeometry(0.2, 0.2, 0.22, 8), { pos: [CRUMBS[0], ch + 0.31, CRUMBS[1]], rot: [0.1, 0, -0.06], color: CANDY.cream });
+  put(new THREE.CylinderGeometry(0.07, 0.07, 1.5, 5), { pos: [CRUMBS[0] + 0.55, ch + 0.13, CRUMBS[1] + 1.15], rot: [Math.PI / 2 - 0.08, 0.45, 0], color: CANDY.cream });
   for (let k = 0; k < 7; k++) {
     const a = (k / 7) * TAU + 1.9, rr = 1.2 + (k % 3) * 0.42;
     put(new THREE.TetrahedronGeometry(0.13 + (k % 2) * 0.05), {

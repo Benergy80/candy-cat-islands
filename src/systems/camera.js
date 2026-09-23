@@ -1,15 +1,33 @@
 // Isometric third-person follow camera.
-//   1 / 2 / 3    camera mode — 1 classic isometric (Q/E turn), 2 FOLLOW (azimuth
-//                tracks the visitor's facing, Q/E offsets it and it re-centres
-//                after 1.5 s of walking), 3 overhead (el 1.1, distance +40%)
+//   1 / 2 / 3    camera mode — 1 ISO (you turn it: Q/E, drag; it never auto-yaws),
+//                2 FOLLOW (a ground tether that swings behind your travel, bent
+//                toward the path you walk; Q/E / drag rotate the tether; el −0.18,
+//                distance ×0.72, fov 42, pitched up 0.15 so the horizon is in
+//                frame, and further as the occlusion lift would squeeze the sky
+//                band under 4.5% — CAMERA_SPEC §2, §4.2), 3 TOP (el 1.1,
+//                distance +40%).
+//                Flying (ctx.state.flying) frames every mode at 44 / 0.38 / fov 40
+//                behind the heading (Contract E); anything that owns the framing
+//                (interiors, vehicles, the ferry, a lock) gets mode 1 in mode 2,
+//                from its first frame (an owner's own setParams({azimuth}) + snap()
+//                is never overwritten, even when it snaps before declaring itself).
+//   WASD         moves along controlAzimuth, which chases the lens at basisRate
+//                (0.87 rad/s, so the heading turns ≤ 0.9) while you hold a key
+//                (a Q/E or a drag mid-walk bends your heading instead of jerking
+//                it) and equals it when you stand
 //   Q / E        rotate the world in eased 45° steps (E defers to "interact" when
 //                something is in range, so it never fights the E key)
 //   wheel        zoom, clamped; the further out you are the more the view tips down
 //   drag         orbit (any mouse button) — vertical drag changes elevation
 //   L (hold)     LOOK UP — flattens to elevation 0.15, widens to fov 44 and
 //                pitches the lens up while held, easing back on release
-//   dead-zone    the target only chases the player once they leave a small box,
-//                with look-ahead along the velocity so you see where you're going
+//   lead         the aim point runs ahead of you, split in camera space (mode 1:
+//                6.5 toward the lens, 3.5 away, 4.0 sideways; mode 2 and 3 have
+//                their own, CAMERA_SPEC §2), ×1.2 at a run, × the zoom; near a path
+//                it bends halfway toward the path 10 u ahead; it holds ~1 s after
+//                you stop, and only 30% of a jump's rise reaches the frame
+//   dead-zone    the target only chases the aim once it leaves a small ellipse
+//                (0.7 as deep as it is wide), tighter the faster you go
 //   reveal       stepping into a named landmark eases the lens out to ~40 for
 //                2.5 s, so you see the whole silhouette of the thing you arrived at
 //
@@ -23,7 +41,8 @@
 // far as that night's moon altitude demands (52-58°, so the moon, the horizon
 // and the visitor all fit), holds 2.5 s with a toast, and eases back. Movement
 // stays live the whole time —
-// basis() keeps reading cur.azimuth, so WASD never flips under the shot.
+// basis() reads controlAzimuth, which never takes a shot's yaw, so WASD never
+// flips under it.
 //
 // KEEPING THE VISITOR VISIBLE — a CAPSULE SWEEP from the lens to the head.
 //
@@ -43,46 +62,69 @@
 // does not write depth are never candidates, and a hit is ignored when it sits
 // under half a unit above the ground (a kerb grazes the knee ray wherever you
 // stand) or within a unit of the body (the deck you are standing on). What is
-// left is classified:
+// left is classified — THE LADDER AS A SENSOR (CAMERA_SPEC §5.2): the window
+// below is the fix, and the lens only moves for what the window cannot open.
 //
+//   PATCHED — a hit on a mesh the window may cut (big masses, instanced clouds):
+//              counted as blocked, opens the window, and is never faded,
+//              dollied past or tilted over.
 //   0. CULL  — a mesh whose WORLD BOUNDING BOX contains the lens goes
 //              visible = false for as long as that lasts. Gated to meshes under
-//              occCullMax across, because "the lens is inside my box" is true of
-//              every island-scale merge all the time; without the gate this rule
-//              deletes Candyland. Roofs are skipped — each architecture system
-//              hides its own roof when you walk inside, and we must not fight it.
-//   1. FADE  — the mesh dissolves to fadeOpacity over fadeTime. Prop-sized
-//              meshes (world box under occFadeMaxDim) always. A big merged
-//              district only when the hit sits within occNearLens of the lens —
-//              i.e. the lens is buried in it and it is filling the screen
-//              anyway. Ghosting a district from further out is what put a
-//              translucent roof on the Arrivals hall, so it stays forbidden.
-//   2. DOLLY — a big mass with room in front of it: pull the lens to just
-//              inside the real hit point, floored at occDollyFloor of the stop.
-//   3. TILT  — a big mass too close to the player to get in front of. Nothing
-//              publishes how tall it is, so the lift ESCALATES occLiftStep per
-//              sweep while the body is still blocked, stops the moment it
-//              clears, and unwinds once six sweeps run clean or the visitor has
-//              walked 3 units away. Capped at occLiftMax.
-//   4. GIVE UP — a tilt pinned at its cap that STILL leaves him hidden is pure
-//              composition damage, so after two such sweeps the lift drops back
-//              to zero and latches off until he moves. What is left then is the
-//              last-resort ghost: the blocker fades anyway, provided it is a
-//              building rather than a district (occFadeLastDim). An island-wide
-//              merge never ghosts — we would rather lose his shins than the
-//              island — and the dolly may dip under its floor instead.
+//              occCullMax (18 u) across, because "the lens is inside my box" is
+//              true of every island-scale merge all the time; without the gate
+//              this rule deletes Candyland. Roofs are skipped — each
+//              architecture system hides its own roof when you walk inside.
+//   1. FADE  — an unpatched prop-sized mesh (world box under occFadeMaxDim)
+//              dissolves to fadeOpacity over fadeTime. A big mass never ghosts:
+//              the near-lens dither handles one right at the lens.
+//   2. DOLLY — an UNPATCHED big mass (noCut / noFade / NEVER_FADE, a material
+//              the patch may not touch) with room in front of it: pull the lens
+//              to just inside the real hit point, never nearer than the floor,
+//              max(occDollyMin 14, occDollyFloor 0.62 × the mode's goal)
+//              outdoors, 5.5 inside a building.
+//   3. TILT  — an unpatched mass too close to the player to get in front of.
+//              Nothing publishes how tall it is, so the lift ESCALATES
+//              occLiftStep per sweep while the body is still blocked, stops the
+//              moment it clears, and unwinds once six sweeps run clean or the
+//              visitor has walked 3 units away. Capped at occLiftMax (0.12),
+//              eased at λ5 / λ2.5 and never faster than occLiftRate (0.14 rad/s);
+//              it holds at the cap (no give-up) and the window / the silhouette
+//              carry the rest.
+//              Dolly and tilt run only while the window is shut (cutK < 0.5 and
+//              not opening): once it carries the frame the lens releases to the
+//              stop (λ3.5) and the tilt unwinds. The per-frame collider pass
+//              (occlude(): a guess — colliders carry no mesh and mostly no
+//              height) tilts ≤ colLiftMax (0.06) and dollies only alongside a
+//              dolly / tilt the sweep is already running; mostly it opens the
+//              window (the collider trigger, §5.1 (b)). SHELLS — big
+//              userData.noFade masses (enterable buildings, the whale) the
+//              sweep never fades or cuts — get rule 2 on their real triangles
+//              only: a dolly to just in front of one when there is room.
 //   5. INSTANCED — an InstancedMesh is never raycast (2000 instances), but its
-//              instances ARE tested as spheres against the sight line. A wall
-//              of palm fronds is what swallowed the visitor in the round-3
-//              plaza frame, and the sweep was not even looking at it. Owners
-//              get asked first (hideInstancesNear(x,z,r), if any system has
-//              one); otherwise the lens pushes in harder (occInstFloor) and
-//              tilts harder (occInstStep) than it would for a solid mesh.
+//              instances ARE tested as spheres against the sight line, through
+//              ONE round-robin cursor over (cloud, instance) so every instance
+//              is eventually tested. A patched cloud's instance opens the window
+//              (confirmed on its own triangles); an unpatched one dollies /
+//              tilts harder (occInstStep) than a solid mesh.
 //   6. PLINTH — a mass named like ground/masonry, or simply bigger than a
-//              building, hit within occPlinthNear of the lens: the cupcake's
-//              plinth cannot be ghosted, cannot be dollied past and does not
-//              clear at 0.30 rad. The tilt cap rises to occLiftPlinth (0.35)
-//              and the dolly is forced in behind it.
+//              building, hit within occPlinthNear of the lens: patched, it grows
+//              the window; unpatched, the tilt cap rises to occLiftPlinth (0.20)
+//              and the dolly is forced to its floor.
+//   ?cut=0 / params.cut = 0 is the fallback: the old ladder (the district fade
+//              within occNearLens of the lens, and a GIVE-UP — a tilt at its cap
+//              that still leaves him hidden relaxes to half the cap and the
+//              blocker ghosts if it is a building, occFadeLastDim), same floor.
+//   THE SEE-THROUGH WINDOW (camera/cutout.js, CAMERA_SPEC §5.1): big masses and
+//              instanced clouds carry a shader patch; while a patched mass IN FRONT
+//              OF THE LENS blocks one of his three axial body rays (hat, chest,
+//              knees — not the offset rays beside him; an instance only when its
+//              own triangles are hit, not just its sphere), or a wall/trunk
+//              collider sits in the sight line between the lens and him two frames
+//              running (a blocker the dolly already stands in front of does not
+//              count), a dithered, feathered, rim-darkened ellipse around him
+//              discards whatever stands IN FRONT of him, so his real body shows
+//              through. A near-lens band dithers patched geometry right at the lens.
+//              Free cameras and ?cut=0 / params.cut = 0 turn both off.
 //   AND THE BACKSTOP: none of this can be relied on, so the VISITOR IS DRAWN
 //   TWICE — see player/visitor.js. The second pass is flat cream, depthFunc
 //   GreaterDepth, so it appears only where something is in front of him. The
@@ -105,35 +147,80 @@
 //   first, and resumes where it stopped — 2-6 ms per sweep, 1-3% of frame time.
 //
 // Public API (other systems + tools/render.mjs depend on these):
-//   params {azimuth, elevation, distance, fov, minDist, maxDist, lookAhead,
+//   params {azimuth, elevation, distance, fov, minDist, maxDist,
+//           leadSide, leadToward, leadAway, leadRun, lead2Away, lead2Side,
+//           lead2Toward, lead3, deadZone, deadZoneDepth, hopK,
+//           lookAhead (deprecated alias of leadAway),
 //           fadeOpacity, fadeProbe, fadeRefresh, fadeMaxRadius, fadeHardMax,
 //           fadeTime, fadeBack, occRadius, occHead, occSweep, occNearLens,
-//           occFadeMaxDim, occFadeLastDim, occCullMax, occDollyFloor,
-//           occLiftStep, occLiftMax, occBudget,
+//           occFadeMaxDim, occFadeLastDim, occCullMax, occDollyFloor, occDollyMin,
+//           occLiftStep, occLiftMax, occLiftRate, occBudget, colLiftMax,
 //           occInstMin, occInstK, occInstBudget, occInstStep, occInstFloor,
 //           occPlinthNear, occLiftPlinth, zoneElev, zoneRise, zoneLambda,
-//           followLambda, followRecentre, revealDist, revealHold,
+//           revealDist, revealHold,
 //           lookElev, lookFov, lookPitch, moonElev, moonDist, moonFov,
-//           moonFovMax, moonDur, moonHold}
+//           moonFovMax, moonDur, moonHold,
+//           m2ElevOff, m2DistK, m2Fov, m2Pitch, m2PitchCap, m2SkyMin,
+//           pathAlign, pathDelay, pathRate,
+//           basisRate, flyDist, flyElev, flyFov, fovRate,
+//           cut, cutRy, cutRx, cutGrow, cutHold, cutRise, cutFall, nearMin, nearMax}
+//           (followLambda / followRecentre are gone: the mode-2 tether has no
+//           timed recentre, CAMERA_SPEC §2)
 //   basis() · snap() · setFree(v|null) · setParams(p) · isFree()
 //   mode · setMode(1|2|3) → emits 'camera:mode' · reveal(seconds?)
 //   shake(intensity, duration) · cinematic({target, azimuth, elevation, distance, duration}) → Promise
 //   moonMoment() → Promise|null (forces the night sky moment; emits 'camera:moon')
 //   lookingUp (0..1)
-//   introspection: fading · fadedList · culled · culledList · occDist · occLift ·
+//   introspection: fading · fadedList · culled · culledList · culledSizes · occDist · occLift ·
+//                  dollyFloor · indoors · ladderHeld (the window carries the frame: no dolly/tilt) ·
 //                  occBlocked · occMs · blockerCount · sweepCount · current · target
-//                  occDebug() — one unbudgeted sweep, reported not applied
+//                  controlAzimuth (the movement basis) · tilt (tiltFor(baseDistance))
+//                  · baseDistance · goalDistance · lead {x, z} (the aim's lead, §4.1)
+//                  occDebug({fromStop}?) — one unbudgeted sweep, reported not applied
+//                    (fromStop: cast from the last sweep's undollied stop, as update() does)
 //                  bodyVisibility() — five rays, whole scene (instances too),
-//                    { visible, total, rays } — the QA number for "can you see
-//                    him in this frame"
+//                    { visible, rawVisible, featherVisible, total, rays } — the QA
+//                    number for "can you see him in this frame" (cut-aware, §5.4);
+//                    a ray left shut carries cutWhy / excused (the §5.3 amber cases)
+//                  cutK (the window, 0..1) · cutState (…, by / plainBy: what the
+//                  window's reading holds) · cutout {isPatched, uniforms, stats, why}
+//                  · isPatched(o)
 import * as THREE from 'three';
 import { damp, clamp, lerp, smoothstep } from '../core/util.js';
+import { createCutout } from './camera/cutout.js';
 
 const STEP = Math.PI / 4;
+// The window reads the sweep's three AXIAL rays only (hat, chest, knees: bits 0-2). The two offset rays sit
+// 0.66 u beside the body axis — just outside his silhouette (≈0.6 u at its widest) — so a lamp they graze
+// stands BESIDE him, not in front of him, and must not open the window (A15). The ladder still reads all five.
+const WIN_RAYS = 3;
+const WIN_MASK = (1 << WIN_RAYS) - 1;
+// cutHits carries this bit beside a mesh's window rays: a PATCHED plinth right at the lens (§5.2 rule 6: grow)
+const PLINTH_BIT = 1 << 8;
+// triangle tests per sweep for confirming instance-sphere hits on the instance's own geometry (window only)
+const INST_CONFIRM_BUDGET = 12000;
+// the see-through window's ellipse bounds (px at pixel ratio 1, CAMERA_SPEC §5.1)
+const CUT_RMIN = 64, CUT_RMAX = 320;
+// the dolly's floor inside a building (CAMERA_SPEC §5.2; outdoors it is max(occDollyMin, occDollyFloor × goal))
+const INDOOR_FLOOR = 5.5;
 const ease = (t) => t * t * (3 - 2 * t);
-const MODE_NAME = { 1: 'isometric', 2: 'follow', 3: 'overhead' };
+const MODE_TOAST = { 1: 'Camera: iso — you turn it (Q/E)', 2: 'Camera: follow — turns with you', 3: 'Camera: top — lay of the land' };
 const OVERHEAD_EL = 1.10;     // mode 3 pitch
 const OVERHEAD_K = 1.40;      // mode 3 distance multiplier
+// mode 2 FOLLOW (CAMERA_SPEC §2, §4.2, §4.8)
+const M2_MIN_EL = 0.40;       // the follow lens never goes flatter than this (town cores sit on it)
+const TETHER_RATE = 0.6;      // rad/s: the geometric swing of the tether, capped
+const AUTO_YAW = 1.1;         // rad/s: every automatic yaw together (swing + alignment)
+const ORBIT_WAIT = 1.2;       // s: path alignment waits this long after a manual orbit
+const ALIGN_RAMP = 0.6;       // s: path alignment ramps in over this
+const ALIGN_L = 1.4;          // path alignment damping λ
+const FLY_L = 1.2, FLY_RATE = 0.9;   // flying: the tether swings behind the heading at λ1.2, ≤ 0.9 rad/s
+const FLY_FOV_L = 6;          // flying: take-off FOV ease, uncapped (flyer.js cameraCheck() wants ≥ 33 by 0.6 s)
+// the aim point's lead (CAMERA_SPEC §4.1, §4.8)
+const LEAD_GROW = 1.6, LEAD_DECAY = 0.9, LEAD_FLIP = 1.1;   // λ growing / decaying to zero / on a reversal
+const LEAD_RATE = 8;          // u/s cap on the lead's motion
+const PATH_AHEAD = 10;        // path anticipation looks this far along the path
+const HOP_DROP_MAX = 3.5;     // hop damping never holds the aim more than this under the body (a long fall is followed)
 // the night sky moment's framing budget, in radians of the vertical frame
 const MOON_R = 0.067;         // angular RADIUS of the sky's moon disc at 780 units
 const MOON_TOP = 0.045;       // …plus this much clear sky above it
@@ -152,9 +239,18 @@ export function create(ctx) {
     // 20-35 unit landmarks against the sky; the extra 3 units of distance pay
     // back the height so the visitor still reads at ~10% of frame height.
     azimuth: Math.PI * 0.25, elevation: 0.64, distance: 31, fov: 30,
-    minDist: 12, maxDist: 88, lookAhead: 2.2, deadZone: 0.85,
+    minDist: 12, maxDist: 88, deadZone: 0.85,
+    // LEAD (§2 lead row, §4.1): the aim runs ahead of the visitor, split in camera
+    // space: toward the lens is the largest because at 0.64 the frame shows ~10 u of
+    // ground on the lens side against ~22 u away. BASE values, × frameScale (the
+    // zoom) × leadRun at a run; mode 2 (lead2*) and mode 3 (lead3) have their own.
+    leadSide: 4.0, leadToward: 6.5, leadAway: 3.5, leadRun: 1.2,
+    lead2Away: 3.0, lead2Side: 2.0, lead2Toward: 5.0, lead3: 3.5,
+    deadZoneDepth: 0.7,       // the dead zone is an ellipse: this × the lateral half-width in depth
+    hopK: 0.3,                // share of a jump's rise that reaches the aim point
     minElev: 0.26, maxElev: 1.12, tiltOut: 0.12, tiltIn: 0.24,
-    fadeOpacity: 0.15, fadeProbe: 0.55, fadeRefresh: 0.25, occLiftMax: 0.30,
+    // occLiftMax: the sweep's tilt cap (CAMERA_SPEC §5.2: 0.12, was 0.30 — the window carries the frame now)
+    fadeOpacity: 0.15, fadeProbe: 0.55, fadeRefresh: 0.25, occLiftMax: 0.12,
     fadeTime: 0.12, fadeBack: 0.26,           // dissolve / restore, seconds
     // per-frame bounding-sphere fade: prop-sized separate meshes only (moving
     // cats, doors, signs). fadeHardMax caps even a userData.fade opt-in, so
@@ -164,27 +260,28 @@ export function create(ctx) {
     occRadius: 1.2,           // capsule radius around the sight line
     occHead: 1.6,             // the sweep aims at position.y + this
     occSweep: 1 / 6,          // seconds between geometry sweeps (6 Hz)
-    occNearLens: 6,           // a big merged mesh hit this close to the lens may fade
+    occNearLens: 6,           // (p.cut 0 fallback only) a big merged mesh hit this close to the lens may fade
     occFadeMaxDim: 12,        // "prop-sized": world bounding box, largest side
     occCullMax: 18,           // only a mesh this small may be culled for holding the lens
-    occDollyFloor: 0.62,      // dolly never closer than this fraction of the stop…
-    occLiftStep: 0.07,        // …and the tilt escalates this much per blocked sweep
-    occBudget: 60000,         // ray-triangle tests per sweep (merged meshes are huge)
-    colLiftMax: 0.12,         // the COLLIDER tilt is a guess at heights: keep it at 7°
-    occFadeLastDim: 45,       // last-resort ghost: a building may, a district may not
+    occDollyFloor: 0.62,      // dolly never closer than this fraction of the mode's distance goal…
+    occDollyMin: 14,          // …nor than this, outdoors (indoors the floor is INDOOR_FLOOR, 5.5) — §5.2
+    occLiftStep: 0.07,        // the tilt escalates this much per blocked sweep
+    occBudget: 40000,         // ray-triangle tests per sweep (merged meshes are huge)
+    colLiftMax: 0.06,         // the COLLIDER tilt is a guess at heights: keep it at 3.4°
+    occLiftRate: 0.14,        // rad/s: the occlusion tilt's rate cap (A10: automatic elevation ≤ 0.15 rad/s, with a margin)
+    occFadeLastDim: 45,       // (p.cut 0 fallback only) last-resort ghost: a building may, a district may not
     // INSTANCED BLOCKERS (palm fronds, gummy trees). The sweep cannot raycast a
     // 2000-instance cloud, so it tests instance BOUNDING SPHERES against the
     // sight line, nearest first, inside a per-sweep budget.
     occInstMin: 0.75,         // ignore instances smaller than this (grass, petals)
     occInstK: 0.70,           // instance spheres are loose around fronds: shrink them
     occInstBudget: 2500,      // instance sphere tests per sweep
-    occInstStep: 1.7,         // an instanced hit escalates the tilt this much harder…
-    occInstFloor: 0.62,       // …but obeys the same dolly floor as everything else
-    // PLINTH / TERRAIN MASSES. A featureless plinth right under the lens cannot
-    // be dollied past and is too tall to tip over at 0.30 rad — so when one is
-    // within occPlinthNear of the lens the tilt is allowed to run to 0.35 rad
-    // and the dolly is forced in behind it.
-    occPlinthNear: 8, occLiftPlinth: 0.35,
+    occInstStep: 1.7,         // an UNPATCHED instanced hit escalates the tilt this much harder…
+    occInstFloor: 0.62,       // …but obeys the same dolly floor as everything else (× goal, ≥ occDollyMin)
+    // PLINTH / TERRAIN MASSES within occPlinthNear of the lens: a patched one only grows the window
+    // (§5.2 rule 6); an unpatched one lets the tilt run to occLiftPlinth (0.20) and forces the dolly
+    // to its floor.
+    occPlinthNear: 8, occLiftPlinth: 0.20,
     // a hit this close to the ground is a kerb, a flowerbed rim or a district's
     // own pavement — the sight line grazes one of those in every frame there is
     occGroundMin: 1.2,
@@ -192,7 +289,29 @@ export function create(ctx) {
     // with roof tiles; easing to 0.50 rad and aiming a metre higher gives the
     // facades two thirds of the frame and puts a horizon back in the shot.
     zoneElev: 0.50, zoneRise: 1.0, zoneLambda: 2.2,
-    followLambda: 3, followRecentre: 1.5,     // mode 2
+    // MODE 2 FOLLOW: mode 1's framing bent down (−0.18, floor 0.40) and in (×0.72),
+    // a wider lens (42°, the visitor stays the same size) and an authored pitch
+    // (lookAt() alone puts the top frame edge 5° under the horizon at fov 42).
+    // m2Pitch 0.15, not the spec's 0.12: at el 0.46 / fov 42, 0.12 leaves the top
+    // edge +0.0265 rad over the horizon = a 3.9% band, under A15's 4%; 0.15 gives
+    // +0.0565 rad = 8.3% (16% in town cores at el 0.40), body ≈ 20% under centre.
+    m2ElevOff: -0.18, m2DistK: 0.72, m2Fov: 42, m2Pitch: 0.15,
+    // …and the ladder's occlusion lift, which steepens the lens to see over a blocker,
+    // tips the horizon down with it: once the band would drop under m2SkyMin of the frame
+    // height (A15's 4% + a margin), the pitch rises by what it takes to hold it, up to
+    // m2PitchCap × the half-FOV (0.213 rad at fov 42, feet ≈ 88% down the frame), and the
+    // lift stops there (0.089 rad at el 0.46, 0.149 in town cores). m2SkyMin 0 = off.
+    m2PitchCap: 0.58, m2SkyMin: 0.045,
+    // path alignment: 0.5 s of pure W on a path bends the tether 70% toward the
+    // path's tangent, at ≤ pathRate rad/s
+    pathAlign: 0.7, pathDelay: 0.5, pathRate: 1.1,
+    // controlAzimuth chases the lens at this, rad/s. The spec's 0.9 is the limit on
+    // the HEADING (A5); the visitor's own velocity lag shrinks as he speeds up out
+    // of a slope, which turns 0.9 of basis into 0.912 of heading on the A5 route —
+    // so the basis runs just under it (§10 allows 0.7-1.2).
+    basisRate: 0.87,
+    flyDist: 44, flyElev: 0.38, flyFov: 40,   // Contract E: the framing while ctx.state.flying
+    fovRate: 12,                              // °/s cap on the per-mode FOV ease
     revealDist: 44, revealHold: 2.5,          // landmark reveal
     // hold L: look up. The elevation alone only flattens the view — the pitch
     // is what puts sky on the screen, because lookAt() always centres the body.
@@ -201,13 +320,53 @@ export function create(ctx) {
     // (never past moonFovMax) rather than being cropped off the top of frame.
     moonElev: 0.12, moonDist: 26, moonFov: 44, moonFovMax: 58,
     moonDur: 5, moonHold: 2.5,
+    // THE SEE-THROUGH WINDOW (CAMERA_SPEC §5.1, camera/cutout.js). cut 0 (or ?cut=0) = off.
+    // Ellipse: ry = clamp(cutRy × the body's projected height, 64, 320 px)·grow, rx = cutRx·ry; grow eases
+    // to cutGrow while ≥ 2 body rays are blocked by patched masses. It opens at λ cutRise when a body ray
+    // is blocked by a patched mass (or a wall/trunk collider sits in the sight line two frames running),
+    // stays open cutHold s after the last need, then closes at λ cutFall. The near-lens dither band runs
+    // clamp(0.2 × lens distance, nearMin, nearMax) deep.
+    cut: ctx.params?.get?.('cut') === '0' ? 0 : 1,
+    cutRy: 1.25, cutRx: 0.8, cutGrow: 1.4, cutHold: 0.6, cutRise: 12, cutFall: 3, nearMin: 2, nearMax: 6,
   };
+  // lookAhead is gone (§6.1): kept as a deprecated alias of leadAway
+  Object.defineProperty(p, 'lookAhead', { enumerable: false, configurable: true, get: () => p.leadAway, set: (v) => { p.leadAway = v; } });
   const DIST_REF = 31;        // the framing the look-ahead / dead-zone were tuned at
   const target = new THREE.Vector3();
   const cur = { azimuth: p.azimuth, elevation: p.elevation, distance: p.distance };
   let free = null;
   let mode = 1;
-  let followOff = 0, followOffT = 0;   // mode 2: temporary Q/E offset + seconds walked since
+  // MODE 2 TETHER (§4.2): a ground anchor A the lens hangs over, kept at Rh =
+  // goalDist·cos(goalElev) from the visitor. The lens bearing IS the bearing of A.
+  const anchor = { x: 0, z: 0, ok: false };      // ok = false: re-seed from cur.azimuth
+  let turnTotal = 0, turnDone = 1, turnT = 1;    // Q/E: eased rotation of A (azDur)
+  let orbitNow = 0;                              // drag rotation of A waiting for this frame
+  let manualT = 99;                              // seconds since the last manual orbit (drag, Q/E)
+  let fwdT = 0, alignK = 0;                      // path alignment: pure-W-on-a-path timer, ramp 0..1
+  // pathAt()'s answer (no allocation): the tangent signed along travel (yaw) and, for the lead's
+  // path anticipation, the direction from the visitor to the path point PATH_AHEAD u further on (ax, az)
+  const pathHit = { on: false, yaw: 0, ax: 0, az: 0 };
+  // LEAD (§4.1): the aim's offset ahead of the visitor (world xz), damped toward this frame's goal
+  const lead = { x: 0, z: 0 };
+  let hopRef = NaN;                              // feet y at the last grounded frame (hop damping)
+  const giOut = { h: 0 };                        // groundInfo(x, z, out) scratch
+  const axNow = { x: 0, y: 0, active: false };   // this frame's movement input (keys, else the stick)
+  // MOVEMENT BASIS (§4.3): WASD reads ctrlAz, which chases the lens at basisRate
+  // while a movement key is held and equals it when idle.
+  let ctrlAz = p.azimuth;
+  let occYaw = 0;                                // clear-side whisker yaw (§4.4, a later step): 0 for now
+  let modeFov = p.fov, pitchBase = 0;            // eased per-mode FOV (§2) and pitch (m2Pitch)
+  let tiltNow = 0, baseDistNow = p.distance;     // tiltFor(baseDist) as last applied
+  // ownership / flight / indoors flags, refreshed by status() (update, snap, setMode, setFree, setParams)
+  let ownNow = false, flyNow = false, wasOwned = false, wasFlying = false, inNow = false;
+  let lastPAz = p.azimuth;                       // p.azimuth as update() last left it (snap() never refreshes it)
+  // Owner hand-off (§2 owned(), §7 "cave corridor azimuth not re-triggered by mode 2"). An owner's
+  // transition is setParams({azimuth}) → snap() → declare itself (cave.js caveCam → snap → placeOverride),
+  // so the snap runs one step too early, unowned, and in mode 2 it frames the follow lens. These two flags
+  // let the next update() see what happened since the last one: azExt = somebody called
+  // setParams({azimuth}); snapFresh = somebody called snap(). Both are cleared by update() right after
+  // its ownership-start check.
+  let azExt = false, snapFresh = false;
   let revealT = 0, revealK = 0, revealMute = 0, lastHere = null;
   let distRef = p.distance;   // "no extra tilt" reference — only wheel zoom tilts the view
   let azFrom = p.azimuth, azTo = p.azimuth, azT = 1, azDur = 0.42;   // eased Q/E snap
@@ -223,10 +382,25 @@ export function create(ctx) {
   let lastDolly = Infinity;
   let sweepCursor = 0;       // round-robin position inside the triangle budget
   let liftMaxRun = 0;        // consecutive sweeps with the tilt pinned at its cap
-  let liftCap = p.occLiftMax;   // …which is taller when a plinth is under the lens
-  let giveUp = false;        // the tilt was tried here and did not clear him
+  let liftCap = p.occLiftMax;   // …which is taller when an UNPATCHED plinth is under the lens
+  let giveUp = false;        // (p.cut 0 fallback only) the tilt was tried here and did not clear him
   const giveUpAt = new THREE.Vector3(NaN, 0, 0);
+  // the instanced pass's round-robin cursor over (cloud, instance) (§5.2 rule 5: every instance is
+  // eventually tested) and the window's instance bits, sticky over one full cycle of that cursor
+  let instC = 0, instJ = 0, instAccCut = 0, instAccPlain = 0, instPrevCut = 0, instPrevPlain = 0;
+  let cutPlinth = false;     // a PATCHED plinth right at the lens: the window grows (§5.2 rule 6)
+  let winCarry = false;      // the window carries the frame this frame: the ladder holds still (§5.2)
   let sweepT = 0, occMs = 0;
+  // the see-through window's drive (§5.1): cutK eases toward 1 while cutNeed, holds cutHold s,
+  // then closes; cutEff is what the shader and the QA see (× (1 − holdAng), 0 off screen / free)
+  let cutKraw = 0, cutEff = 0, cutHoldT = 0, cutGrowK = 1, cutOnScr = true;
+  let cutNeedA = false;         // (a) the sweep: a body ray blocked by a PATCHED mesh / instance cloud
+  let cutRays = 0;              // how many body rays patched masses block (drives the grow)
+  let cutAllPlain = false;      // every blocker the sweep sees is unpatched (gates the collider trigger)
+  let colRun = 0;               // (b) consecutive frames occlude() found a wall/trunk collider in the sight line
+  let colSweeps = 0;            // …and how many sweeps have run since it began
+  let cutSweepClear = true;     // the last sweep saw no blocker at all on any body ray
+  const cutO = { ry: 1.25, rx: 0.8, rMin: CUT_RMIN, rMax: CUT_RMAX, nearMin: 2, nearMax: 6 };
   let cine = null;
   let lookK = 0;                // hold-L look-up, eased 0..1
   let moonDone = false;         // the night sky moment already ran this night
@@ -273,30 +447,266 @@ export function create(ctx) {
   // The mode only bends the GOALS; p.elevation / p.distance stay the player's
   // own (wheel / drag / setParams) values, so 1→3→1 comes back to the framing
   // you left, and snap() / setFree(null) keep whatever mode is current.
-  const goalElev = () => (mode === 3
-    ? clamp(OVERHEAD_EL, p.minElev, p.maxElev)
-    : clamp(lerp(p.elevation, Math.min(p.elevation, p.zoneElev), zoneK), p.minElev, p.maxElev));
-  const goalDist = () => clamp(p.distance * (mode === 3 ? OVERHEAD_K : 1), p.minDist, p.maxDist);
-  /** Mode 2 wants the lens BEHIND the visitor: the camera looks along (-sin az,
-   *  -cos az) and the visitor faces (sin f, cos f), so az = facing + π. */
-  const followAz = () => {
-    const f = ctx.systems.player?.facing;
-    return wrap((Number.isFinite(f) ? f : p.azimuth - Math.PI) + Math.PI + followOff);
+  //
+  // owned() (§2): somebody else authors the framing — an interior, the palace or
+  // the cave (placeOverride), a vehicle, the ferry, a lock. Mode 2 then renders
+  // EXACTLY as mode 1 (goals, p.fov, no pitch, yaw from p.azimuth, Q/E snaps),
+  // so palace.js / cave.js / the cat interiors keep their framing in either mode.
+  // Flying (Contract E) outranks both: 44 flat / 0.38 / fov 40, tether behind
+  // the heading, in every mode.
+  function owned(inside = indoors()) {
+    const pl = ctx.systems.player;
+    return !!(inside || ctx.state.placeOverride || pl?.onVehicle || pl?.onFerry || pl?.locked || ctx.state.ferry);
+  }
+  function status() { inNow = indoors(); ownNow = owned(inNow); flyNow = !!ctx.state.flying; }
+  /** Mode 2 proper: the tether drives the yaw and the follow framing applies. */
+  const follow = () => mode === 2 && !ownNow && !flyNow;
+  /** Who drives the yaw: the tether (mode 2 proper, or any mode while flying) or p.azimuth. */
+  const tetherOn = () => flyNow || (mode === 2 && !ownNow);
+  const goalElev = () => {
+    if (flyNow) return p.flyElev;
+    if (mode === 3) return clamp(OVERHEAD_EL, p.minElev, p.maxElev);
+    const e1 = clamp(lerp(p.elevation, Math.min(p.elevation, p.zoneElev), zoneK), p.minElev, p.maxElev);
+    return mode === 2 && !ownNow ? clamp(e1 + p.m2ElevOff, M2_MIN_EL, p.maxElev) : e1;
   };
+  const goalDist = () => {
+    if (flyNow) return p.flyDist;                // flat: p.distance is ignored while flying
+    const k = mode === 3 ? OVERHEAD_K : mode === 2 && !ownNow ? p.m2DistK : 1;
+    return clamp(p.distance * k, p.minDist, p.maxDist);
+  };
+  const fovGoalMode = () => (flyNow ? p.flyFov : follow() ? p.m2Fov : p.fov);
+  const pitchGoal = () => (follow() ? p.m2Pitch : 0);
+  /** The landmark reveal runs in modes 1 and 2 only (§2), never while flying. */
+  const revealEff = () => (mode === 3 || flyNow ? 0 : revealK);
   /** Distance goal including the landmark reveal ease-out. */
-  const goalDistNow = () => { const d = goalDist(); return d + Math.max(0, p.revealDist - d) * revealK; };
+  const goalDistNow = () => { const d = goalDist(); return d + Math.max(0, p.revealDist - d) * revealEff(); };
+  /** The wheel's distance (plus the reveal): what tiltFor() reads — never the
+   *  mode-scaled cur.distance, so modes 2 and 3 add no tilt of their own (§2). */
+  const baseDist = () => p.distance + Math.max(0, p.revealDist - p.distance) * revealEff();
+  /** The dolly's floor (CAMERA_SPEC §5.2, A3): max(occDollyMin, k × the mode's distance goal) outdoors,
+   *  INDOOR_FLOOR inside a building. Never pushes the lens OUT: every dolly reads min(dist, …). */
+  const dollyFloor = (k = p.occDollyFloor) => (inNow ? INDOOR_FLOOR : Math.max(p.occDollyMin, goalDist() * k));
 
+  // ── mode-2 tether (§4.2) ───────────────────────────────────────────────────
+  const tetherR = () => Math.max(1, goalDist() * Math.cos(goalElev()));
+  function seedAnchor(P, az, Rh) { anchor.x = P.x + Math.sin(az) * Rh; anchor.z = P.z + Math.cos(az) * Rh; anchor.ok = true; }
+  /** This frame's movement input: the keys if any are held, else the virtual
+   *  stick (touch, debug.walk) — both ignoring moveLock. Fills axNow. */
+  function readAxis(inp) {
+    const a = typeof inp.axisRaw === 'function' ? inp.axisRaw(axNow) : null;
+    if (a && a.active) { if (a !== axNow) { axNow.x = a.x; axNow.y = a.y; axNow.active = true; } return axNow; }
+    const v = inp.virtualRaw ?? inp.virtual;
+    axNow.x = Number(v?.x) || 0; axNow.y = Number(v?.y) || 0; axNow.active = axNow.x !== 0 || axNow.y !== 0;
+    return axNow;
+  }
+  const PATHS = Array.isArray(world.PATHS) ? world.PATHS : [];
+  /**
+   * Path anticipation's sensor (§4.1): the nearest world.PATHS segment on this
+   * island within width/2 + 2.5 of (x, z) whose tangent lies within 53° of the
+   * travel direction (|cos| > 0.6). Sets pathHit.yaw to that tangent signed
+   * along travel, and pathHit.ax/az to the unit direction from (x, z) to the
+   * path point PATH_AHEAD u further along the path in the travel sense (past
+   * the path's end it carries on along the last segment). ~60 segments, run
+   * once per frame, no allocation.
+   */
+  function pathAt(x, z, vx, vz) {
+    pathHit.on = false;
+    const sp = Math.hypot(vx, vz);
+    if (sp < 1e-3) return false;
+    const ux = vx / sp, uz = vz / sp;
+    const isl = ctx.state.island || (x < 0 ? 'candy' : 'cat');
+    let best = Infinity, tx = 0, tz = 0, bk = -1, bi = 0, bt = 0, bs = 1;
+    for (let k = 0; k < PATHS.length; k++) {
+      const P = PATHS[k];
+      if (P.island !== isl || !P.points) continue;
+      const pts = P.points, lim = (P.width || 0) * 0.5 + 2.5;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const ax = pts[i][0], az = pts[i][1];
+        const sx = pts[i + 1][0] - ax, sz = pts[i + 1][1] - az, L2 = sx * sx + sz * sz;
+        if (L2 < 1e-6) continue;
+        const t = clamp(((x - ax) * sx + (z - az) * sz) / L2, 0, 1);
+        const d = Math.hypot(ax + sx * t - x, az + sz * t - z);
+        if (d > lim || d >= best) continue;
+        const L = Math.sqrt(L2), cx = sx / L, cz = sz / L, c = ux * cx + uz * cz;
+        if (Math.abs(c) <= 0.6) continue;
+        const s = c < 0 ? -1 : 1;
+        best = d; tx = cx * s; tz = cz * s; bk = k; bi = i; bt = t; bs = s;
+      }
+    }
+    if (best === Infinity) return false;
+    pathHit.on = true; pathHit.yaw = Math.atan2(tx, tz);
+    // walk PATH_AHEAD u along the polyline from the foot of the perpendicular, in the travel sense
+    const pts = PATHS[bk].points;
+    let qx = pts[bi][0] + (pts[bi + 1][0] - pts[bi][0]) * bt, qz = pts[bi][1] + (pts[bi + 1][1] - pts[bi][1]) * bt;
+    let left = PATH_AHEAD, j = bs > 0 ? bi + 1 : bi, dx = tx, dz = tz;
+    while (left > 0 && j >= 0 && j < pts.length) {
+      const ex = pts[j][0] - qx, ez = pts[j][1] - qz, L = Math.hypot(ex, ez);
+      if (L >= left) { qx += ex / L * left; qz += ez / L * left; left = 0; break; }
+      if (L > 1e-6) { dx = ex / L; dz = ez / L; }
+      qx = pts[j][0]; qz = pts[j][1]; left -= L; j += bs;
+    }
+    if (left > 0) { qx += dx * left; qz += dz * left; }       // past the end: straight on
+    const ax = qx - x, az = qz - z, La = Math.hypot(ax, az);
+    if (La > 1e-3) { pathHit.ax = ax / La; pathHit.az = az / La; } else { pathHit.ax = tx; pathHit.az = tz; }
+    return true;
+  }
+  /**
+   * Path alignment's goal azimuth (§4.2), or NaN while it is released. Runs the
+   * timers: 0.5 s of pure-forward input on a path at sp > 1.5 arms it, it waits
+   * 1.2 s after any manual orbit, ramps in over 0.6 s, and lets go at once on S,
+   * A/D, a stop or leaving the path.
+   */
+  function alignGoal(dt, pl) {
+    const v = pl.velocity;
+    const sp = v ? Math.hypot(v.x, v.z) : 0;
+    const pure = axNow.y > 0 && Math.abs(axNow.x) < 0.25 * axNow.y;
+    // pathHit: this frame's pathAt(), run once by update() before the tether (the lead reads it too)
+    if (!(pure && sp > 1.5 && pathHit.on)) { fwdT = 0; alignK = 0; return NaN; }
+    fwdT += dt;
+    if (fwdT < p.pathDelay || manualT < ORBIT_WAIT) { alignK = 0; return NaN; }
+    alignK = Math.min(1, alignK + dt / ALIGN_RAMP);
+    const travel = Math.atan2(v.x, v.z);
+    // − occYaw: a whisker offset is never baked into A and then unwound (§4.2)
+    return lerpAngle(travel + Math.PI, pathHit.yaw + Math.PI, p.pathAlign) - occYaw;
+  }
+  /**
+   * One frame of the tether; returns the new azimuth and moves A.
+   *   · geometry: A = P + d̂·Rh, az = bearing of A. Strafing swings the view by
+   *     v_lateral/Rh (0.35 rad/s walking), capped at TETHER_RATE; S pushes the
+   *     lens straight back with no yaw at all; W is already "behind".
+   *   · manual: drag rotates A about P at once, Q/E over azDur (eased).
+   *   · automatic: path alignment in mode 2, "behind the heading" while flying;
+   *     swing + automatic together stay under AUTO_YAW.
+   */
+  function tether(dt, pl) {
+    const P = pl.position, Rh = tetherR();
+    const az0 = cur.azimuth;
+    if (!anchor.ok) seedAnchor(P, az0, Rh);
+    const dx = anchor.x - P.x, dz = anchor.z - P.z, L = Math.hypot(dx, dz);
+    // |d| ≈ 0 has no bearing; a jump (a teleport nobody snapped) re-seeds from the lens instead of whipping
+    const swing = L >= 0.1 && L <= Rh * 4 ? clamp(wrap(Math.atan2(dx, dz) - az0), -TETHER_RATE * dt, TETHER_RATE * dt) : 0;
+    let az = az0 + swing + orbitNow;
+    orbitNow = 0;
+    if (turnT < 1) { turnT = Math.min(1, turnT + dt / azDur); const e = ease(turnT); az += turnTotal * (e - turnDone); turnDone = e; }
+    let step = 0;
+    if (flyNow) {
+      fwdT = 0; alignK = 0;
+      const h = ctx.state.flying?.heading;
+      if (Number.isFinite(h) && manualT >= ORBIT_WAIT) step = clamp(wrap(h + Math.PI - az) * (1 - Math.exp(-FLY_L * dt)), -FLY_RATE * dt, FLY_RATE * dt);
+    } else {
+      const want = alignGoal(dt, pl);
+      if (want === want) step = clamp(wrap(want - az) * (1 - Math.exp(-ALIGN_L * dt)) * alignK, -p.pathRate * dt, p.pathRate * dt);
+    }
+    step = clamp(step, -AUTO_YAW * dt - swing, AUTO_YAW * dt - swing);
+    az = wrap(az + step);
+    anchor.x = P.x + Math.sin(az) * Rh; anchor.z = P.z + Math.cos(az) * Rh;
+    return az;
+  }
+  /**
+   * Mode 2's horizon guard (§2 m2Pitch, A15's sky band). The ladder's lift raises the lens to
+   * see over a blocker, which tips the whole frame down by the same angle and takes the sky band
+   * with it. skyTop(half) is the angle the top frame edge must keep above the horizontal for a
+   * band of m2SkyMin; modePitch() raises the pitch just enough to hold it (pitch turns the view
+   * about the lens: the sight line over the blocker is unchanged, the visitor sits lower in frame),
+   * never past m2PitchCap × half-FOV, and liftMaxNow() stops the lift where even that cap cannot
+   * hold the band. Faded with the mode's own pitch: nothing in modes 1/3, owned, or flying.
+   */
+  const skyTop = (half) => half - Math.atan((1 - 2 * p.m2SkyMin) * Math.tan(half));
+  function modePitch(pb, aim) {
+    if (!(pb > 1e-4)) return 0;
+    if (!(p.m2SkyMin > 0)) return pb;
+    const half = cam.fov * Math.PI / 360;
+    const cx = cam.position.x, cz = cam.position.z;
+    const down = Math.atan2(cam.position.y - aim.y, Math.hypot(aim.x - cx, aim.z - cz));   // the lookAt's down angle
+    const need = down - half + skyTop(half);                                                 // pitch that holds the band
+    const extra = Math.max(0, need - pb) * Math.min(1, pb / Math.max(1e-4, p.m2Pitch));
+    return Math.min(pb + extra, Math.max(pb, half * p.m2PitchCap));
+  }
+  /** The ladder's lift cap this frame for a lens at elevation `el` before the lift: in mode 2
+   *  proper, no more than the capped pitch can still hold the sky band against. */
+  function liftMaxNow(el) {
+    if (!(p.m2SkyMin > 0) || !follow() || !(pitchBase > 1e-4)) return liftCap;
+    const half = cam.fov * Math.PI / 360;
+    return clamp(Math.max(pitchBase, half * p.m2PitchCap) + half - skyTop(half) - el, 0, liftCap);
+  }
+  /** Rotate the tether by d radians, eased over azDur (Q/E in mode 2). */
+  function turnTether(d) { turnTotal = turnTotal * (1 - turnDone) + d; turnDone = 0; turnT = 0; }
+  function resetTether() { turnTotal = 0; turnDone = 1; turnT = 1; orbitNow = 0; fwdT = 0; alignK = 0; }
+  /** The tether is handing the yaw back to p.azimuth (2→1/3, landing, ownership):
+   *  keep the bearing the lens has, including any whisker offset. */
+  function handYawBack() {
+    p.azimuth = wrap(cur.azimuth + occYaw); cur.azimuth = p.azimuth; occYaw = 0;
+    azFrom = azTo = p.azimuth; azT = 1; lastPAz = p.azimuth;
+  }
+
+  // ── the aim point: lead, path anticipation, hop damping (§4.1) ─────────────
+  /** Where the feet rest at (x, z): the ground core (low props count), else the terrain. */
+  function groundH(x, z) {
+    const pl = ctx.systems.player;
+    if (typeof pl?.groundHeight === 'function') { const h = pl.groundHeight(x, z); if (Number.isFinite(h)) return h; }
+    else if (typeof pl?.groundInfo === 'function') { const g = pl.groundInfo(x, z, giOut); if (g && Number.isFinite(g.h)) return g.h; }
+    return world.height(x, z);
+  }
+  /**
+   * The aim's height: 1.15 over the feet (+ the town-core rise, as before), but only hopK of a
+   * jump's rise over the ground under him — or over the height he took off from, whichever is
+   * higher, so a hop off a perch or out of a wade is measured from where he left, and a fall below
+   * it is followed 1:1. Never more than HOP_DROP_MAX under the body (a long drop stays in frame).
+   * Off while owned, on a vehicle or flying: P.y + 1.15 exactly as before.
+   */
+  function aimY(pl) {
+    const P = pl.position, y = P.y + 1.15 + p.zoneRise * zoneK;   // a town aims at the shopfronts, not the kerb
+    if (ownNow || flyNow || pl.onVehicle) { hopRef = NaN; return y; }
+    if (!ctx.state.playerAirborne) { hopRef = P.y; return y; }
+    const h = groundH(P.x, P.z);
+    const hop = Math.max(0, P.y - (hopRef === hopRef ? Math.max(h, hopRef) : h));
+    return y - Math.min((1 - p.hopK) * hop, HOP_DROP_MAX);
+  }
+  /**
+   * One frame of the lead (§4.1). The goal splits the travel direction in camera space —
+   * F = (−sin az, −cos az) up-screen on the ground, R = (cos az, −sin az) — into away / toward
+   * the lens and sideways, each with its mode's base lead (§2), × smoothstep(0.5, 7, speed) ×
+   * frameScale × leadRun at a run (the run is read off the speed as well as Shift, so a full
+   * stick or debug.walk's 1.58 counts). Near a path it turns halfway toward the path point
+   * PATH_AHEAD u ahead (magnitude kept). The lead damps toward the goal at λ1.6 growing, λ0.9
+   * decaying (the view holds where you were heading for ~1 s), λ1.1 on a reversal, ≤ 8 u/s.
+   */
+  function updateLead(dt, pl, az) {
+    let gx = 0, gz = 0;
+    const v = pl?.velocity, vs = v ? Math.hypot(v.x, v.z) : 0;
+    if (vs > 1e-3) {
+      const Fx = -Math.sin(az), Fz = -Math.cos(az), Rx = Math.cos(az), Rz = -Math.sin(az);
+      const f = (v.x * Fx + v.z * Fz) / vs, r = (v.x * Rx + v.z * Rz) / vs;
+      let away, toward, side;
+      if (follow()) { away = p.lead2Away; toward = p.lead2Toward; side = p.lead2Side; }
+      else if (mode === 3 && !flyNow) { away = toward = side = p.lead3; }
+      else { away = p.leadAway; toward = p.leadToward; side = p.leadSide; }
+      const walk = (Number(pl.speed) || 7) * (Number.isFinite(pl.speedBoost) ? pl.speedBoost : 1);
+      const runK = pl.running ? 1 : smoothstep(1.1 * walk, 1.4 * walk, vs);
+      const s = smoothstep(0.5, 7, vs) * frameScale() * (1 + (p.leadRun - 1) * runK);
+      const fl = f * (f >= 0 ? away : toward) * s, rl = r * side * s;
+      gx = Fx * fl + Rx * rl; gz = Fz * fl + Rz * rl;
+      if (pathHit.on) {
+        const m = Math.hypot(gx, gz);
+        if (m > 1e-4) {
+          const a = Math.atan2(gx, gz), c = a + wrap(Math.atan2(pathHit.ax, pathHit.az) - a) * 0.5;
+          gx = Math.sin(c) * m; gz = Math.cos(c) * m;
+        }
+      }
+    }
+    const lam = lead.x * gx + lead.z * gz < 0 ? LEAD_FLIP
+      : gx * gx + gz * gz >= lead.x * lead.x + lead.z * lead.z ? LEAD_GROW : LEAD_DECAY;
+    const k = 1 - Math.exp(-lam * dt);
+    let mx = (gx - lead.x) * k, mz = (gz - lead.z) * k;
+    const ml = Math.hypot(mx, mz), cap = LEAD_RATE * dt;
+    if (ml > cap) { mx *= cap / ml; mz *= cap / ml; }
+    lead.x += mx; lead.z += mz;
+  }
+  /** The aim point: the feet + the lead, at aimY(). */
   function desiredTarget(out) {
     const pl = ctx.systems.player;
     if (!pl?.position) return out.set(0, 2, 0);
-    out.copy(pl.position);
-    out.y += 1.15 + p.zoneRise * zoneK;      // a town aims at the shopfronts, not the kerb
-    if (pl.velocity) {
-      tmp2.copy(pl.velocity).setY(0);
-      const sp = tmp2.length();
-      if (sp > 0.2) out.addScaledVector(tmp2.divideScalar(sp), p.lookAhead * frameScale() * Math.min(1, sp / 6));
-    }
-    return out;
+    return out.set(pl.position.x + lead.x, aimY(pl), pl.position.z + lead.z);
   }
 
   /** Where the lens would stand for this framing (no side effects). */
@@ -311,19 +721,29 @@ export function create(ctx) {
 
   const api = {
     params: p, current: cur, target,
-    /** Camera-relative forward/right on the ground plane (movement uses this). */
-    basis() { const az = cur.azimuth; return { fx: -Math.sin(az), fz: -Math.cos(az), rx: Math.cos(az), rz: -Math.sin(az) }; },
-    /** Current camera mode (1 iso / 2 follow / 3 overhead). */
+    /** Camera-relative forward/right on the ground plane (movement uses this).
+     *  Reads controlAzimuth (§4.3), not the lens: it chases the lens at
+     *  basisRate while you hold a key, and never takes a cinematic's yaw. */
+    basis() { const az = ctrlAz; return { fx: -Math.sin(az), fz: -Math.cos(az), rx: Math.cos(az), rz: -Math.sin(az) }; },
+    /** The movement basis azimuth (radians; the lens bearing once it has caught up). */
+    get controlAzimuth() { return ctrlAz; },
+    /** Current camera mode (1 iso / 2 follow / 3 top). */
     get mode() { return mode; },
-    /** Switch mode. Emits 'camera:mode' and toasts; survives snap()/setFree(null). */
+    /** Switch mode. Emits 'camera:mode' and toasts; survives snap()/setFree(null).
+     *  1→2 hangs the tether at the lens's current bearing (nothing whips); 2→1/3
+     *  writes p.azimuth = the lens bearing once, so the view stays put. */
     setMode(n) {
       const m = n === 2 ? 2 : n === 3 ? 3 : 1;
       if (m === mode) return mode;
+      status();
+      if (follow()) handYawBack();                 // leaving the tether (not while owned / flying)
       mode = m;
-      followOff = 0; followOffT = 0;
       azFrom = azTo = p.azimuth; azT = 1;
+      anchor.ok = false;                           // the next tether frame seeds A at cur.azimuth
+      resetTether();
+      ctrlAz = wrap(cur.azimuth + occYaw);
       ctx.events.emit('camera:mode', m);
-      ctx.systems.ui?.toast?.(`Camera: ${MODE_NAME[m]}`);
+      ctx.systems.ui?.toast?.(MODE_TOAST[m]);
       return mode;
     },
     /** Ease the lens out to params.revealDist for `secs`, then back — used when
@@ -332,61 +752,141 @@ export function create(ctx) {
     get revealing() { return revealK > 0.01; },
 
     snap() {
+      status();
+      // ownership began in mode 2 and this snap is its cut (sourpatch eaten.js locks, then
+      // snaps): the owned framing reads p.azimuth, which mode 2 never writes — keep the lens's
+      // bearing, unless the owner has just aimed it (update() applies the same rule)
+      if (ownNow && !wasOwned && mode === 2 && !flyNow && !azExt && p.azimuth === lastPAz) handYawBack();
+      // a landing snapped before the next update: keep the lens behind the machine
+      if (wasFlying && !flyNow && !follow()) handYawBack();
+      wasOwned = ownNow; wasFlying = flyNow;
       const pl0 = ctx.systems.player?.position;
       zoneK = pl0 ? zoneAt(pl0.x, pl0.z) : 0;    // settled, not damped: a screenshot gets one frame
-      cur.azimuth = mode === 2 ? followAz() : p.azimuth;
-      cur.elevation = goalElev(); cur.distance = goalDist();
       revealT = 0; revealK = 0;
+      resetTether();
+      if (tetherOn() && pl0) {
+        // the tether snaps BEHIND: the facing (on foot) or the heading (flying) + π
+        const f = flyNow ? ctx.state.flying.heading : ctx.systems.player?.facing;
+        cur.azimuth = wrap((Number.isFinite(f) ? f : p.azimuth - Math.PI) + Math.PI);
+        seedAnchor(pl0, cur.azimuth, tetherR());
+      } else { cur.azimuth = p.azimuth; anchor.ok = false; }
+      cur.elevation = goalElev(); cur.distance = goalDist();
+      ctrlAz = wrap(cur.azimuth + occYaw);
+      // the mode's lens and pitch at once (a screenshot gets one frame); a free
+      // camera keeps the lens it was given
+      modeFov = fovGoalMode(); pitchBase = pitchGoal();
+      if (!free) { cam.fov = modeFov; cam.updateProjectionMatrix(); }
+      baseDistNow = baseDist(); tiltNow = flyNow ? 0 : tiltFor(baseDistNow);
       // a teleport lands you inside a landmark zone; that is not an "arrival",
       // so swallow the banner that follows it (and keeps --view renders exact)
       revealMute = 0.8; lastHere = ctx.systems.ui?.here ?? null;
       azFrom = azTo = p.azimuth; azT = 1; cine = null; shakeAmp = 0; idle = 1;
+      // a cut starts on the body (§6.4): no lead, and no hop damping (the feet count as grounded)
+      lead.x = 0; lead.z = 0; hopRef = pl0 ? pl0.y : NaN;
       desiredTarget(target);
       clearFades(); clearCull();
-      sweepLift = 0; sweepDolly = Infinity; occLift = 0; occDist = cur.distance;
+      cutHits.clear(); plainHits.clear(); shellBy = null; shellDolly = Infinity; colRun = 0; colSweeps = 0;
+      instC = 0; instJ = 0; instAccCut = 0; instAccPlain = 0; instPrevCut = 0; instPrevPlain = 0;
+      cutTally(0, 0);                              // no reading from before the cut leaks into its first pass
+      sweepLift = 0; sweepDolly = Infinity; lastDolly = Infinity; occLift = 0; occDist = cur.distance;
       clearRun = 0; liftMaxRun = 0; giveUp = false; liftCap = p.occLiftMax; liftAnchor.set(NaN, 0, 0); giveUpAt.set(NaN, 0, 0);
       ctx.scene.updateMatrixWorld(true);
       refreshCandidates(); candT = 0; sweepT = 0;
-      const el0 = cur.elevation + tiltFor(cur.distance);
+      const el0 = cur.elevation + tiltNow;
       // Settle the sweep in one go, so a single-frame screenshot is right. Each
       // pass re-measures from the lens the previous pass asked for; inside a
       // snap the tilt only climbs, so ten passes always converge (and leave two
       // spare for the give-up latch to fire when the tilt is not working).
       const passes = free ? 1 : 10;
       for (let i = 0; i <= passes; i++) {
-        const oc = occlude(target, cur.azimuth, cur.elevation, cur.distance);
-        occLift = clamp(Math.max(oc.lift, sweepLift), 0, liftCap);
-        occDist = Math.max(6, Math.min(cur.distance, oc.dist, sweepDolly));
+        const oc = occlude(target, cur.azimuth, cur.elevation, cur.distance, Math.min(cur.distance, occDist));
+        colRun = oc.trig ? colRun + 1 : 0;
+        // §5.2: the window settles open in a snap wherever it is needed (cutK is set directly below), and
+        // then the ladder holds still: the lens stays at the stop, no tilt
+        winCarry = p.cut !== 0 && !cutSweepClear && (cutNeedA || colTrigger());
+        const colOk = colAssist();
+        occLift = winCarry ? 0 : clamp(Math.max(oc.lift, sweepLift), 0, liftMaxNow(el0));
+        occDist = winCarry ? cur.distance : Math.max(6, Math.min(cur.distance, colOk ? oc.dist : cur.distance, sweepDolly, shellDolly));
         place(cur.azimuth, el0 + occLift, Math.min(cur.distance, occDist), target);
         if (free || i === passes) break;
         lensAt(cur.azimuth, el0 + occLift, cur.distance, target, idealPos);
+        lastSweepFrom.copy(idealPos); sweepAim.copy(target);
         // first pass looks at everything (a screenshot gets no second chance);
         // the rest only have to confirm the tilt, so they take a wide budget
         sweepCursor = 0;
         sweepOcclusion(idealPos, cam.position, i === 0 ? Infinity : p.occBudget * 3);
         applyCull();
+        if (colRun) colSweeps++;
       }
-      if (!free) fadeBlockers(1, cam.position, target);
+      if (!free) {
+        fadeBlockers(1, cam.position, target);
+        const pb = modePitch(pitchBase, target);
+        if (pb > 1e-4) cam.rotateX(pb);                 // the mode's pitch, after the final lookAt
+        cam.updateMatrixWorld(true);
+        // the window settled from the final pass (§5.1: snap() runs the sweep, then sets cutK directly)
+        const need = p.cut !== 0 && (cutNeedA || colTrigger());
+        cutKraw = need ? 1 : 0; cutHoldT = need ? p.cutHold : 0;
+        cutGrowK = cutRays >= 2 || cutPlinth ? p.cutGrow : 1;
+        writeCut(cutKraw);
+      } else { cut.off(); cutKraw = 0; cutEff = 0; }
+      // not lastPAz: an owner's setParams({azimuth}) just before this snap must still read as the
+      // owner's write at the next update() (that is how the cave's corridor aim got clobbered)
+      snapFresh = true;
     },
     setFree(v) {
       free = v;
       clearFades(); clearCull();                  // a free camera frames the world, not the player
+      // the window and the near-lens band are off under a free camera (free renders stay pixel-identical);
+      // back on the player it re-opens from 0 as the sweep asks. The collider trigger's bookkeeping is
+      // forgotten only when a free camera takes over: setFree(null) right after a snap() (render.mjs /
+      // camvis: teleport → setCameraParams → setView(null)) keeps what that snap settled for this very
+      // framing, so a collider the snap's sweep already found clear cannot re-fire the trigger for the
+      // four frames before the next sweep and leave a closing window over an unblocked visitor (A15)
+      cutKraw = 0; cutEff = 0; cutHoldT = 0; cutGrowK = 1;
+      if (v) { colRun = 0; colSweeps = 0; }
+      if (v) cut.off();
       if (v) { const t = new THREE.Vector3(...v.target); if (v.fov) { cam.fov = v.fov; cam.updateProjectionMatrix(); } place(v.azimuth ?? p.azimuth, v.elevation ?? p.elevation, v.distance ?? p.distance, t); }
       // back to the follow camera: keep the mode, and do not read the landmark
       // we are standing in as a fresh arrival
       else {
-        cam.fov = p.fov; cam.updateProjectionMatrix();
-        candT = 0; sweepT = 0; sweepLift = 0; sweepDolly = Infinity; clearRun = 0; liftMaxRun = 0; giveUp = false; liftCap = p.occLiftMax; liftAnchor.set(NaN, 0, 0); giveUpAt.set(NaN, 0, 0);
+        status();
+        // the MODE's lens (not p.fov: that would ease every mode-2 view 30 → 42 during its frames)
+        modeFov = fovGoalMode(); pitchBase = pitchGoal();
+        cam.fov = modeFov; cam.updateProjectionMatrix();
+        anchor.ok = false; resetTether();          // the tether resumes from cur.azimuth
+        lead.x = 0; lead.z = 0;
+        ctrlAz = wrap(cur.azimuth + occYaw);
+        wasOwned = ownNow; wasFlying = flyNow;
+        candT = 0; sweepT = 0; sweepLift = 0; sweepDolly = Infinity; lastDolly = Infinity; shellDolly = Infinity; clearRun = 0; liftMaxRun = 0; giveUp = false; liftCap = p.occLiftMax; liftAnchor.set(NaN, 0, 0); giveUpAt.set(NaN, 0, 0);
         revealMute = 0.8; revealT = 0; lastHere = ctx.systems.ui?.here ?? null;
       }
     },
     setParams(np) {
       Object.assign(p, np);
-      if (np.azimuth !== undefined) { azFrom = azTo = np.azimuth; azT = 1; }
-      if (np.distance !== undefined) distRef = np.distance;
-      if (np.fov) { cam.fov = np.fov; cam.updateProjectionMatrix(); }
+      if (np.azimuth !== undefined) { azFrom = azTo = np.azimuth; azT = 1; azExt = true; }
+      // the "no extra tilt" reference follows an explicit distance, except while a
+      // vehicle or the flight owns the distance (§2)
+      if (np.distance !== undefined && !(ctx.systems.player?.onVehicle || ctx.state.flying)) distRef = np.distance;
+      if (np.fov) {
+        if (free) { cam.fov = np.fov; cam.updateProjectionMatrix(); }
+        else {
+          // an explicit fov is exact at once where the mode's lens is p.fov (modes 1/3,
+          // owned); mode 2 and the flight keep their own lens
+          status();
+          const g = fovGoalMode();
+          if (g === p.fov) { modeFov = g; cam.fov = g; cam.updateProjectionMatrix(); }
+        }
+      }
     },
     isFree: () => !!free,
+    /** tiltFor(baseDistance) as last applied: 0 at the wheel default in every mode (§2). */
+    get tilt() { return tiltNow; },
+    /** The wheel's distance plus the landmark reveal (what the tilt reads). */
+    get baseDistance() { return baseDistNow; },
+    /** The mode's distance goal (before the reveal and the occlusion dolly). */
+    get goalDistance() { status(); return goalDist(); },
+    /** The aim point's lead ahead of the visitor, world xz (§4.1; a copy, for QA). */
+    get lead() { return { x: lead.x, z: lead.z }; },
     /** Introspection for the render/debug harness. */
     get fading() { return faded.size; },
     /** Which meshes are currently dissolved — names + world radii, for QA. */
@@ -407,24 +907,68 @@ export function create(ctx) {
     get occBlocked() { return occBlocked; },
     /** Milliseconds the last capsule sweep cost (it runs at params.occSweep). */
     get occMs() { return occMs; },
+    /** The see-through window's strength this frame, 0..1 (§5.1; 0 off screen, free, cut 0, in a noTilt hold). */
+    get cutK() { return cutEff; },
+    /** The window's inputs, for QA: need (a) from the sweep, the collider run (b), rays, grow, hold. */
+    get cutState() {
+      // by / plainBy: what the window's reading holds (mesh name → body-ray bits; '[inst]' = the instance clouds)
+      const by = [], plainBy = [];
+      cutHits.forEach((v, o) => by.push(`${o.name || o.type}:${v}`)); plainHits.forEach((v, o) => plainBy.push(`${o.name || o.type}:${v}`));
+      if (lastInstCut) by.push(`[inst]:${lastInstCut}`); if (lastInstPlain) plainBy.push(`[inst]:${lastInstPlain}`);
+      const shells = shellBy ? [shellBy.name || shellBy.type] : [];
+      return { needSweep: cutNeedA, colRun, colSweeps, sweepClear: cutSweepClear, colTrigger: colTrigger(), allUnpatched: cutAllPlain, rays: cutRays, plinth: cutPlinth, carry: winCarry, inst: [instC, instJ], shells, grow: cutGrowK, hold: cutHoldT, raw: cutKraw, by, plainBy };
+    },
+    /** The cutout module: isPatched(o), uniforms, stats (CAMERA_SPEC §5.1, §7). */
+    get cutout() { return cut; },
+    /** Is this mesh cut by the see-through window? (§7: never a NEVER_FADE / noCut / noFade mesh.) */
+    isPatched(o) { return cut.isPatched(o); },
     /** Meshes currently hidden because the lens is inside them. */
     get culled() { return culled.size; },
     get culledList() { return [...culled.keys()].map((o) => o.name || o.type); },
+    /** The culled meshes with their world size, largest bounding-box side (QA, A3: only ever ≤ occCullMax). */
+    get culledSizes() {
+      return [...culled.keys()].map((o) => {
+        const bb = o.geometry?.boundingBox, sc = worldScale(o);
+        const d = bb ? Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) * sc : NaN;
+        return { name: o.name || o.type, maxDim: +d.toFixed(2) };
+      });
+    },
+    /** Inside a building this frame (the architecture systems' interiors; the dolly floor is 5.5 there, §5.2). */
+    get indoors() { return inNow; },
+    /** The dolly's floor this frame (§5.2, A3): max(occDollyMin, occDollyFloor × the mode's goal) outdoors, 5.5 inside. */
+    get dollyFloor() { return dollyFloor(); },
+    /** The window carries the frame (open or opening): the ladder's dolly and tilt hold still (§5.2). */
+    get ladderHeld() { return winCarry; },
     /** One unbudgeted sweep from where the lens is now, reported rather than
      *  applied — the QA hook for "why can I not see him in this frame". The
-     *  tilt/dolly control state is put back afterwards so asking the question
-     *  does not move the camera; the fade set is simply re-measured. */
-    occDebug() {
+     *  tilt/dolly control state and the window's reading are put back afterwards
+     *  so asking the question moves nothing; the fade set is simply re-measured.
+     *  occDebug({ fromStop: true }) casts from where update()'s last sweep cast
+     *  (the undollied stop) with the real lens as the lens, i.e. what the window read;
+     *  `window` then says what cutNeed would be from this one unbudgeted pass. */
+    occDebug(o = {}) {
       const out = [];
       const keep = { sweepLift, sweepDolly, clearRun, liftMaxRun, giveUp, sweepCursor, occBlocked, occMs };
-      sweepOcclusion(cam.position, cam.position, Infinity, out);
+      const keepCut = { cutNeedA, cutSweepClear, cutRays, cutAllPlain, cutPlinth, lastInstCut, lastInstPlain, hits: new Map(cutHits), plain: new Map(plainHits) };
+      const keepInst = { instC, instJ, instAccCut, instAccPlain, instPrevCut, instPrevPlain, shellBy, shellDolly };
+      const from = o.fromStop && Number.isFinite(lastSweepFrom.x) ? lastSweepFrom : cam.position;
+      // one clean round over every instance (the reading is this pass's alone)
+      instC = 0; instJ = 0; instAccCut = 0; instAccPlain = 0; instPrevCut = 0; instPrevPlain = 0;
+      sweepOcclusion(from, cam.position, Infinity, out);
       const r = {
         blocked: occBlocked, lift: +sweepLift.toFixed(3),
         dolly: Number.isFinite(sweepDolly) ? +sweepDolly.toFixed(2) : null,
         ms: +occMs.toFixed(2), candidates: sweepers.length,
+        from: [from.x, from.y, from.z].map((x) => +x.toFixed(2)), lensBack: +from.distanceTo(cam.position).toFixed(2),
+        window: { need: cutNeedA, rays: cutRays, clear: cutSweepClear, allUnpatched: cutAllPlain, plinth: cutPlinth },
+        shell: shellBy ? shellBy.name || shellBy.type : null, shellDolly: Number.isFinite(shellDolly) ? +shellDolly.toFixed(2) : null,
         hits: out.sort((a, b) => a.d - b.d),
       };
       ({ sweepLift, sweepDolly, clearRun, liftMaxRun, giveUp, sweepCursor, occBlocked, occMs } = keep);
+      ({ cutNeedA, cutSweepClear, cutRays, cutAllPlain, cutPlinth, lastInstCut, lastInstPlain } = keepCut);
+      ({ instC, instJ, instAccCut, instAccPlain, instPrevCut, instPrevPlain, shellBy, shellDolly } = keepInst);
+      cutHits.clear(); keepCut.hits.forEach((v, k) => cutHits.set(k, v));
+      plainHits.clear(); keepCut.plain.forEach((v, k) => plainHits.set(k, v));
       return r;
     },
 
@@ -435,38 +979,75 @@ export function create(ctx) {
      * rather than the budgeted sweep. Slow (tens of ms) and side-effect free;
      * this is the number the art director asks for ("body visibility 5/5"), not
      * something the camera runs per frame.
-     *   → { visible, total, rays: [{ pt, clear, by:[name@dist] }] }
+     *   → { visible, rawVisible, featherVisible, total,
+     *       rays: [{ pt, clear, rawClear, feather, by:[name@dist], cutBy, cutWhy, excused }] }
+     *   (cutWhy / excused on a ray that is not clear: cutout.why() — terrain, noCut, unpatched,
+     *   nearBody, feather are the §5.3 amber cases; shut, low, outside are the window's own misses)
+     * CUT-AWARE (CAMERA_SPEC §5.4): a hit is cut-clear when its mesh is patched, it sits in
+     * front of the chest (view depth < uCutP.x) and over the feet line (y > uCutP.y), and it
+     * projects inside the window's fully open core (e < 0.55) while cutK ≥ 0.5 — or it lies deep
+     * enough in the near-lens band that every dither cell discards it. 0.55 ≤ e < 0.8 is the
+     * feather band: reported apart (featherVisible), never as clear. A ray is clear when every
+     * hit on it is cut-clear; `by` lists its first three hits, `cutBy` the first one the window
+     * does not open.
+     * Two readings of "a hit", on purpose:
+     *   · rawClear / rawVisible — TODAY'S geometric answer, unchanged (A2 compares it with the
+     *     pre-edit baseline): any userData.noFade mesh is skipped as if it were the visitor's own,
+     *     and a mesh inside a hidden group (an interior shell nobody draws) still counts. noGhost is
+     *     skipped the same way: it is what an owner writes INSTEAD of noFade on a shell the window
+     *     may cut (the same meshes), so moving a shell from noFade to noGhost cannot move A2.
+     *   · clear / visible — what is DRAWN: only the visitor's own meshes (his group, the silhouette)
+     *     are skipped, a noFade mass (an enterable building's roof, a shack) blocks like anything
+     *     else the window may not cut, and a mesh under a hidden ancestor is not there. So a ray can
+     *     be rawClear and still not clear (a noFade roof the old metric never saw).
      */
     bodyVisibility() {
       const pl = ctx.systems.player?.position;
-      const out = { visible: 0, total: 0, rays: [] };
+      const out = { visible: 0, rawVisible: 0, featherVisible: 0, total: 0, rays: [] };
       if (!pl) return out;
-      const mine = (o) => { for (let n = o; n; n = n.parent) if (n.userData?.noFade || n.userData?.silhouette || n === ctx.systems.player?.group) return true; return false; };
+      const plg = ctx.systems.player?.group;
+      const mine = (o) => { for (let n = o; n; n = n.parent) if (n.userData?.noFade || n.userData?.noGhost || n.userData?.silhouette || n === plg) return true; return false; };
+      const own = (o) => { for (let n = o; n; n = n.parent) if (n.userData?.silhouette || n === plg) return true; return false; };
+      const shown = (o) => { for (let n = o; n; n = n.parent) if (!n.visible) return false; return true; };
       const pts = [['hat', 1.78], ['head', 1.45], ['chest', 1.05], ['hips', 0.65], ['knees', 0.40]];
       out.total = pts.length;
       for (const [nm, dy] of pts) {
         tmp2.set(pl.x, pl.y + dy, pl.z).sub(cam.position);
         const L = tmp2.length();
-        if (L < 1e-3) { out.visible++; out.rays.push({ pt: nm, clear: true, by: [] }); continue; }
+        if (L < 1e-3) { out.visible++; out.rawVisible++; out.rays.push({ pt: nm, clear: true, rawClear: true, feather: false, by: [] }); continue; }
         qaRay.set(cam.position, tmp2.divideScalar(L));
         qaRay.near = 0.05; qaRay.far = L - 0.15;
         let hits = [];
         try { hits = qaRay.intersectObject(ctx.scene, true); } catch { hits = []; }
         const by = [];
+        let nRaw = 0, blockBy = null, blockWhy = null, anyFeather = false;
         for (const h of hits) {
           const o = h.object;
-          if (!o.visible || mine(o)) continue;
+          if (!o.visible) continue;
           const m = Array.isArray(o.material) ? o.material[0] : o.material;
           if (!m || m.depthWrite === false) continue;
           if (m.transparent && (m.opacity ?? 1) < 0.5) continue;
           if (/^(sky|cloud|star|sun|moon)/i.test(o.name || '')) continue;
           if (h.point.y - world.height(h.point.x, h.point.z) < 0.45) continue;   // the floor at his shoes
           if (L - h.distance < 0.8) continue;                                    // the deck he stands on
-          by.push(`${o.name || o.type}${o.isInstancedMesh ? '[inst]' : ''}@${h.distance.toFixed(1)}`);
-          if (by.length >= 3) break;
+          const label = `${o.name || o.type}${o.isInstancedMesh ? '[inst]' : ''}@${h.distance.toFixed(1)}`;
+          if (!mine(o)) { nRaw++; if (by.length < 3) by.push(label); }              // today's reading
+          if (!own(o) && shown(o)) {                                               // what is drawn
+            const c = cut.classify(h, cam);
+            if (c === 'feather') anyFeather = true;
+            else if (c !== 'clear' && !blockBy) { blockBy = label; blockWhy = cut.why(h, cam); }
+          }
+          if (blockBy && by.length >= 3) break;                  // neither answer can change any more
         }
-        if (!by.length) out.visible++;
-        out.rays.push({ pt: nm, clear: !by.length, by });
+        const rawClear = nRaw === 0, clear = !blockBy && !anyFeather, feather = !blockBy && anyFeather;
+        if (clear) out.visible++;
+        if (rawClear) out.rawVisible++;
+        if (feather) out.featherVisible++;
+        const ray = { pt: nm, clear, rawClear, feather, by };
+        // cutWhy: why the window leaves that blocker in the picture, and whether §5.3 accepts it (excused)
+        if (blockBy) { ray.cutBy = blockBy; ray.cutWhy = blockWhy; ray.excused = cut.excused(blockWhy); }
+        else if (feather) { ray.cutWhy = 'feather'; ray.excused = true; }
+        out.rays.push(ray);
       }
       return out;
     },
@@ -562,9 +1143,44 @@ export function create(ctx) {
       if (inp.pressed.has('Digit1') || inp.pressed.has('Numpad1')) api.setMode(1);
       if (inp.pressed.has('Digit2') || inp.pressed.has('Numpad2')) api.setMode(2);
       if (inp.pressed.has('Digit3') || inp.pressed.has('Numpad3')) api.setMode(3);
+
+      // ── who owns the framing this frame (§2) ────────────────────────────
+      status();
+      const pl = ctx.systems.player;
+      const tOn = tetherOn() && !!pl?.position;
+      if (!tOn) anchor.ok = false;                 // the tether re-seeds from cur.azimuth when it resumes
+      // Ownership began in mode 2 (§2: owned mode 2 renders exactly as mode 1).
+      //  · yaw: the owned framing reads p.azimuth, so start it from the lens's bearing,
+      //    unless somebody wrote p.azimuth since our last frame (cave.js aims down its
+      //    corridor, a view pins --az): that is the owner's aim, never overwrite it.
+      //  · a snap() ran since our last frame (the owner's transition, or the view's):
+      //    it framed the follow lens because the owner had not declared itself yet —
+      //    redo it now, owned, so frame 1 is the cut mode 1 got (az, el/dist, p.fov, no pitch).
+      //  · otherwise (walking in through a door, boarding) el/dist ease as in mode 1,
+      //    but the lens and the pitch are mode 1's from the first owned frame.
+      const ownerAz = azExt || p.azimuth !== lastPAz;
+      if (ownNow && !wasOwned && mode === 2 && !flyNow) {
+        if (!ownerAz) handYawBack();
+        if (snapFresh && !cine) api.snap();
+        else {
+          modeFov = fovGoalMode(); pitchBase = 0;
+          if (cam.fov !== modeFov) { cam.fov = modeFov; cam.updateProjectionMatrix(); }
+        }
+      }
+      azExt = false; snapFresh = false;
+      // Landed: modes 1/3 (and owned mode 2) keep the lens behind the machine
+      // instead of whipping back to the pre-flight azimuth.
+      if (wasFlying && !flyNow && !follow()) handYawBack();
+      wasOwned = ownNow; wasFlying = flyNow;
+      manualT += dt;
+      readAxis(inp);
+      // the path under his feet, once a frame: path alignment (tether) and the lead's anticipation read it
+      if (pl?.position && pl.velocity) pathAt(pl.position.x, pl.position.z, pl.velocity.x, pl.velocity.z); else pathHit.on = false;
+
       // E is also "interact"; only rotate when nothing is in interaction range.
+      // Q/E and drag rotate the tether in mode 2 (and while flying), p.azimuth otherwise.
       const busyE = !!ctx.systems.interaction?.nearest?.();
-      const turn = (d) => { if (mode === 2) { followOff = clamp(followOff + d, -Math.PI, Math.PI); followOffT = 0; } else startSnap(d); };
+      const turn = (d) => { if (tOn) { turnTether(d); manualT = 0; alignK = 0; } else startSnap(d); };
       if (inp.pressed.has('KeyQ')) turn(+STEP);
       if (inp.pressed.has('KeyE') && !busyE) turn(-STEP);
       if (inp.wheel) { p.distance = clamp(p.distance + inp.wheel * 0.035, p.minDist, p.maxDist); }
@@ -572,10 +1188,10 @@ export function create(ctx) {
       // set pointer.orbit (input contract v3, CAMERA_SPEC §6.2); touch writes either.
       const orbiting = inp.pointer.down || inp.pointer.orbit;
       if (orbiting && inp.pointer.dragDX) {
-        if (mode === 2) { followOff = clamp(followOff - inp.pointer.dragDX * 0.006, -Math.PI, Math.PI); followOffT = 0; }
+        if (tOn) { orbitNow -= inp.pointer.dragDX * 0.006; manualT = 0; alignK = 0; }
         else { p.azimuth -= inp.pointer.dragDX * 0.006; azFrom = azTo = p.azimuth; azT = 1; }
       }
-      if (orbiting && inp.pointer.dragDY) p.elevation = clamp(p.elevation - inp.pointer.dragDY * 0.004, p.minElev, p.maxElev);
+      if (orbiting && inp.pointer.dragDY) { p.elevation = clamp(p.elevation - inp.pointer.dragDY * 0.004, p.minElev, p.maxElev); if (tOn) { manualT = 0; alignK = 0; } }
 
       const sp = ctx.state.playerSpeed || 0;
       // town core? (eases the pitch down and the aim point up — see ZONES)
@@ -592,28 +1208,47 @@ export function create(ctx) {
       else revealK = damp(revealK, 0, 2.2, dt);
 
       // ── azimuth ─────────────────────────────────────────────────────────
-      if (mode === 2) {
-        // FOLLOW: the world turns as the visitor turns. Q/E (and drag) hold a
-        // temporary offset that unwinds once you have walked for a moment.
-        if (sp > 0.6) followOffT += dt; else followOffT = Math.min(followOffT, p.followRecentre);
-        if (followOff !== 0 && followOffT >= p.followRecentre) followOff = damp(followOff, 0, 2.2, dt);
-        cur.azimuth = wrap(lerpAngle(cur.azimuth, followAz(), 1 - Math.exp(-p.followLambda * dt)));
-        p.azimuth = azFrom = azTo = cur.azimuth; azT = 1;    // 2 → 1 must not whip round
-      } else if (azT < 1) {
+      // FOLLOW / flying: the tether (§4.2). It never writes p.azimuth — that
+      // re-tripped cave.js's manual-turn detector every frame.
+      if (tOn) cur.azimuth = tether(dt, pl);
+      else if (azT < 1) {
         // eased 45° snap (falls back to damping for drag / external setParams)
         azT = Math.min(1, azT + dt / azDur); cur.azimuth = lerpAngle(azFrom, azTo, ease(azT)); if (azT >= 1) p.azimuth = azTo;
       } else cur.azimuth = lerpAngle(cur.azimuth, p.azimuth, 1 - Math.exp(-7 * dt));
       cur.elevation = damp(cur.elevation, goalElev(), 6, dt);
       cur.distance = damp(cur.distance, goalDistNow(), 5, dt);
 
-      // ── dead-zone follow with look-ahead ────────────────────────────────
+      // ── movement basis (§4.3) ───────────────────────────────────────────
+      // While a movement key (or the stick) is held, controlAzimuth chases the
+      // view at basisRate: tether swings (≤ 0.6 rad/s) pass straight through, a
+      // Q/E or a fast drag bends the heading over ~0.9 s instead of jerking it.
+      const viewAz = wrap(cur.azimuth + occYaw);
+      if (axNow.active) ctrlAz = wrap(ctrlAz + clamp(wrap(viewAz - ctrlAz), -p.basisRate * dt, p.basisRate * dt));
+      else ctrlAz = viewAz;
+
+      // ── per-mode lens + pitch (§2) ──────────────────────────────────────
+      // A mode change eases the FOV at λ5, ≤ fovRate °/s; the take-off does not
+      // (flyer.js takes the camera over unless it reads ≥ 33° at 0.6 s).
+      const fg = fovGoalMode();
+      if (flyNow) modeFov = damp(modeFov, fg, FLY_FOV_L, dt);
+      else { const nf = damp(modeFov, fg, 5, dt); modeFov += clamp(nf - modeFov, -p.fovRate * dt, p.fovRate * dt); }
+      pitchBase = damp(pitchBase, pitchGoal(), 5, dt);
+      baseDistNow = baseDist();
+      tiltNow = flyNow ? 0 : tiltFor(baseDistNow);
+
+      // ── dead-zone follow with the lead (§4.1) ───────────────────────────
+      // The dead zone is an ellipse in camera space: dzW across the screen, deadZoneDepth × that
+      // along it (screen-up); the target chases whatever the aim point leaves outside it.
+      updateLead(dt, pl, viewAz);
       desiredTarget(tmp);
-      const dz = p.deadZone * frameScale() * (1 - 0.75 * Math.min(1, sp / 6));
+      const dzW = Math.max(1e-4, p.deadZone * frameScale() * (1 - 0.75 * Math.min(1, sp / 6)));
+      const dzD = Math.max(1e-4, dzW * p.deadZoneDepth);
       const dx = tmp.x - target.x, dz2 = tmp.z - target.z;
-      const d = Math.hypot(dx, dz2);
+      const sa = Math.sin(viewAz), ca = Math.cos(viewAz);
+      const eDz = Math.hypot((dx * ca - dz2 * sa) / dzW, (dx * sa + dz2 * ca) / dzD);   // R·d / dzW, F·d / dzD
       const chase = 6.5 + Math.min(1, sp / 6) * 5;
-      if (d > dz) {
-        const k = (d - dz) / d;
+      if (eDz > 1) {
+        const k = 1 - 1 / eDz;
         target.x = damp(target.x, target.x + dx * k, chase, dt);
         target.z = damp(target.z, target.z + dz2 * k, chase, dt);
       }
@@ -639,13 +1274,15 @@ export function create(ctx) {
       lookK = damp(lookK, wantLook, wantLook > lookK ? 5.5 : 3.2, dt);
 
       // ── compose final view (+ look-up, + cinematic blend) ───────────────
-      let az = cur.azimuth, el = cur.elevation + brEl + tiltFor(cur.distance), dist = cur.distance + brDist;
-      let fovGoal = p.fov, pitch = 0, holdAng = 0;
+      // The mode's pitch goes in BEFORE the blends, so the look-up and a shot
+      // lerp it toward their own pitch exactly as they do the rest.
+      let az = cur.azimuth + occYaw, el = cur.elevation + brEl + tiltNow, dist = cur.distance + brDist;
+      let fovGoal = modeFov, pitch = pitchBase, holdAng = 0, keepM = 1;   // keepM: the mode pitch's share after the blends
       tmp.copy(target);
       if (lookK > 0.002) {
         el = lerp(el, p.lookElev, lookK);
         fovGoal = lerp(fovGoal, p.lookFov, lookK);
-        pitch = p.lookPitch * lookK;
+        pitch = lerp(pitch, p.lookPitch, lookK); keepM *= 1 - lookK;
       }
       if (cine) {
         cine.t += dt;
@@ -662,7 +1299,7 @@ export function create(ctx) {
           dist = lerp(dist, o.distance ?? dist, w);
           tmp.lerp(cineTgt, w);
           if (o.fov) fovGoal = lerp(fovGoal, o.fov, w);
-          pitch = lerp(pitch, o.pitch ?? 0, w);
+          pitch = lerp(pitch, o.pitch ?? 0, w); keepM *= 1 - w;
           if (o.noTilt) holdAng = w;
         }
       }
@@ -673,11 +1310,22 @@ export function create(ctx) {
       // tip up and look over what the lens cannot get in front of. Two sources:
       // the cheap per-frame collider cylinders, and the capsule sweep's real
       // triangle hits (whichever asks for more, gets it).
-      const want = occlude(tmp, az, el, dist);
-      const dollyGoal = Math.min(want.dist, sweepDolly);
+      const want = occlude(tmp, az, el, dist, Math.min(dist, occDist));   // occDist: where the lens stood last frame
+      colRun = want.trig ? colRun + 1 : 0;       // the window's collider trigger needs two frames running
+      if (!colRun) colSweeps = 0;
+      // THE LADDER AS A SENSOR (§5.2). While the window carries the frame (open, or opening) the lens holds
+      // still: occDist releases to the stop at λ3.5 and the tilt unwinds. Otherwise the sweep's dolly / tilt act
+      // on UNPATCHED blockers only; the collider pass tilts (≤ colLiftMax) but — a guess that cannot tell a
+      // patched wall from an unpatched one — only dollies alongside a dolly / tilt the sweep is running (colAssist()).
+      winCarry = carries(holdAng);
+      const colOk = colAssist();
+      const dollyGoal = winCarry ? dist : Math.min(colOk ? want.dist : dist, sweepDolly, shellDolly);
       occDist = dollyGoal < occDist ? damp(occDist, dollyGoal, 16, dt) : damp(occDist, dollyGoal, 3.5, dt);
-      const liftGoal = clamp(Math.max(want.lift, sweepLift), 0, liftCap);
-      occLift = damp(occLift, liftGoal, liftGoal > occLift ? 5 : 2.5, dt);
+      const liftGoal = winCarry ? 0 : clamp(Math.max(want.lift, sweepLift), 0, liftMaxNow(el));
+      // λ5 up / λ2.5 down (§4.8), and never faster than occLiftRate: a fresh 0.06 collider tilt at λ5 alone
+      // swings the frame 0.28 rad/s, and A10 caps every automatic elevation at 0.15 rad/s
+      const nl = damp(occLift, liftGoal, liftGoal > occLift ? 5 : 2.5, dt);
+      occLift += clamp(nl - occLift, -p.occLiftRate * dt, p.occLiftRate * dt);
       // A `noTilt` shot owns its ANGLES: the anti-occlusion lift would swing the
       // authored framing (17° of it) and tip the moon off the top of the frame.
       // The DOLLY still runs — pulling the lens in front of a blocker changes
@@ -710,15 +1358,36 @@ export function create(ctx) {
         // dolly already put the lens, the blocker would read as gone and the
         // lens would spring back out, one frame on, one frame off.
         lensAt(az, el + occLift, dist, tmp, idealPos);
+        lastSweepFrom.copy(idealPos); sweepAim.copy(tmp);
         sweepOcclusion(idealPos, cam.position);
         applyCull();
+        if (colRun) colSweeps++;
       }
       fadeBlockers(dt, cam.position, tmp);
 
+      // ── the see-through window's strength (§5.1) ────────────────────────
+      // Open (λ cutRise) while a patched mass blocks a body ray (the sweep) or a wall / trunk
+      // collider has sat in the sight line two frames running (unless every blocker the sweep
+      // sees is uncuttable); hold cutHold s after the last need; close at λ cutFall.
+      const cutNeed = p.cut !== 0 && (cutNeedA || colTrigger());
+      cutHoldT = cutNeed ? p.cutHold : Math.max(0, cutHoldT - dt);
+      const cutGoal = cutHoldT > 0 ? 1 : 0;
+      cutKraw = damp(cutKraw, cutGoal, cutGoal > cutKraw ? p.cutRise : p.cutFall, dt);
+      if (cutKraw < 1e-4 && cutGoal === 0) cutKraw = 0;
+      const growGoal = cutRays >= 2 || cutPlinth ? p.cutGrow : 1;
+      cutGrowK = damp(cutGrowK, growGoal, growGoal > cutGrowK ? 8 : 2.5, dt);
+
       // Aim above the body LAST: the shake and the ground clamp both re-aim
       // with lookAt(), which would quietly undo it.
+      pitch += (modePitch(pitchBase, tmp) - pitchBase) * keepM;   // the sky guard, faded like the mode pitch
       if (pitch > 1e-4) cam.rotateX(pitch);
 
+      lastPAz = p.azimuth;
+      // listeners (citizens.js's scruff carry) read cam.matrixWorld: make it this
+      // frame's, pitch included, not the last render's
+      cam.updateMatrixWorld(true);
+      // the window's uniforms from this frame's final matrix (a `noTilt` shot's hold shuts it)
+      writeCut(cutKraw * (1 - holdAng));
       ctx.events.emit('camera:update', cam);
     },
   };
@@ -732,11 +1401,20 @@ export function create(ctx) {
    *   · otherwise tip the view UP so the sight line passes over the blocker —
    *     much gentler than slamming a 25-unit camera to 5, and the right answer
    *     for the tall thin posts you can end up standing against.
-   * Returns { dist, lift } (lift in radians of extra elevation).
+   * Returns { dist, lift, trig } (lift in radians of extra elevation; trig = a wall or trunk collider,
+   * padded r ≥ 1.2, enters the sight line more than 1.2 u in front of the aim point, in front of the
+   * REAL lens (`lensD`, where the dolly has the lens: a collider it already stands in front of is not
+   * in the picture) and under its height guess — the window's collider trigger (b), CAMERA_SPEC §5.1).
+   * The object is reused: read it before the next call.
    */
-  function occlude(tgt, az, el, dist) {
+  const occOut = { dist: 0, lift: 0, trig: false };
+  function occlude(tgt, az, el, dist, lensD = dist) {
     const cols = ctx.colliders;
-    const out = { dist, lift: 0 };
+    const out = occOut;
+    out.dist = dist; out.lift = 0; out.trig = false;
+    // the trigger reads the REAL lens: a collider the old dolly has already put the lens in front of is
+    // behind the picture (A15: the window exists only while something is in front of him)
+    const trigFar = Math.min(dist, lensD) - cam.near;
     if (!cols || !cols.length) return out;
     const ce = Math.cos(el);
     const dx = Math.sin(az) * ce, dz = Math.cos(az) * ce, dy = Math.sin(el);
@@ -746,8 +1424,9 @@ export function create(ctx) {
     // things — and that is the whole trick:
     //   · DOLLY, for a mass sitting right in front of the lens. Giant candy is
     //     20-35 units tall, so up there we must NOT assume props are short.
-    //     The lens may only come in to `floor` (62% of the stop), which is what
-    //     keeps it from diving into the candy forest to dodge a lollipop stick.
+    //     The lens may only come in to `floor` (dollyFloor(): 62% of the goal,
+    //     never under 14 u outdoors, §5.2), which is what keeps it from diving
+    //     into the candy forest to dodge a lollipop stick.
     //   · TILT, for a mass near the player, which the lens can never get in
     //     front of. Here we assume ~6 units (village props, posts, benches);
     //     guessing tall would tip the camera up in every dense street.
@@ -756,8 +1435,8 @@ export function create(ctx) {
     // house (walls are geometry, colliders are a few circles) as it is open air.
     // Below that, the tilt is the only fix — and it raises the angle anyway.
     const mayDolly = el > 0.45;
-    const floor = Math.max(6, dist * 0.62);
-    let best = dist, lift = 0;
+    const floor = dollyFloor();
+    let best = dist, lift = 0, trig = false;
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
       let r, t0;
@@ -770,12 +1449,13 @@ export function create(ctx) {
         const ox = tgt.x - c.x, oz = tgt.z - c.z;
         const px = ox * cs + oz * sn, pz = -ox * sn + oz * cs;
         const vx = dx * cs + dz * sn, vz = -dx * sn + dz * cs;
+        // the two slabs, unrolled (no per-box arrays)
         let tmin = -Infinity, tmax = Infinity;
-        for (const [o, v, h] of [[px, vx, hw + 0.4], [pz, vz, hd + 0.4]]) {
-          if (Math.abs(v) < 1e-6) { if (o < -h || o > h) { tmin = Infinity; break; } continue; }
-          const ta = (-h - o) / v, tb = (h - o) / v;
-          tmin = Math.max(tmin, Math.min(ta, tb)); tmax = Math.min(tmax, Math.max(ta, tb));
-        }
+        const sx = hw + 0.4, sz = hd + 0.4;
+        if (Math.abs(vx) < 1e-6) { if (px < -sx || px > sx) continue; }
+        else { const ta = (-sx - px) / vx, tb = (sx - px) / vx; tmin = Math.max(tmin, Math.min(ta, tb)); tmax = Math.min(tmax, Math.max(ta, tb)); }
+        if (Math.abs(vz) < 1e-6) { if (pz < -sz || pz > sz) continue; }
+        else { const ta = (-sz - pz) / vz, tb = (sz - pz) / vz; tmin = Math.max(tmin, Math.min(ta, tb)); tmax = Math.min(tmax, Math.max(ta, tb)); }
         if (!(tmin < tmax) || tmax <= 0) continue;
         t0 = Math.max(tmin, 0);
       } else {
@@ -788,6 +1468,8 @@ export function create(ctx) {
         if (disc <= 0) continue;
         t0 = (-bb - Math.sqrt(disc)) / (2 * a);    // where the sight line enters it
       }
+      // the window's collider trigger (b): walls and trunks, never lamp posts or bollards
+      if (!trig && r >= 1.2 && t0 > 1.2 && t0 < trigFar && dy * t0 < (c.h ?? 14) - 1.0) trig = true;
       if (t0 <= 1.2 || t0 >= best) continue;
       const rise = dy * t0;                           // sight-line height at the blocker
       if (mayDolly && r >= 1.2 && t0 - 0.5 >= floor) {
@@ -801,7 +1483,7 @@ export function create(ctx) {
         if (rise < top) lift = Math.max(lift, clamp(Math.asin(clamp(top / t0, -1, 1)) - el, 0, p.colLiftMax));
       }
     }
-    out.dist = Math.max(floor, best); out.lift = lift;
+    out.dist = Math.max(floor, best); out.lift = lift; out.trig = trig;
     return out;
   }
 
@@ -813,6 +1495,7 @@ export function create(ctx) {
   const cands = [];                 // per-frame sphere fade: prop-sized separate meshes
   const sweepers = [];              // capsule sweep: { o, bb, r, maxDim, big, cullable }
   const insts = [];                 // instanced blockers: { o, r, cloud, n }
+  const shells = [];                // SHELLS (shellable()): { o, bb } — read by their world box, never acted on
   const faded = new Map();          // mesh → { k, orig, mat }  (currently dissolving)
   const clones = new Map();         // mesh → { orig, mat }     (lazy fade material cache)
   const culled = new Map();         // mesh → true              (visible=false, lens inside it)
@@ -821,6 +1504,35 @@ export function create(ctx) {
   const probes = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
   const seg = new THREE.Vector3(), bc = new THREE.Vector3();
   let candT = 0;
+
+  // ── the see-through window (CAMERA_SPEC §5.1; camera/cutout.js) ────────────
+  // Big masses and instanced clouds carry a shader patch that opens a dithered,
+  // feathered window around the visitor wherever a patched mass stands in front
+  // of him. The sweep tells us when (cutNeed), update() drives cutK and writes the
+  // uniforms after the final rotateX, bodyVisibility() reports what it opened.
+  const cut = createCutout(ctx, {
+    enabled: p.cut !== 0,
+    bigDim: () => p.occFadeMaxDim,
+    instanceable,
+    ghostOf: (o) => { const s = faded.get(o); return s && s.mat && o.material === s.mat ? s.orig : null; },
+  });
+  // what the sweep saw, sticky per mesh because the triangle budget tests only some candidates per
+  // sweep: patched mesh → the body rays it blocked at its last test; the same for unpatched blockers
+  const cutHits = new Map(), plainHits = new Map();
+  // the sweep's reading of SHELLS (shellable(): big noFade masses): the one its chest ray found in the sight
+  // line (QA), and the dolly in front of it when there is room (shellDolly)
+  let shellBy = null;
+  let shellDolly = Infinity;    // the shells' own dolly (§5.2 rule 2 on their real triangles), this sweep
+  const shellHit = new THREE.Vector3();
+  const nearNow = new Set();
+  // main.js emits world:ready once every system has built its meshes and before the first render,
+  // so every program compiles once, cut or not; later meshes are decided by refreshCandidates()
+  ctx.events.on('world:ready', () => {
+    if (!cut.enabled) return;
+    clearFades(); clones.clear();              // a ghost cloned before the patch would never be cut
+    try { cut.patchAll(); } catch (e) { console.log('[camera/cut] patch pass failed, the window stays shut:', e && e.message); }
+    refreshCandidates();
+  });
 
   /**
    * Candidate blockers: every non-instanced, PROP-SIZED mesh in the scene.
@@ -848,11 +1560,13 @@ export function create(ctx) {
    * gets the same protection here.
    */
   const NEVER_FADE = /^(sugarfin|whale|ferry)/i;
+  //   userData.noGhost = never a ghost either, but the see-through window MAY cut it (an owner
+  //   that fades or hides its own shells — enterable buildings — and still wants the window)
   function noFade(o) {
-    if (o.userData.noFade) return true;
+    if (o.userData.noFade || o.userData.noGhost) return true;
     if (NEVER_FADE.test(o.name || '')) return true;
     for (let n = o.parent; n; n = n.parent) {
-      if (n.userData?.noFade) return true;
+      if (n.userData?.noFade || n.userData?.noGhost) return true;
       if (NEVER_FADE.test(n.name || '')) return true;
     }
     return false;
@@ -902,13 +1616,37 @@ export function create(ctx) {
   }
 
   /**
+   * A SHELL: a big mass its owner flags userData.noFade (an enterable building that fades or hides its own
+   * walls, the docked whale's deck, the shack, the cave's props) — never the visitor, his silhouette or
+   * anything noOcclude. sweepable() leaves these out (the sweep must never ghost them), so before §5.2 only the
+   * collider pass ever moved the lens for them (to the collider's footprint: into the flared cupcake wall). The
+   * sweep now gives them rule 2 on their real triangles and nothing else (never faded, culled, cut or tilted
+   * over): the chest ray at the shells whose world box is on the sight line, and a dolly to just in front of the
+   * nearest one when there is room (shellDolly, in sweepOcclusion()). Big only (> occFadeMaxDim): a key or a
+   * star never counts.
+   */
+  function shellable(o) {
+    if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || !noFade(o) || o.userData.noOcclude || o.userData.silhouette) return false;
+    if (SKY_GROUND.test(o.name || '')) return false;
+    const plg = ctx.systems.player?.group;
+    for (let n = o; n; n = n.parent) {
+      if (n === plg || n.name === 'sky') return false;
+      if (n.userData && (n.userData.noOcclude || n.userData.silhouette)) return false;
+    }
+    const m = Array.isArray(o.material) ? o.material[0] : o.material;
+    if (!m || m.depthWrite === false) return false;
+    if (m.transparent && (m.opacity ?? 1) < 0.9) return false;
+    return true;
+  }
+
+  /**
    * An InstancedMesh worth testing: big enough instances to hide a person, a
    * material that writes depth, not sky/ground/particles. Grass, petals and
    * confetti are excluded by occInstMin — they hide nothing and there are
    * thousands of them.
    */
-  function instanceable(o) {
-    if (!o.isInstancedMesh || !o.count) return false;
+  function instanceable(o, anyCount = false) {
+    if (!o.isInstancedMesh || (!anyCount && !o.count)) return false;
     if (o.userData.noFade || o.userData.noOcclude || o.userData.noInstOcclude) return false;
     if (SKY_GROUND.test(o.name || '')) return false;
     for (let n = o.parent; n; n = n.parent) {
@@ -925,9 +1663,11 @@ export function create(ctx) {
     cands.length = 0;
     sweepers.length = 0;
     insts.length = 0;
+    shells.length = 0;
     ctx.scene.traverse((o) => {
       const g = o.geometry;
       if (!o.isMesh || !g) return;
+      cut.visit(o);                                // the window's lazy pass: meshes added since world:ready
       if (!g.boundingSphere) { try { g.computeBoundingSphere(); } catch { return; } }
       const bs = g.boundingSphere;
       if (!bs || !Number.isFinite(bs.radius)) return;
@@ -955,6 +1695,10 @@ export function create(ctx) {
             cullable: maxDim <= p.occCullMax && !isRoof(o),
           });
         }
+      } else if (shellable(o)) {
+        if (!g.boundingBox) { try { g.computeBoundingBox(); } catch { return; } }
+        const bb = g.boundingBox;
+        if (bb && Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) * worldScale(o) > p.occFadeMaxDim) shells.push({ o, bb });
       }
 
       // the cheap per-frame path stays prop-sized only
@@ -982,6 +1726,10 @@ export function create(ctx) {
     c.transparent = true; c.depthWrite = false;   // so shader uniforms may not survive
     c.userData = m.userData;                      // — keep the original reference
     if (m.onBeforeCompile) c.onBeforeCompile = m.onBeforeCompile;
+    // …and its program key: without it every ghost of a hooked material shares one wrapper's
+    // source and the programs collide (CAMERA_SPEC §5.1)
+    c.customProgramCacheKey = m.customProgramCacheKey;
+    cut.adopt(c, m);                              // a ghost of a cut material is cut too
     return c;
   }
   function setOpacity(m, v) { if (Array.isArray(m)) { for (const x of m) x.opacity = v; } else m.opacity = v; }
@@ -1015,6 +1763,7 @@ export function create(ctx) {
   const tmpBox = new THREE.Box3();
   const rayEnds = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
   const rayHits = [];
+  const blockedRays = [false, false, false, false, false];   // the sweep's per-ray reading (reused)
   const cullNow = new Set();
   const idealPos = new THREE.Vector3();
   const near = [];
@@ -1022,22 +1771,16 @@ export function create(ctx) {
   const rayLens = [0, 0, 0, 0, 0];
   const testedNow = new Set(), fadeNow = new Set();
   const instM = new THREE.Matrix4(), instV = new THREE.Vector3(), sightV = new THREE.Vector3();
-
-  /**
-   * Builders may expose `hideInstancesNear(x, z, r)` — the vegetation system
-   * hiding its own fronds around the visitor is a better answer than anything
-   * the lens can do about them. Nobody ships it yet, so the call is defensive on
-   * purpose: the day catNature or candyVegetation grows one, the camera starts
-   * using it with no further change here.
-   */
-  function askOwnersToHide(pl) {
-    if (!pl) return;
-    for (const k in ctx.systems) {
-      const sys = ctx.systems[k];
-      const f = sys && sys.hideInstancesNear;
-      if (typeof f === 'function') { try { f.call(sys, pl.x, pl.z, p.occRadius + 1.6); } catch { /* a hook must never break the camera */ } }
-    }
-  }
+  const lensF = new THREE.Vector3();       // the REAL lens's view direction (to the chest), for the window's reading
+  const lastSweepFrom = new THREE.Vector3(NaN, 0, 0);   // where update()'s last sweep cast from (occDebug({fromStop}))
+  // THE DOLLY'S UNIT. The lens dollies along stop → AIM (occDist is a distance from the aim point), and the aim
+  // runs up to ~8 u ahead of the visitor (the lead, §4.1): a blocker's dolly distance is its distance from the aim
+  // along that axis, not from his body — measured from the body, a walk toward the lens left the "dollied" lens
+  // behind the very wall it was dollying past. sweepAim = the aim the sweep's stop was placed from (callers set it).
+  const sweepAim = new THREE.Vector3(NaN, 0, 0), aimAxis = new THREE.Vector3(), aimFrom = new THREE.Vector3();
+  let aimStop = 0;
+  /** A point's dolly distance: the aim-to-point distance along the stop → aim axis (set by the sweep). */
+  const aimT = (pt) => aimStop - ((pt.x - aimFrom.x) * aimAxis.x + (pt.y - aimFrom.y) * aimAxis.y + (pt.z - aimFrom.z) * aimAxis.z);
 
   /** Nearest intersection of one candidate with the current ray, or null. */
   function nearestHit(o, far) {
@@ -1047,6 +1790,54 @@ export function create(ctx) {
     let best = null;
     for (let i = 0; i < rayHits.length; i++) if (!best || rayHits[i].distance < best.distance) best = rayHits[i];
     return best;
+  }
+  /** View depth of a world point from the real lens (lensF set by the sweep). */
+  const lensDepth = (pt, lens) => (pt.x - lens.x) * lensF.x + (pt.y - lens.y) * lensF.y + (pt.z - lens.z) * lensF.z;
+  /**
+   * The window's reading of one ray (§5.1 (a); A15 "only while something is in front of him"): the
+   * nearest hit of the LAST nearestHit() call that lies in front of the REAL lens's near plane. The
+   * sweep casts from the undollied stop, so with the old dolly (§5.2, until step 5) the nearest hit
+   * can sit behind the lens the frame is drawn from: that mass is not in the picture and must not open
+   * the window, but a surface of the same merged mesh further along the ray still may. `h` is that
+   * call's nearest hit; when it is already in front (no dolly: always) it is the answer.
+   */
+  function frontHit(h, lens) {
+    if (!h) return null;
+    const nr = cam.near;
+    if (lensDepth(h.point, lens) > nr) return h;
+    let best = null;
+    for (let i = 0; i < rayHits.length; i++) {
+      const x = rayHits[i];
+      if ((!best || x.distance < best.distance) && lensDepth(x.point, lens) > nr) best = x;
+    }
+    return best;
+  }
+  /**
+   * The window's check of an instance-sphere hit (§5.1 (a)): does body ray k really meet THIS instance's
+   * triangles (instM = its matrix), in front of the real lens and as a real blocker? The same CPU geometry
+   * bodyVisibility() raycasts. Over INST_CONFIRM_BUDGET triangle tests in one sweep it answers with the
+   * sphere (true), as before. The ladder never asks: its sphere logic is unchanged.
+   */
+  let confirmSpent = 0;
+  const instProbe = new THREE.Mesh();
+  function instConfirm(o, k, lens) {
+    const gm = o.geometry;
+    const pos = gm && gm.attributes && gm.attributes.position;
+    if (!pos) return true;
+    const tris = (gm.index ? gm.index.count : pos.count) / 3;
+    if (confirmSpent + tris > INST_CONFIRM_BUDGET) return true;
+    confirmSpent += tris;
+    instProbe.geometry = gm; instProbe.material = o.material;
+    instProbe.matrixWorld.multiplyMatrices(o.matrixWorld, instM);
+    rc.set(rayA, rayDirs[k]); rc.near = 0.05; rc.far = rayLens[k] - 0.2;
+    rayHits.length = 0;
+    try { instProbe.raycast(rc, rayHits); } catch { return true; }
+    let best = null;
+    for (let i = 0; i < rayHits.length; i++) {
+      const x = rayHits[i];
+      if ((!best || x.distance < best.distance) && lensDepth(x.point, lens) > cam.near) best = x;
+    }
+    return !!best && realBlocker(best, rayEnds[k]);
   }
 
   /**
@@ -1065,6 +1856,78 @@ export function create(ctx) {
     return h.point.y - world.height(h.point.x, h.point.z) >= p.occGroundMin;
   }
 
+  /** Is every ancestor visible (is this mesh drawn at all)? */
+  function shownTree(o) { for (let n = o; n; n = n.parent) if (!n.visible) return false; return true; }
+  /**
+   * The collider trigger (§5.1 (b)): a wall / trunk collider in the sight line two frames running
+   * opens the window before the 6 Hz sweep can look. It is only a guess (colliders carry no mesh and
+   * mostly no height), so the sweep has the last word: suppressed while every blocker the sweep sees
+   * is uncuttable (the spec's rule), and — "driven by real blockage" — once a sweep since the trigger
+   * began has found every body ray clear (a tall collider beside the sight line, not in front of him).
+   */
+  const colTrigger = () => colRun >= 2 && !cutAllPlain && !(colSweeps >= 1 && cutSweepClear);
+  /**
+   * §5.2 "runs only while cutK < 0.5": the window carries the frame — open (cutK ≥ 0.5), or opening (a need
+   * within the last cutHold s: without this the lens would dip for the four frames the window takes to reach
+   * 0.5, then creep back at λ3.5) — and it is cutting something: the sweep's window reading holds a blocker
+   * (a collider false start the sweep has already found clear, open for its 0.6 s, must not nod the lens).
+   * Never with the cut off, with the visitor off screen (last frame's window), or while a noTilt shot holds
+   * the window shut (`hold` = holdAng: the dolly then runs, as the shot expects).
+   */
+  const carries = (hold) => p.cut !== 0 && cutOnScr && hold < 0.5 && !cutSweepClear && (cutKraw * (1 - hold) >= 0.5 || cutHoldT > 0);
+  /**
+   * May the collider pass DOLLY the lens? It is a guess (colliders carry no mesh and mostly no height), and it
+   * cannot tell a patched wall — the window's — from an unpatched one. So with the window on its dolly only
+   * adds to what the sweep itself is doing about an UNPATCHED blocker (the sweep's dolly or tilt is live,
+   * hysteresis included); a collider the sweep sees nothing behind pulls nothing in (candy_meadow's 31 → 19.2 u
+   * dolly is gone, §5.2 "Consequence"), and neither does one for a SHELL (a big noFade mass: the collider's
+   * footprint is not the flared cupcake wall above it, and dollying to it pressed the lens into the wall — the
+   * shells get their own dolly on real triangles, shellDolly). Its tilt (≤ colLiftMax 0.06) is left to §5.2's
+   * own gate (only while the window is shut). In the p.cut 0 fallback the collider pass runs as the old ladder did.
+   */
+  const colAssist = () => p.cut === 0 || sweepLift > 0 || Number.isFinite(sweepDolly);
+
+  /**
+   * Write the window's uniforms for the lens as it now stands (call after the final rotateX and
+   * cam.updateMatrixWorld). k = the strength this frame; off screen, free or cut 0 it is 0, and the
+   * near-lens band is off with the cut. Sets cutEff (the getter, and what bodyVisibility() reads).
+   */
+  function writeCut(k) {
+    const P = ctx.systems.player?.position;
+    if (free || p.cut === 0 || !P) { cut.off(); cutEff = 0; if (free) cutKraw = 0; return; }
+    cutO.ry = p.cutRy; cutO.rx = p.cutRx; cutO.nearMin = p.nearMin; cutO.nearMax = p.nearMax;
+    const on = cut.write(cam, P, k, 1, cutGrowK, cutO);
+    if (!on) cutKraw = 0;                       // he is off screen: the window shuts, and re-opens from 0
+    cutOnScr = on;
+    cutEff = on ? k : 0;
+  }
+
+  /**
+   * The window's reading of the sweep (§5.1 (a), §5.2 classification): cutNeedA when any body ray
+   * is blocked by a PATCHED mass or a cut instance cloud standing in front of the REAL lens (frontHit;
+   * the sweep casts from the undollied stop); cutRays = how many rays those block (the
+   * ellipse grows from 2); cutAllPlain = the sweep sees blockers and none of them is cut-able
+   * (noCut / NEVER_FADE / unpatchable / prop-sized), which suppresses the collider trigger (b).
+   */
+  // (pre-built callbacks: the sweep runs inside update(), and for…of over a Map allocates an iterator)
+  let tallyC = 0, tallyU = 0;
+  const orCut = (v) => { tallyC |= v; }, orPlain = (v) => { tallyU |= v; };
+  const dropFarCut = (v, o) => { if (!nearNow.has(o)) cutHits.delete(o); };
+  const dropFarPlain = (v, o) => { if (!nearNow.has(o)) plainHits.delete(o); };
+  let lastInstCut = 0, lastInstPlain = 0;   // the last tally's instance bits (cutState, QA only)
+  function cutTally(instCut, instPlain) {
+    lastInstCut = instCut; lastInstPlain = instPlain;
+    tallyC = instCut; tallyU = instPlain;
+    cutHits.forEach(orCut); plainHits.forEach(orPlain);
+    const cm = tallyC & WIN_MASK, um = tallyU & WIN_MASK;
+    cutPlinth = (tallyC & PLINTH_BIT) !== 0;
+    cutNeedA = cm !== 0;
+    cutSweepClear = cm === 0 && um === 0;
+    let n = 0; for (let m = cm; m; m >>>= 1) n += m & 1;
+    cutRays = n;
+    cutAllPlain = cm === 0 && um !== 0;
+  }
+
   /**
    * One sweep.
    *   `fromPos` — the UNDOLLIED stop the rays are cast from (stable; see the
@@ -1079,7 +1942,7 @@ export function create(ctx) {
     const pl = ctx.systems.player?.position;
     cullNow.clear();
     sweepDolly = Infinity;
-    if (!pl || (!sweepers.length && !insts.length)) { sweepFade.clear(); occBlocked = 0; sweepLift = 0; lastDolly = Infinity; return 0; }
+    if (!pl || (!sweepers.length && !insts.length)) { sweepFade.clear(); occBlocked = 0; sweepLift = 0; lastDolly = Infinity; cutHits.clear(); plainHits.clear(); cutTally(0, 0); return 0; }
 
     // the dolly offset: how much nearer the real lens is than the rays' origin
     const lensBack = fromPos.distanceTo(lensPos);
@@ -1089,6 +1952,11 @@ export function create(ctx) {
     const segLen = rayD.length();
     if (segLen < 1e-3) { occBlocked = 0; return 0; }
     rayD.divideScalar(segLen);
+    // the dolly axis (stop → aim); no aim known (a caller that set none): the sight line to the head
+    aimFrom.copy(fromPos);
+    if (Number.isFinite(sweepAim.x)) { aimAxis.subVectors(sweepAim, fromPos); aimStop = aimAxis.length(); }
+    else aimStop = 0;
+    if (aimStop > 1e-3) aimAxis.divideScalar(aimStop); else { aimAxis.copy(rayD); aimStop = segLen; }
     // ground-plane right vector of the sight line — the body's screen width
     rightV.set(-rayD.z, 0, rayD.x);
     const rl = rightV.length();
@@ -1100,11 +1968,16 @@ export function create(ctx) {
     rayEnds[2].set(pl.x, pl.y + 0.50, pl.z);                                   // knees
     rayEnds[3].set(pl.x + rightV.x * sh, pl.y + 1.15, pl.z + rightV.z * sh);   // one shoulder
     rayEnds[4].set(pl.x - rightV.x * sh, pl.y + 0.50, pl.z - rightV.z * sh);   // the other shin
+    // the window only reads what the REAL lens has in front of it (frontHit)
+    lensF.subVectors(rayEnds[1], lensPos);
+    const lfl = lensF.length();
+    if (lfl > 1e-4) lensF.divideScalar(lfl); else lensF.copy(rayD);
 
     // Broad phase once for the whole bundle: bounding sphere vs the centre
     // segment, padded by the capsule radius plus the body spread.
     const pad0 = p.occRadius + 0.9;
     near.length = 0;
+    nearNow.clear();
     for (let i = 0; i < sweepers.length; i++) {
       const s = sweepers[i];
       const o = s.o;
@@ -1123,10 +1996,10 @@ export function create(ctx) {
       }
       s.d = sd;
       near.push(s);
+      nearNow.add(o);
     }
     // nearest the sight line first: those are the ones that actually hide him
     near.sort((a, b) => a.d - b.d);
-
     for (let k = 0; k < rayEnds.length; k++) {
       rayDirs[k].subVectors(rayEnds[k], rayA);
       rayLens[k] = rayDirs[k].length();
@@ -1138,10 +2011,13 @@ export function create(ctx) {
     // So each sweep spends occBudget ray-triangle tests, nearest candidate
     // first, and resumes where it left off — a full rotation takes a few sweeps
     // and the hysteresis below is what holds the answer steady across them.
-    const blockedRay = [false, false, false, false, false];
+    const blockedRay = blockedRays; blockedRay.fill(false);
     let needTilt = false, dollyBest = Infinity, lastResort = Infinity;
-    let plinthNear = false, instHit = false;      // the two round-4 escalations
-    const floor = Math.max(6, goalDist() * p.occDollyFloor);
+    let plinthNear = false, instHit = false;      // the two round-4 escalations (UNPATCHED blockers only)
+    // §5.2: with the window on, a patched hit is the window's (blocked, cutNeed; never faded, dollied or tilted)
+    // and the ladder only moves the lens for what the window cannot open; p.cut 0 = the old ladder
+    const cutOn = p.cut !== 0;
+    const floor = dollyFloor();
     testedNow.clear(); fadeNow.clear();
     let spent = 0;
     if (sweepCursor >= near.length) sweepCursor = 0;
@@ -1160,43 +2036,92 @@ export function create(ctx) {
       if (cullNow.has(o) || !o.visible) continue;
       testedNow.add(o);
       if (log) log.push({ n: o.name || o.type, tested: 1, tris: s.tris, rays: nRays, off: +Math.sqrt(s.d).toFixed(1), d: 9999 });
+      let cm = 0, um = 0;                      // body rays this mesh blocks: as a cut-able mass / not
+      let pm = 0;                              // PLINTH_BIT: a patched plinth right at the lens (grows the window)
+      // the window reads DRAWN blockers only: an interior shell inside a hidden group (candy
+      // architecture hides a building's inner group until you enter) is raycast by the ladder
+      // below but draws nothing, so it must not open the window
+      const drawn = shownTree(o);
+      // …and neither does the ladder: an undrawn mesh hides nothing (§5.2, the ladder as a sensor)
+      if (!drawn) { cutHits.delete(o); plainHits.delete(o); continue; }
       for (let k = 0; k < nRays; k++) {
         const L = rayLens[k];
         if (L < 1e-3) continue;
         rc.set(rayA, rayDirs[k]);
         rc.near = 0.05;
         const h = nearestHit(o, L - 0.2);
+        // the window's reading: the nearest hit in front of the REAL lens (a mass the old dolly has already
+        // put the lens in front of is not in the picture; the ladder below still reads `h`, untouched)
+        const hc = drawn ? frontHit(h, lensPos) : null;
+        if (hc && k < WIN_RAYS && realBlocker(hc, rayEnds[k])) { if (cut.isPatchedHit(hc)) cm |= 1 << k; else um |= 1 << k; }
         if (log && h) {
           log.push({
-            n: o.name || o.type, ray: k, d: +h.distance.toFixed(1), dPlayer: +(L - h.distance).toFixed(1),
+            n: o.name || o.type, ray: k, d: +h.distance.toFixed(1), dPlayer: +(L - h.distance).toFixed(1), dAim: +aimT(h.point).toFixed(1),
             aboveGround: +(h.point.y - world.height(h.point.x, h.point.z)).toFixed(2),
             maxDim: +s.maxDim.toFixed(1), big: s.big, real: realBlocker(h, rayEnds[k]),
+            lensDepth: +lensDepth(h.point, lensPos).toFixed(1), window: hc ? (hc === h ? 'this' : 'further ' + hc.distance.toFixed(1)) : 'none',
           });
         }
         if (!realBlocker(h, rayEnds[k])) continue;
-        // rule 1 — fade. Prop-sized always; a merged district only when the hit
-        // is right at the lens, i.e. we are standing inside the thing.
-        if ((!s.big || h.distance - lensBack <= p.occNearLens) && !noFade(o)) { fadeNow.add(o); continue; }
-        // rules 2 / 3 — a mass we must move around
+        // A PLINTH / TERRAIN MASS right under the lens (the giant cupcake's plinth: a featureless wall 8 units
+        // from the lens and 30 across). Name it or measure it.
+        const plinth = h.distance - lensBack <= p.occPlinthNear && (PLINTH.test(o.name || '') || s.maxDim > p.occFadeLastDim);
+        // §5.2 classification — a hit on a PATCHED mesh: blocked (raw), the window's to open (cutNeed, via the
+        // window's reading above), never faded, dollied or tilted; a patched plinth only grows the window (rule 6)
+        if (cutOn && cut.isPatchedHit(h)) { blockedRay[k] = true; if (plinth) pm = PLINTH_BIT; continue; }
+        // rule 1 — fade: an unpatched prop-sized mesh. (The old "district within occNearLens of the lens" ghost,
+        // 1b, runs only in the p.cut 0 fallback: with the window on, the near-lens dither does that job.)
+        if ((!s.big || (!cutOn && h.distance - lensBack <= p.occNearLens)) && !noFade(o)) { fadeNow.add(o); continue; }
+        // rules 2 / 3 — an UNPATCHED mass we must move around (noCut / noFade / NEVER_FADE / unpatchable)
         blockedRay[k] = true;
         const dPlayer = L - h.distance;        // how far in front of the visitor it sits
-        // A PLINTH / TERRAIN MASS right under the lens. The giant cupcake's
-        // plinth is a featureless tan wall 8 units from the lens and 30 across:
-        // it cannot be ghosted (it is half the landmark), the dolly cannot get
-        // in front of it, and 0.30 rad of tilt does not clear it. Name it or
-        // measure it — either way it unlocks the taller tilt and forces a dolly.
-        if (h.distance - lensBack <= p.occPlinthNear && (PLINTH.test(o.name || '') || s.maxDim > p.occFadeLastDim)) {
+        const dAim = aimT(h.point);            // …and the dolly distance that puts the lens just in front of it
+        // an unpatched plinth unlocks the taller tilt (occLiftPlinth) and forces the dolly to its floor
+        if (plinth) {
           plinthNear = true;
-          lastResort = Math.min(lastResort, Math.max(floor, dPlayer - 0.6));
+          lastResort = Math.min(lastResort, Math.max(floor, dAim - 0.6));
         }
-        if (dPlayer - 0.7 >= floor) { dollyBest = Math.min(dollyBest, dPlayer - 0.7); continue; }
-        // Nothing in front of it to dolly to. If the tilt has already been
-        // tried here and did not work (see giveUp below), ghosting the mass is
-        // the last thing left — allowed for a building or a facility shell, but
-        // never for an island-wide merge, which would dissolve half the game.
-        if (giveUp && s.maxDim <= p.occFadeLastDim && !noFade(o)) { fadeNow.add(o); blockedRay[k] = false; continue; }
+        if (dAim - 0.7 >= floor) { dollyBest = Math.min(dollyBest, dAim - 0.7); continue; }
+        // Nothing in front of it to dolly to. p.cut 0 fallback only: if the tilt has already been tried here
+        // and did not work (see giveUp below), ghosting the mass is the last thing left — allowed for a
+        // building or a facility shell, never for an island-wide merge. With the window on there is no give-up.
+        if (!cutOn && giveUp && s.maxDim <= p.occFadeLastDim && !noFade(o)) { fadeNow.add(o); blockedRay[k] = false; continue; }
         needTilt = true;
-        if (dPlayer >= 4) lastResort = Math.min(lastResort, dPlayer - 0.7);
+        if (dPlayer >= 4) lastResort = Math.min(lastResort, dAim - 0.7);
+      }
+      if (cm || pm) cutHits.set(o, cm | pm); else cutHits.delete(o);
+      if (um) plainHits.set(o, um); else plainHits.delete(o);
+    }
+    // a mesh the broad phase no longer puts near the sight line (or that is culled / hidden) blocks nothing
+    cutHits.forEach(dropFarCut); plainHits.forEach(dropFarPlain);
+    // SHELLS (shellable(): big noFade masses the sweep never fades, culls or cuts). Rule 2 on their REAL
+    // triangles, and nothing else: the chest ray from the stop, at every drawn shell whose world box (+0.5 u) the
+    // sight line crosses (≤ 16 shells exist, 0-2 near any sight line). Of every shell surface it meets, the one
+    // NEAREST HIM decides: when it leaves room in front of it (≥ the floor) the lens may dolly to just in front of
+    // it (shellDolly), past all of them; otherwise no dolly at all — stopping between two surfaces (a cupcake's
+    // roof and its wall) reveals nothing. No tilt and no forced dolly: a lens pressed against a cupcake it cannot
+    // get in front of shows a wall, not the visitor (§5.3 lets him read amber there until the shell is cut-able).
+    // With the cut off the old collider pass handles them.
+    shellBy = null; shellDolly = Infinity;
+    if (cutOn && shells.length && rayLens[1] > 1e-3) {
+      const L1 = rayLens[1];
+      let farD = -1;
+      for (let i = 0; i < shells.length; i++) {
+        const o = shells[i].o;
+        if (!o.visible || !o.parent || !shownTree(o)) continue;
+        tmpBox.copy(shells[i].bb).applyMatrix4(o.matrixWorld).expandByScalar(0.5);
+        if (!segBox(rayA, headV, tmpBox)) continue;
+        rc.set(rayA, rayDirs[1]); rc.near = 0.05;
+        nearestHit(o, L1 - 0.2);                       // fills rayHits with every surface of it on the ray
+        for (let j = 0; j < rayHits.length; j++) {
+          const h = rayHits[j];
+          if (h.distance > farD && realBlocker(h, rayEnds[1])) { farD = h.distance; shellBy = o; shellHit.copy(h.point); }
+        }
+      }
+      if (shellBy) {
+        const dA = aimT(shellHit);
+        if (dA - 0.7 >= floor) shellDolly = dA - 0.7;
+        if (log) log.push({ n: shellBy.name || shellBy.type, shell: 1, d: +farD.toFixed(1), dPlayer: +(L1 - farD).toFixed(1), dAim: +dA.toFixed(1), room: dA - 0.7 >= floor });
       }
     }
     // ── INSTANCED BLOCKERS ────────────────────────────────────────────────
@@ -1204,15 +2129,30 @@ export function create(ctx) {
     // fronds that this sweep was not even looking at. Raycasting 2000 instances
     // is out of the question, so each instance is a SPHERE (shrunk by occInstK,
     // because a frond cloud's sphere is mostly air) tested against the sight
-    // line: cheap enough that the whole cloud fits in one sweep's budget.
-    // What we do about it, in order: ask the owner to hide the instances, dolly
-    // in front of them, and failing that tilt harder than a solid mesh would.
+    // line. §5.2 rule 5: an instance of a PATCHED cloud is the window's (its own
+    // triangles confirm it, cutNeed; it counts toward the grow), never the
+    // ladder's; an UNPATCHED cloud's instance is dollied in front of, or tilted
+    // over harder (occInstStep) than a solid mesh. ONE round-robin cursor over
+    // (cloud, instance) resumes where the last sweep ran out of occInstBudget, so
+    // every instance is eventually tested (not just each cloud's first ~2500);
+    // it goes round at most once per sweep and closes a cycle each time it
+    // passes cloud 0 — the window's instance bits are held over one full cycle
+    // (instPrev*), so a blocker the budget reaches only every few sweeps still
+    // holds the window open.
+    confirmSpent = 0;
     if (insts.length && segLen > 1e-3) {
       sightV.subVectors(headV, rayA);
       const sightL2 = sightV.lengthSq() || 1e-6;
-      const iFloor = Math.max(5.5, goalDist() * p.occInstFloor);
-      let instSpent = 0;
-      for (let i = 0; i < insts.length && instSpent < p.occInstBudget; i++) {
+      const iFloor = inNow ? INDOOR_FLOOR : Math.max(p.occDollyMin, goalDist() * p.occInstFloor);
+      const iBudget = budget === Infinity ? Infinity : p.occInstBudget;
+      const nC = insts.length;
+      if (instC >= nC) { instC = 0; instJ = 0; }
+      const c0 = instC, j0 = instJ;
+      let instSpent = 0, stopC = -1, stopJ = 0;
+      for (let n = 0; n <= nC && stopC < 0; n++) {
+        const i = (c0 + n) % nC;
+        if (n > 0 && i === 0) { instPrevCut = instAccCut; instPrevPlain = instAccPlain; instAccCut = 0; instAccPlain = 0; }
+        if (n === nC && j0 === 0) break;                     // back at the start: one full cycle
         const s = insts[i];
         const o = s.o;
         if (!o.visible || !o.parent || !o.count) continue;
@@ -1226,8 +2166,12 @@ export function create(ctx) {
           const cr = cl.radius * wsc + p.occRadius + 1.5;
           if (segDist2(rayA, headV, bc) > cr * cr) continue;
         }
-        const cnt = Math.min(o.count, p.occInstBudget - instSpent);
-        for (let j = 0; j < cnt; j++) {
+        // the start cloud from j0 on; its first j0 instances close the round
+        const jA = n === 0 ? j0 : 0, jB = n === nC ? Math.min(j0, o.count) : o.count;
+        const cloudCut = cut.isPatched(o), cloudDrawn = shownTree(o);
+        const ladder = !(cutOn && cloudCut);                 // an unpatched cloud (or the cut off): the ladder's
+        for (let j = jA; j < jB; j++) {
+          if (instSpent >= iBudget) { stopC = i; stopJ = j; break; }
           instSpent++;
           o.getMatrixAt(j, instM);
           const e = instM.elements;
@@ -1241,15 +2185,28 @@ export function create(ctx) {
           if (tt <= 0.02 || tt >= 0.98) continue;            // beside us, or behind the lens
           const dPlayer = segLen - tt * segLen;
           if (dPlayer < 1.2) continue;                       // the trunk we are standing against
+          // the window counts it only when some of it stands in front of the REAL lens (see frontHit), on an
+          // axial ray, and when the instance's own triangles confirm what its sphere suggests: a lollipop's
+          // sphere (stick + head, r ≈ 5) is mostly air, and the window must not open on air (A15)
+          const inPic = cloudDrawn && lensDepth(instV, lensPos) + rr > cam.near;
+          for (let k = 0; k < rayEnds.length; k++) {
+            if (segDist2(rayA, rayEnds[k], instV) < rr * rr) {
+              blockedRay[k] = true;
+              if (inPic && k < WIN_RAYS && instConfirm(o, k, lensPos)) { if (cloudCut) instAccCut |= 1 << k; else instAccPlain |= 1 << k; }
+            }
+          }
+          if (log) log.push({ n: (o.name || o.type) + '[inst]', inst: j, d: +(tt * segLen).toFixed(1), dPlayer: +dPlayer.toFixed(1), r: +r.toFixed(2), lensDepth: +lensDepth(instV, lensPos).toFixed(1), window: inPic, ladder });
+          if (!ladder) continue;                             // rule 5: the window's, never dollied or tilted
           instHit = true;
-          for (let k = 0; k < rayEnds.length; k++) if (segDist2(rayA, rayEnds[k], instV) < rr * rr) blockedRay[k] = true;
-          if (log) log.push({ n: (o.name || o.type) + '[inst]', inst: j, d: +(tt * segLen).toFixed(1), dPlayer: +dPlayer.toFixed(1), r: +r.toFixed(2) });
-          if (dPlayer - 0.8 >= iFloor) dollyBest = Math.min(dollyBest, dPlayer - 0.8);
-          else { needTilt = true; lastResort = Math.min(lastResort, Math.max(iFloor, dPlayer - 0.6)); }
+          const dAimI = aimT(instV);
+          if (dAimI - 0.8 >= iFloor) dollyBest = Math.min(dollyBest, dAimI - 0.8);
+          else { needTilt = true; lastResort = Math.min(lastResort, Math.max(iFloor, dAimI - 0.6)); }
         }
       }
-      if (instHit) askOwnersToHide(pl);
+      // out of budget: resume there next sweep; a round completed within the budget restarts from cloud 0
+      if (stopC >= 0) { instC = stopC; instJ = stopJ; } else { instC = 0; instJ = 0; }
     }
+    cutTally(instPrevCut | instAccCut, instPrevPlain | instAccPlain);
     // the tilt is allowed to run taller against a plinth than against a wall
     liftCap = plinthNear ? Math.max(p.occLiftMax, p.occLiftPlinth) : p.occLiftMax;
 
@@ -1276,12 +2233,12 @@ export function create(ctx) {
         // sweep can only see it coarsely, so it has to commit when it does
         sweepLift = Math.min(liftCap, sweepLift + p.occLiftStep * (instHit ? p.occInstStep : 1));
         liftAnchor.copy(pl);
-        // A tilt that has run all the way to its cap and STILL leaves him
-        // behind the thing is pure composition damage: it steepens every frame
-        // and buys nothing. Give up on it, remember the spot, and let the fade
-        // above take over until the visitor has walked 3 units away.
-        if (sweepLift >= liftCap - 1e-6 && ++liftMaxRun >= 2) {
-          giveUp = true; sweepLift = 0; giveUpAt.copy(pl);
+        // GIVE-UP (§5.2 rule 4). With the window on there is none: a tilt at its cap holds there, and the
+        // window / the silhouette carry the rest. In the p.cut 0 fallback (the old ladder) a tilt pinned at its
+        // cap that STILL leaves him behind the thing relaxes to half the cap, latches until he has walked 3 u
+        // away, and the last-resort ghost above takes over.
+        if (!cutOn && sweepLift >= liftCap - 1e-6 && ++liftMaxRun >= 2) {
+          giveUp = true; sweepLift = 0.5 * liftCap; giveUpAt.copy(pl);
         }
       }
     } else {
@@ -1290,17 +2247,13 @@ export function create(ctx) {
       if (moved) { sweepLift = 0; liftAnchor.set(NaN, 0, 0); }
       else if (clearRun >= 6) { sweepLift = Math.max(0, sweepLift - p.occLiftStep); clearRun = 4; }
     }
-    // Tilt maxed out and still hidden: the dolly may come in past its floor —
-    // but ONLY inside something. A 6-unit lens in the open is not a rescue, it
-    // is a different game: it puts the camera in the visitor's pocket and
-    // throws away the composition, which is exactly what a critic caught it
-    // doing on every close approach. Outdoors the floor is the floor, and the
-    // silhouette pass is what keeps him visible from there.
-    const hardFloor = indoors() ? 5.5 : floor;
+    // Tilt maxed out and still hidden (an unpatched blocker): the dolly may come in to its floor, never past
+    // it (§5.2, A3: max(14, 0.62 × goal) outdoors — a lens in the visitor's pocket is a different game — and
+    // INDOOR_FLOOR inside a building). The silhouette pass keeps him visible from there.
     if (needTilt && sweepLift >= liftCap - 1e-6 && Number.isFinite(lastResort)) {
-      dollyBest = Math.min(dollyBest, Math.max(hardFloor, lastResort));
+      dollyBest = Math.min(dollyBest, Math.max(floor, lastResort));
     }
-    if (Number.isFinite(dollyBest)) dollyBest = Math.max(dollyBest, hardFloor);
+    if (Number.isFinite(dollyBest)) dollyBest = Math.max(dollyBest, floor);
     // the dolly gets the same hold, for the same reason
     if (!Number.isFinite(dollyBest) && clearRun < 4) dollyBest = lastDolly;
     lastDolly = dollyBest;
@@ -1328,6 +2281,20 @@ export function create(ctx) {
     culled.clear(); cullNow.clear();
   }
 
+  /** Does the segment a→b cross (or start inside) the box? Slab test, no allocation. */
+  function segBox(a, b, box) {
+    let t0 = 0, t1 = 1;
+    for (let ax = 0; ax < 3; ax++) {
+      const o = ax === 0 ? a.x : ax === 1 ? a.y : a.z, d = (ax === 0 ? b.x : ax === 1 ? b.y : b.z) - o;
+      const lo = ax === 0 ? box.min.x : ax === 1 ? box.min.y : box.min.z, hi = ax === 0 ? box.max.x : ax === 1 ? box.max.y : box.max.z;
+      if (Math.abs(d) < 1e-9) { if (o < lo || o > hi) return false; continue; }
+      let ta = (lo - o) / d, tb = (hi - o) / d;
+      if (ta > tb) { const t = ta; ta = tb; tb = t; }
+      if (ta > t0) t0 = ta; if (tb < t1) t1 = tb;
+      if (t0 > t1) return false;
+    }
+    return true;
+  }
   /** Squared distance from sphere centre to the segment a→b. */
   function segDist2(a, b, c) {
     seg.subVectors(b, a);
@@ -1418,13 +2385,17 @@ export function create(ctx) {
    * an array, a Map, a Set or a plain object and never throw on a system that
    * has not shipped them yet.
    */
+  const ARCH = ['candyArchitecture', 'catArchitecture'];
   function indoors() {
-    for (const k of ['candyArchitecture', 'catArchitecture']) {
-      let list = ctx.systems[k]?.interiors;
+    for (let a = 0; a < ARCH.length; a++) {
+      let list = ctx.systems[ARCH[a]]?.interiors;
       if (!list) continue;
-      if (list instanceof Map || list instanceof Set) list = [...list.values()];
-      else if (!Array.isArray(list)) { try { list = Object.values(list); } catch { continue; } }
-      for (const it of list) if (it && it.inside === true) return true;
+      // both systems publish arrays (the per-frame case: no allocation); anything else is converted
+      if (!Array.isArray(list)) {
+        if (list instanceof Map || list instanceof Set) list = [...list.values()];
+        else { try { list = Object.values(list); } catch { continue; } }
+      }
+      for (let i = 0; i < list.length; i++) { const it = list[i]; if (it && it.inside === true) return true; }
     }
     return false;
   }

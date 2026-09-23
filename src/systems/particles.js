@@ -48,10 +48,36 @@ const CAP_NORMAL = 2400;
 const CAP_ADD = 1600;
 const TAU = Math.PI * 2;
 
+// ── MOBILE TIER (ctx.state.mobile, read once at create; BRIEF Contract I) ────
+// Pools at 40% (960 / 640), every one-shot burst and every registered emitter
+// at half strength, and the authored ambient layers thinned at the SOURCE (their
+// rates), so a phone never has to recycle live particles to stay under the cap
+// — recycling is what would make a field flicker. The lamp-anchored glows keep
+// their full rate: they cycle through their anchors and a thinner rate would
+// leave some lamps dark, and on a phone they carry the night glow that the
+// point lights no longer do.
+const MOBILE_CAP_SCALE = 0.4;
+const MOBILE_BURST_SCALE = 0.5;       // one-shot bursts (count), min 1
+const MOBILE_BURST_MAX = 160;         // was 400: no additive over-draw storms
+const MOBILE_EMIT_SCALE = 0.5;        // emitter()/smoke() rates from other systems
+const MOBILE_AMBIENT = [
+  // [id pattern, rate scale] — first match wins; the default is 0.45
+  [/lamp_halos|bulb_halos|light_pools/, 1],     // anchor-cycled: keep every lamp lit
+  [/smoke|steam/, 0.6],                          // columns: thinner, still columns
+  [/prints/, 0.6],
+  [/fireflies|glints|sparkles|moths/, 0.4],      // additive specks — the over-draw
+];
+const MOBILE_AMBIENT_DEFAULT = 0.45;
+const MOBILE_EVERY_SCALE = 1.8;       // `every: [a, b]` burst timers → fewer bursts
+
 export function create(ctx) {
   const rnd = rng(hash('particles'));
-  const normal = new Pool(CAP_NORMAL, false, 'normal');
-  const additive = new Pool(CAP_ADD, true, 'additive');
+  const MOBILE = !!ctx.state.mobile;
+  const capN = MOBILE ? Math.round(CAP_NORMAL * MOBILE_CAP_SCALE) : CAP_NORMAL;
+  const capA = MOBILE ? Math.round(CAP_ADD * MOBILE_CAP_SCALE) : CAP_ADD;
+  const emitScale = MOBILE ? MOBILE_EMIT_SCALE : 1;
+  const normal = new Pool(capN, false, 'normal');
+  const additive = new Pool(capA, true, 'additive');
   ctx.scene.add(normal.mesh, additive.mesh);
 
   let windX = 0.4, windZ = -0.15;
@@ -176,7 +202,9 @@ export function create(ctx) {
   }
 
   function burst(o) {
-    const n = Math.min(400, o.count ?? 12);
+    const n = MOBILE
+      ? Math.min(MOBILE_BURST_MAX, Math.max(1, Math.round((o.count ?? 12) * MOBILE_BURST_SCALE)))
+      : Math.min(400, o.count ?? 12);
     for (let i = 0; i < n; i++) spawn(o);
   }
 
@@ -281,7 +309,7 @@ export function create(ctx) {
       const live = normal.count + additive.count;
       return {
         normal: normal.count, additive: additive.count, live, triangles: live * 2,
-        cap: CAP_NORMAL + CAP_ADD, emitters: emitters.length,
+        cap: capN + capA, emitters: emitters.length,
         calls: (normal.count > 0 ? 1 : 0) + (additive.count > 0 ? 1 : 0),
       };
     },
@@ -290,6 +318,17 @@ export function create(ctx) {
   };
 
   const ambient = createAmbient(ctx, api);
+  if (MOBILE) {
+    // thin the authored layers at their source (rates are read live every frame
+    // and by prime(), so this is the whole change — no per-frame cost)
+    for (const f of ambient.effects) {
+      if (f.every) { f.every = [f.every[0] * MOBILE_EVERY_SCALE, f.every[1] * MOBILE_EVERY_SCALE]; continue; }
+      if (typeof f.rate !== 'number') continue;
+      let k = MOBILE_AMBIENT_DEFAULT;
+      for (const [re, v] of MOBILE_AMBIENT) if (re.test(f.id || '')) { k = v; break; }
+      f.rate *= k;
+    }
+  }
   api.sprinkleShower = (sec) => ambient.sprinkleShower(sec);
   api.ambient = ambient;
   api.pools = { normal, additive };
@@ -300,7 +339,7 @@ export function create(ctx) {
   try { fxEvents = createEvents(ctx, api); api.events = fxEvents; }
   catch (err) { console.error('[particles] event FX failed to create', err); }
   console.warn(`[particles] 2 draw calls max (normal+additive instanced quads) · ${ambient.effects.length} ambient effects`
-    + ` · caps ${CAP_NORMAL}/${CAP_ADD} particles (2 tris each) · 0 per-frame allocations`);
+    + ` · caps ${capN}/${capA} particles (2 tris each) · 0 per-frame allocations${MOBILE ? ' · mobile tier (bursts ×0.5, emitters ×0.5, ambient thinned)' : ''}`);
 
   // ── player / NPC feedback events ───────────────────────────────────────────
   const world = ctx.world;
@@ -409,7 +448,7 @@ export function create(ctx) {
         const dx = obs.x - (o.x ?? 0), dz = obs.z - (o.z ?? 0);
         if (dx * dx + dz * dz > cull * cull) { e.acc = 0; continue; }
       }
-      e.acc += dt * (o.rate ?? 8);
+      e.acc += dt * (o.rate ?? 8) * emitScale;
       let guard = 0;
       while (e.acc >= 1 && guard++ < 24) { e.acc -= 1; spawn(o); }
       if (e.acc > 4) e.acc = 0;

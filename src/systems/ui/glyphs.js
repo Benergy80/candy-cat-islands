@@ -160,6 +160,8 @@ const P = {
   exit: 'M4 4.6 v14.8 h8 M9 12 h11 M16.6 8.6 L20 12 l-3.4 3.4',
   sun: 'M12 7.2 a4.8 4.8 0 1 0 0 9.6 a4.8 4.8 0 1 0 0 -9.6 M12 2 v2.4 M12 19.6 V22 M2 12 h2.4 M19.6 12 H22 M5 5 l1.7 1.7 M17.3 17.3 L19 19 M19 5 l-1.7 1.7 M6.7 17.3 L5 19',
   bug: 'M12 5.4 c3.2 0 5.4 2.8 5.4 7 s-2.2 6.2 -5.4 6.2 s-5.4 -2 -5.4 -6.2 s2.2 -7 5.4 -7 Z M12 5.4 V3 M4 9 l3 1.6 M20 9 l-3 1.6 M4.4 16 l3 -1.4 M19.6 16 l-3 -1.4',
+  // a folded paper map (the MAP chip shown while the minimap is off)
+  map: 'M3.2 6.4 L8.8 4 l6.4 2.4 L20.8 4 v13.6 l-5.6 2.4 l-6.4 -2.4 L3.2 20 Z M8.8 4 v13.6 M15.2 6.4 V20',
 };
 
 /**
@@ -242,6 +244,52 @@ const ITEM = {
     <path d="M10.6 12.4 L18.8 20.6 M14.4 16.2 l1.8 -1.8 M16.6 18.4 l1.8 -1.8" stroke="#ffc94a" stroke-width="2.4"/>
     <circle cx="8.2" cy="9.8" r="4.2" fill="#ffc94a"/>
     <circle cx="8.2" cy="9.8" r="1.4" fill="#2a1430" stroke="none"/>`,
+  // THE WINCH — brass drum on a stand, crank handle (escape item for The Big Fling)
+  winch: `
+    <path d="M4.6 20.4 L7.4 13.4 M13.4 13.4 L16.2 20.4 M3.6 20.4 h13.6" stroke-width="2"/>
+    <rect x="4.4" y="7.4" width="12" height="7.6" rx="2.2" fill="#e7a94a"/>
+    <path d="M7.6 7.6 v7.2 M10.4 7.6 v7.2 M13.2 7.6 v7.2" stroke-width="1.3" opacity=".5"/>
+    <path d="M16.4 11.2 h2.8 v-5.2 h2.4" stroke-width="2.1"/>
+    <circle cx="21.2" cy="6" r="1.5" fill="#ff5f8f" stroke-width="1.5"/>`,
+  // jawbreaker cannon — stubby barrel on wheels, a striped jawbreaker in the mouth
+  cannon: `
+    <path d="M4.6 15.6 L15.8 9.2 a3 3 0 0 1 3 5.2 L7.6 20.8 Z" fill="#8a7bd0"/>
+    <circle cx="8.2" cy="18.6" r="3" fill="#ffc94a" stroke-width="1.7"/>
+    <circle cx="19.2" cy="7.4" r="3.1" fill="#ff5f8f" stroke-width="1.7"/>
+    <path d="M17.4 6.4 q1.8 1 3.6 0" stroke="#fff6fa" stroke-width="1.3"/>`,
+  // licorice whip — a black twist with a red tip, cracking
+  whip: `
+    <path d="M4.4 20.2 L7.6 17 q5 -4.6 3.6 -8.6 q-1.4 -4 4 -4.4 q4.6 -.4 5.6 3.2" stroke-width="5"/>
+    <path d="M4.4 20.2 L7.6 17 q5 -4.6 3.6 -8.6 q-1.4 -4 4 -4.4 q4.6 -.4 5.6 3.2" stroke="#3a2438" stroke-width="2.6"/>
+    <path d="M4 20.6 l3 -3" stroke="#e8343f" stroke-width="3.4"/>
+    <path d="M20.8 9.6 l1.4 1.4 M22 7.4 h1.4" stroke-width="1.4" opacity=".7"/>`,
+  // pop rocks — a torn packet with fizzing crystals
+  poprocks: `
+    <path d="M5.4 8.6 l2 -2 l2 1.6 l2 -1.6 l2 1.6 l2 -1.6 l2 2 v11.2 a1.6 1.6 0 0 1 -1.6 1.6 H7 a1.6 1.6 0 0 1 -1.6 -1.6 Z" fill="#ff7a4f"/>
+    <path d="M8.4 12.8 l1.6 -1.6 l1.6 1.6 l-1.6 1.6 Z M12.6 16 l1.4 -1.4 l1.4 1.4 l-1.4 1.4 Z" fill="#9ff0ff" stroke-width="1.3"/>
+    <path d="M9.4 3.4 v1.2 M13 2.2 v1.4 M16.2 3.2 v1.2" stroke-width="1.5"/>`,
+  // bubblegum blower — pink bubble on a mouthpiece
+  gum: `
+    <circle cx="14" cy="9.4" r="6.4" fill="#ff9ec0"/>
+    <path d="M11.2 6.4 q1.6 -1.6 3.6 -1.2" stroke="#fff6fa" stroke-width="1.6"/>
+    <path d="M4.2 19.8 l4.6 -4.6" stroke-width="5"/>
+    <path d="M4.2 19.8 l4.6 -4.6" stroke="#37bcd8" stroke-width="2.6"/>`,
+  // marshmallow launcher — a fat tube with a marshmallow loaded
+  marshmallow: `
+    <path d="M3.6 16.4 l9.8 -6.2 l3 4.6 l-9.8 6.2 Z" fill="#c7b4f0"/>
+    <path d="M6.4 20.6 l-1 1.8" stroke-width="2.4"/>
+    <rect x="15" y="4.2" width="6.6" height="6.6" rx="2.2" fill="#fffaf1" transform="rotate(-32 18.3 7.5)"/>`,
+  // peppermint boomerang — red/white swirl bent into a V
+  boomerang: `
+    <path d="M4.2 18.8 q7.8 -1.6 8.6 -10.6 q.8 9 7.4 13" stroke-width="6"/>
+    <path d="M4.2 18.8 q7.8 -1.6 8.6 -10.6 q.8 9 7.4 13" stroke="#fff6fa" stroke-width="3.4"/>
+    <path d="M6.6 18.2 l1.2 -2.2 M10 15.6 l1.8 -1.2 M14 13.4 l1.6 1.4 M17 17 l1.8 .6" stroke="#e8343f" stroke-width="2"/>`,
+  // water balloon — a blue balloon, knotted, one drip
+  balloon: `
+    <path d="M12 3.2 c4 0 6.6 3.2 6.6 7 c0 4.2 -3 7.4 -6.6 7.4 s-6.6 -3.2 -6.6 -7.4 c0 -3.8 2.6 -7 6.6 -7 Z" fill="#6fc6f4"/>
+    <path d="M12 17.6 l-1.4 2 h2.8 Z" fill="#6fc6f4" stroke-width="1.5"/>
+    <path d="M9.2 7.4 q1.2 -1.6 3 -1.6" stroke="#e8f8ff" stroke-width="1.6"/>
+    <path d="M18.6 17.4 q1.2 1.8 0 2.8 q-1.2 -1 0 -2.8 Z" fill="#6fc6f4" stroke-width="1.2"/>`,
   // fallback — a paper bag of something
   unknown: `
     <path d="M5.6 9.8 h12.8 l-1.1 9.9 a1.7 1.7 0 0 1 -1.7 1.5 H8.4 a1.7 1.7 0 0 1 -1.7 -1.5 Z" fill="#ffe3ae"/>
@@ -251,6 +299,15 @@ const ITEM = {
 /** Which item glyph suits this id/name? Matched loosely so ids can drift. */
 export function glyphForItem(id = '', name = '') {
   const s = `${id} ${name}`.toLowerCase();
+  // wave-3 kit first (their names would otherwise fall through to 'unknown')
+  if (/winch|crank/.test(s)) return 'winch';
+  if (/jawbreak|cannon/.test(s)) return 'cannon';
+  if (/licorice|whip/.test(s)) return 'whip';
+  if (/pop.?rock/.test(s)) return 'poprocks';
+  if (/bubble|gum.?blow/.test(s)) return 'gum';
+  if (/marshmallow/.test(s)) return 'marshmallow';
+  if (/boomerang|peppermint/.test(s)) return 'boomerang';
+  if (/balloon/.test(s)) return 'balloon';
   if (/caramel|torch|heat|burn|flame/.test(s)) return 'caramelizer';
   if (/salt.?gun|saltgun|salt.?blaster/.test(s)) return 'saltgun';
   if (/salt/.test(s)) return 'salt';
@@ -289,4 +346,17 @@ export const POI_PATHS = {
   tree: 'M12 21 v-4.4 M4.8 16.6 h14.4 L12 3.6 Z',
   fish: P.fish,
   q: 'M8.6 8.4 a3.6 3.6 0 1 1 3.4 4.8 v2 M12 19 v.4',
+  // ── wave-3 map-marker pictograms (ui.addMapMarker glyphs) ──
+  // cave key: a round bow with cat ears, a shaft, two teeth
+  key: 'M4.7 6.4 l.5 -3.6 l2.5 2.2 M11.7 6.4 l-.5 -3.6 l-2.5 2.2 M3.9 9.2 a4.3 4.3 0 1 0 8.6 0 a4.3 4.3 0 1 0 -8.6 0 Z M11.3 12.3 L19.6 20.6 M15.2 16.2 l2.2 -2.2 M17.6 18.6 l2.2 -2.2',
+  // winch: a drum on a stand with a crank
+  winch: 'M4.4 8.4 h11.2 v7 h-11.2 Z M8.2 8.4 v7 M11.8 8.4 v7 M6 15.4 L4.4 20.6 M14 15.4 l1.6 5.2 M15.6 11.9 h3.4 V6.4 h2.6',
+  // ammo: a pyramid of three jawbreakers
+  ammo: 'M5 16.4 a3.2 3.2 0 1 0 6.4 0 a3.2 3.2 0 1 0 -6.4 0 Z M12.6 16.4 a3.2 3.2 0 1 0 6.4 0 a3.2 3.2 0 1 0 -6.4 0 Z M8.8 9.6 a3.2 3.2 0 1 0 6.4 0 a3.2 3.2 0 1 0 -6.4 0 Z',
+  // weapon: the candy-cane bat
+  weapon: 'M8.4 21 V10.6 a4.2 4.2 0 0 1 8.4 0 v1.8 M8.4 17 l3 -1.4 M8.4 13 l3 -1.4',
+  // thermal: three rising warm wisps (the flyer's lift columns)
+  thermal: 'M6.4 20.4 q-2.4 -4.2 0 -8.2 q2.2 -3.8 0 -8 M12 20.4 q-2.4 -4.2 0 -8.2 q2.2 -3.8 0 -8 M17.6 20.4 q-2.4 -4.2 0 -8.2 q2.2 -3.8 0 -8',
+  // plane: a paper plane
+  plane: 'M2.8 11.6 L21.2 4 L15.4 20.2 L11.4 14 Z M11.4 14 L21.2 4 M11.4 14 v5.2 l2.4 -2.4',
 };

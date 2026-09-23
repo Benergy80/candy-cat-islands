@@ -146,5 +146,50 @@
       "candyCreatures.flypast": 0.42
     },
     "frames": 70
+  },
+  "npc_creatures_ant_detour": {
+    "pos": [
+      -134,
+      36.5
+    ],
+    "time": 11,
+    "frames": 90
+  },
+  "npc_creatures_meadow_night": {
+    "pos": [
+      -114,
+      -38
+    ],
+    "time": 21.5,
+    "frames": 90,
+    "call": {
+      "candyCreatures.stageAll": [
+        [
+          [
+            "sheep",
+            -122.55,
+            -38.57,
+            1.2
+          ],
+          [
+            "snail",
+            -121.81,
+            -36.24,
+            0.4
+          ]
+        ]
+      ]
+    }
+  },
+  "npc_creatures_bench_ant": {
+    "free": [
+      -139,
+      37.5
+    ],
+    "az": 0.78,
+    "el": 0.62,
+    "dist": 18,
+    "time": 11,
+    "frames": 70
   }
 }

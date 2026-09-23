@@ -1,0 +1,134 @@
+{
+ "escape_items_key_day": {
+  "pos": [
+   89.5,
+   33.5
+  ],
+  "time": 12,
+  "frames": 40
+ },
+ "escape_items_key_night": {
+  "pos": [
+   89.5,
+   33.5
+  ],
+  "time": 22,
+  "frames": 40
+ },
+ "escape_items_winch_day": {
+  "pos": [
+   95,
+   51
+  ],
+  "time": 12,
+  "frames": 40
+ },
+ "escape_items_winch_night": {
+  "pos": [
+   95,
+   51
+  ],
+  "time": 22,
+  "frames": 40
+ },
+ "escape_items_trail_wide": {
+  "free": [
+   89,
+   36
+  ],
+  "y": 6,
+  "az": 0.78,
+  "el": 0.72,
+  "dist": 64,
+  "time": 17,
+  "frames": 40
+ },
+ "escape_items_catapult": {
+  "pos": [
+   126,
+   81
+  ],
+  "time": 12,
+  "frames": 40
+ },
+ "escape_items_hatch": {
+  "pos": [
+   202.0,
+   -67.3
+  ],
+  "time": 12,
+  "frames": 40,
+  "az": 0.785,
+  "el": 0.84,
+  "dist": 23
+ },
+ "escape_items_hatchpost": {
+  "pos": [
+   202.5,
+   -65.2
+  ],
+  "time": 12,
+  "frames": 40,
+  "dist": 15,
+  "el": 0.62,
+  "az": 0.785
+ },
+ "escape_items_hatchpost_night": {
+  "pos": [
+   202.5,
+   -65.2
+  ],
+  "time": 22,
+  "frames": 40,
+  "dist": 15,
+  "el": 0.62,
+  "az": 0.785
+ },
+ "escape_items_arrivals": {
+  "pos": [
+   62,
+   21
+  ],
+  "time": 12,
+  "frames": 40
+ },
+ "escape_items_zcarry": {
+  "pos": [
+   137.5,
+   77.5
+  ],
+  "time": 12,
+  "frames": 40,
+  "call": {
+   "escape.routes.catapult.winch.take": []
+  }
+ },
+ "escape_items_zcarry_close": {
+  "pos": [
+   99.5,
+   52.5
+  ],
+  "time": 12,
+  "frames": 40,
+  "dist": 13,
+  "el": 0.5,
+  "call": {
+   "escape.routes.catapult.winch.take": []
+  },
+  "az": 0.785
+ },
+ "escape_items_zinstalled": {
+  "pos": [
+   137.9,
+   74.2
+  ],
+  "time": 19.5,
+  "frames": 50,
+  "call": {
+   "escape.routes.catapult.winch.install": []
+  },
+  "dist": 29,
+  "el": 0.7,
+  "az": 0.35
+ }
+}

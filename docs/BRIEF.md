@@ -215,3 +215,42 @@ traversing ctx.scene; dispose its old shadow map), hide keyboard hints. Inject y
 `node --check` every file you touched · render ≥ 2 views (day AND night where relevant) with tools/render.mjs and READ the PNGs ·
 zero CONSOLE ERRORS · draw calls ≤ your wave-1 budget + 6 · report ≤ 40 lines: what exists (coordinates), files, views, API, budgets,
 known weaknesses. Never resume a giant context: write first, look once, fix the biggest visible weakness, repeat.
+
+### Contract I — iPhone / mobile quality tier (added 2026-09-22)
+main.js decides the tier BEFORE any system is created: `ctx.state.quality` = 'mobile' on phones (coarse pointer and a short side under
+900 css px, or `?q=mobile`), else 'high' (`?q=high` forces desktop). `ctx.state.mobile` (bool) and `ctx.state.touch` (bool) are set too.
+Renderer on mobile: no MSAA, pixel ratio ≤ 1.5, PCFShadowMap. Every heavy system reads `ctx.state.mobile` at create() and trims:
+instanced vegetation/nature counts (≈ 45% of desktop), particle caps (≈ 40%), shadow casters (only the visitor, NPCs and buildings
+cast; vegetation/props do not), shadow map ≤ 1024, sky (no volumetric mist / fewer clouds), terrain detail, architecture glow/emissive
+extras, ferry/water (cheaper water shader path), draw-call goal ≤ 220 and ≤ 550k triangles at the game camera on mobile, no visible
+popping. The tier must look like the same game — the art director's rules still apply — just lighter. Test with Playwright WebKit
+(`playwright.webkit`, devices['iPhone 13'] / ['iPhone 15 Pro'], hasTouch) as the closest proxy to iOS Safari; report draw calls,
+triangles, geometries, textures and frameMs per view. Safari rules: never rely on `performance.memory`; textures ≤ 2048; no
+`OES_texture_float` linear filtering assumptions; unlock WebAudio on the first touch; `viewport-fit=cover` + safe-area insets;
+home-screen PWA: manifest.webmanifest + apple-touch-icon (180 px) + theme-color; `-webkit-touch-callout: none`; no 100vh (use dvh /
+window.innerHeight). Ownership for the tier pass: **world-tier** = candy/vegetation*, cat/nature*, candy/architecture*, cat/architecture*,
+terrain*; **fx-tier** = sky*, particles.js, ferry.js; **pwa** = manifest.webmanifest, icons/ (new). index.html and touch.js stay with the touch owner.
+
+### Contract J — frame-rate pass (added 2026-09-22, Ben: "optimize for frame rates at the end — it has gotten a bit choppy")
+Runs LAST, after every WAVE 3 builder has landed. Measured in Ben's real Chrome (hardware GL) via claude-in-chrome (window.game.stats().fps / frameMs over ≥ 600 frames at candy_village, cat_main_street, cat_plaza, candy_night, sea_crossing), never in the SwiftShader harness. Targets on the M1 Pro at 2× DPR: ≥ 55 fps median, no frame > 40 ms outside loading; draw calls ≤ 450, triangles ≤ 1.3M (desktop). Method: per-system update() CPU timing (wrap each system's update in main.js's loop with performance.now() when ?prof=1), renderer.info per system (toggle groups), shadow-map cost, per-frame allocations (heap growth over 600 frames), texture uploads, instanced-attribute uploads (needsUpdate every frame), raycasts per frame (camera sweep, interaction), DOM/UI churn (querySelector/innerHTML per frame). Optimise the top hotspots only; every change guarded by measurement before/after; no visual regression (critic frames).
+
+### Contract H2 — mobile controls that stay out of the way (added 2026-09-22; Ben: "mobile needs onscreen control buttons that are not in the way")
+The first touch pass (renders/w3_touch/iphone13_landscape_cat_fix.png) covered ≈ 35% of the phone screen: six 90-px pastel discs bottom-right, four
+round buttons top-right, a hotbar bottom-centre and the dialogue box mid-screen. Replace it with a layout that reads as part of the HUD:
+- **Coverage budget:** all control DOM (joystick, buttons, chips) ≤ 16% of the landscape viewport area, measured from getBoundingClientRect();
+  nothing but transient prompts inside the central 60% × 60% of the screen; the visitor and the ground ahead of him are never under a control.
+- **Corners only.** Left thumb: the joystick (outer ring ≤ 120 px, appears where the thumb lands — floating stick — and fades when released).
+  Right thumb: a compact ARC of three buttons — A jump (56 px) as the anchor, E/interact (48 px) and B/use (48 px) beside it. C duck, R roll and
+  F cycle become 36-px ghost chips stacked along the right edge above the arc. Top-right: LOOK / camera-mode / map / help as 32-px icon chips in
+  ONE row under the clock, not four 90-px discs.
+- **Style:** thin 1.5-px cream outline, 30% fill at rest, full fill + slight scale on press, icon or a single letter, label only on the A/E/B
+  arc; after 3 s without a touch the controls fade to 22% opacity, any touch restores them. No drop shadows or glows at rest.
+- **Contextual:** the E chip only lights (and grows to 48 px) when interaction.nearest() is non-null; B shows the held item's glyph; the hotbar
+  collapses on phones to one held-item chip (tap = F cycle, long-press opens the tray).
+- **Dialogue and panels on phones (via touch.js's injected CSS, no ui.js edits):** the dialogue box docks bottom-centre above the arc, ≤ 40%
+  width; the objective panel collapses to a single line chip top-left that expands on tap; toasts stack top-centre; banners stay top-centre.
+- **Verification:** a Playwright iPhone 13 landscape + portrait screenshot set (game, dialogue open, map open, help open) READ by a critic, plus
+  the coverage metric printed by the verifier (must be ≤ 16% landscape, ≤ 22% portrait) and a check that no control overlaps the minimap,
+  the clock, the objective chip or the dialogue box.
+Also fold in the camera spec's §8.4 requests: a LOOK button that holds `KeyV` while pressed, and `pointer.orbit = true` (not `pointer.down`)
+for the right-thumb look drag once input.js ships `orbit`.

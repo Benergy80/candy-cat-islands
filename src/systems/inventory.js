@@ -2,38 +2,45 @@
 // INVENTORY & PICKUPS — what you are carrying, and everything lying around the
 // two islands waiting to be carried.
 //
-// 46 sweets (40 on Candyland, 6 smuggled onto Cat Island), eight tools, two fuel
-// cans. Every pickup is a floating, bobbing, spinning, sparkling item registered
-// with the interaction system, so E picks it up and the prompt names it.
+// 46 sweets (40 on Candyland, 6 smuggled onto Cat Island), fifteen weapons and
+// tools, two fuel cans and (wave 3) ~75 AMMO pickups in themed caches. Every
+// pickup is a floating, bobbing, spinning, sparkling item registered with the
+// interaction system, so E picks it up and the prompt names it; ammo is also
+// scooped up just by walking through it, and comes back 60–90 s later.
 // One InstancedMesh per item TYPE (candy is three tintable shapes, so one
 // geometry gives six flavours) — a whole island of gumdrops is one draw call.
 //
 // PUBLIC API
-//   items            ordered [{ id, name, kind:'weapon'|'tool'|'candy'|'ammo', count }]
+//   items            ordered (items.ORDER) [{ id, name, kind:'weapon'|'tool'|'candy', count,
+//                    ammo?, max? }] — `ammo`/`max` are the live magazine, for the hotbar
 //   add(id, n) · count(id) · has(id) · spend(id, n)
 //   held             current weapon/tool id, or null (bare hands)
-//   cycle()          F: next weapon/tool → null → …          setHeld(id)
-//   def(id)          the item table entry (name, kind, mode, power, ammo)
-//   ammo             { salt, gumballs, saltgun, fuel } · addAmmo(kind, n) · useAmmo(kind, n)
-//   registerPickup({ id, x, z, itemId, n, label, mesh?, respawn?, variant?, tint?, y?, fixed? })
+//   cycle()          F: next usable weapon in ORDER → bare hands → …   setHeld(id)
+//   def(id)          the item table entry (name, kind, mode, hit, power, ammo)
+//   ammo             { salt, gumballs, saltgun, fuel, jawbreakers, poprocks, gum,
+//                    marshmallows, balloons } · addAmmo(kind, n) · useAmmo(kind, n) · caps
+//   registerPickup({ id, x, z, itemId, n, label, mesh?, respawn?, variant?, tint?, y?, fixed?, auto? })
 //   pickups          live list · hotbar() → [{ id, name, count, held, ammo }]
+//   caches           the ammo clusters [{ id, x, z, itemId, n, label, island }]
 //   help             [{ keys, text }] control lines for the UI's '?' card
 // EVENTS  'inventory:pickup' {itemId,n,id} · 'inventory:held' {itemId} · 'inventory:change'
 // Views:  tools/views/inventory.json
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 import { mat, clamp } from '../core/util.js';
-import { ITEMS, VISUALS, buildVisual, applyPickupGlow } from './inventory/items.js';
+import { ITEMS, VISUALS, ORDER, AMMO_CAP, AMMO_LOAD, CANDY_REFILL, buildVisual, applyPickupGlow } from './inventory/items.js';
 import { createMarkers } from './inventory/markers.js';
 import { authorPickups } from './inventory/places.js';
 
-const AMMO_CAP = { salt: 12, gumballs: 20, saltgun: 30, fuel: 20 };
-const CANDY_REFILL = { salt: 2, gumballs: 2, saltgun: 5 };
 const BOB = 0.13, SPIN = 0.9;
-const POOL_RANGE = 140;          // pools further than this stop drawing entirely
+const POOL_RANGE = 104;          // pickups further than this from the camera's FOCUS stop drawing
+const AMMO_RANGE = 62;           // ammo is small: its pools only draw near the camera's focus
 const SPARKLE_RANGE = 34;
 const MARK_RANGE = 78;           // markers fade out over the last 18 u of this
+const AMMO_MARK_RANGE = 54;
+const AUTO_R = 1.35;             // walk through ammo to scoop it up
 const LAVENDER = 0xb388ff;       // every sweet's marker hue
+const rank = (id) => { const i = ORDER.indexOf(id); return i < 0 ? ORDER.length : i; };
 
 export function create(ctx) {
   const world = ctx.world;
@@ -90,30 +97,52 @@ export function create(ctx) {
   }
 
   // ── the bag ────────────────────────────────────────────────────────────────
-  const items = [];                                  // ordered, stable
-  const ammo = { salt: 0, gumballs: 0, saltgun: 0, fuel: 0 };
+  const items = [];                                  // ordered by ORDER, stable
+  const ammo = {};
+  for (const k in AMMO_CAP) ammo[k] = 0;
   let held = null;
   const seen = new Set();                            // items ever picked up (for first-time toasts)
 
-  const def = (id) => ITEMS[id] || { id, name: id, kind: 'candy' };
+  // Unknown ids (another builder's key item) are TOOLS, never candy: a winch in
+  // the bag must not read as sweets to the Sour Patch Kids or the hotbar.
+  const def = (id) => ITEMS[id] || { id, name: String(id).replace(/[-_]/g, ' '), kind: 'tool', keyItem: true };
   const entryFor = (id) => items.find((it) => it.id === id);
-  const carryable = () => items.filter((it) => it.kind === 'weapon' || it.kind === 'tool');
+  /** The F ring: things with a use, in ORDER. Key items ride in the bag only. */
+  const carryable = () => items.filter((it) => (it.kind === 'weapon' || it.kind === 'tool') && def(it.id).mode && it.count > 0);
+
+  /** Mirror the live magazine onto the bag entry (the hotbar reads it.ammo / it.max). */
+  function syncAmmoFields() {
+    for (const it of items) {
+      const d = ITEMS[it.id];
+      if (!d?.ammo) continue;
+      it.ammo = ammo[d.ammo] || 0;
+      it.max = AMMO_CAP[d.ammo] ?? null;
+    }
+  }
 
   function add(itemId, n = 1) {
     const d = def(itemId);
-    // fuel cans never sit in the bag — they go straight into the Caramelizer
+    // fuel cans + ammo never sit in the bag — they go straight into the counter
     if (d.refills) {
       for (const k in d.refills) addAmmo(k, d.refills[k] * n);
       ctx.events.emit('inventory:pickup', { itemId, n, refill: true });
       return 0;
     }
     let it = entryFor(itemId);
-    if (!it) { it = { id: itemId, name: d.name, kind: d.kind, count: 0 }; items.push(it); }
+    if (!it) {
+      it = { id: itemId, name: d.name, kind: d.kind, count: 0 };
+      let at = items.length;
+      for (let i = 0; i < items.length; i++) if (rank(items[i].id) > rank(itemId)) { at = i; break; }
+      items.splice(at, 0, it);
+    }
     it.count += n;
     if (itemId === 'candy') for (const k in CANDY_REFILL) addAmmo(k, CANDY_REFILL[k] * n);
-    else if (d.ammo && !seen.has(itemId)) ammo[d.ammo] = AMMO_CAP[d.ammo] ?? 0;   // a found weapon comes loaded
+    else if (d.ammo && !seen.has(itemId)) {                                    // a found weapon comes loaded
+      ammo[d.ammo] = Math.max(ammo[d.ammo] || 0, AMMO_LOAD[d.ammo] ?? AMMO_CAP[d.ammo] ?? 0);
+    }
     seen.add(itemId);
-    if (!held && (d.kind === 'weapon' || d.kind === 'tool')) setHeld(itemId);
+    syncAmmoFields();
+    if (!held && d.mode && (d.kind === 'weapon' || d.kind === 'tool')) setHeld(itemId);
     ctx.events.emit('inventory:pickup', { itemId, n, count: it.count });
     ctx.events.emit('inventory:change', { itemId });
     return it.count;
@@ -123,6 +152,11 @@ export function create(ctx) {
     const it = entryFor(itemId);
     if (!it || it.count < n) return false;
     it.count -= n;
+    // a spent key item leaves the bag (and your hand); candy stays at 0 as a purse
+    if (it.count <= 0 && it.id !== 'candy' && def(it.id).keyItem) {
+      items.splice(items.indexOf(it), 1);
+      if (held === it.id) setHeld(null);
+    }
     ctx.events.emit('inventory:change', { itemId });
     return true;
   }
@@ -130,12 +164,14 @@ export function create(ctx) {
   function addAmmo(kind, n) {
     if (!(kind in ammo)) ammo[kind] = 0;
     ammo[kind] = clamp(ammo[kind] + n, 0, AMMO_CAP[kind] ?? 99);
+    syncAmmoFields();
     return ammo[kind];
   }
   function useAmmo(kind, n = 1) {
     if (!kind) return true;
     if ((ammo[kind] || 0) < n) return false;
     ammo[kind] -= n;
+    syncAmmoFields();
     return true;
   }
 
@@ -154,13 +190,37 @@ export function create(ctx) {
     return setHeld(ring[(i + dir + ring.length) % ring.length]);
   }
 
+  // ── merged ammo toasts: a cache scooped in one run is ONE line, not six ─────
+  const pendingAmmo = new Map();                      // counter → gained
+  let pendingT = 0;
+  const AMMO_WORD = {
+    salt: 'Salt', saltgun: 'Salt-gun salt', gumballs: 'Gumballs', fuel: 'Fuel', jawbreakers: 'Jawbreakers',
+    poprocks: 'Pop Rocks', gum: 'Bubblegum', marshmallows: 'Marshmallows', balloons: 'Water balloons',
+  };
+  const weaponFor = (kind) => { for (const id in ITEMS) if (ITEMS[id].ammo === kind) return ITEMS[id]; return null; };
+  function flushAmmoToast() {
+    if (!pendingAmmo.size) return;
+    const parts = [];
+    let missing = null;
+    for (const [k, g] of pendingAmmo) {
+      if (k === 'saltgun' && pendingAmmo.has('salt')) continue;
+      parts.push(g > 0 ? `${AMMO_WORD[k] || k} +${g} (${ammo[k] || 0}/${AMMO_CAP[k] ?? '?'})` : `${AMMO_WORD[k] || k} full`);
+      const w = weaponFor(k);
+      if (w && !seen.has(w.id) && !missing) missing = w;
+    }
+    pendingAmmo.clear();
+    const hint = missing ? ` — for the ${missing.name}${where[missing.id] ? ` (${where[missing.id]})` : ''}` : '';
+    ctx.systems.ui?.toast(parts.join(' · ') + hint, missing ? 3.6 : 2.4, { icon: 'spark' });
+  }
+
   // ── pickups ────────────────────────────────────────────────────────────────
   const pickups = [];
   let packDirty = true;
 
+  const where = {};                                  // weapon id → where its pickup lies (for hints)
   function registerPickup(spec) {
     const d = def(spec.itemId);
-    const key = spec.variant || d.visual || 'gumdrop';
+    const key = spec.variant || d.pickupVisual || d.visual || 'gumdrop';
     const V = VISUALS[key] || VISUALS.gumdrop;
     const p = {
       ...spec,
@@ -172,7 +232,11 @@ export function create(ctx) {
       scale: spec.scale ?? V.pick ?? 1.3,
       tint: spec.tint ?? null,
       y: spec.y ?? null,
+      isAmmo: d.kind === 'ammo' && !!V.ammo,
+      auto: spec.auto ?? (d.kind === 'ammo' && !!V.ammo),
+      _pos: { x: 0, z: 0, y: 0 },
     };
+    if (d.kind === 'weapon' && spec.where) where[spec.itemId] = spec.where;
     p.ground = world.height(p.x, p.z);
     p.baseY = p.y != null ? p.y : p.ground + (V.lift ?? 0.8);
     // ── marker vocabulary ────────────────────────────────────────────────────
@@ -214,7 +278,9 @@ export function create(ctx) {
         const dx = p.x - q.x, dz = p.z - q.z, d2 = Math.hypot(dx, dz);
         if (d2 < 0.001) return p;
         const k = Math.min(BIAS, d2 * 0.45);
-        return { x: p.x - dx / d2 * k, z: p.z - dz / d2 * k, y: p.baseY };
+        const o = p._pos;                             // reused: ~120 pickups ask every frame
+        o.x = p.x - dx / d2 * k; o.z = p.z - dz / d2 * k; o.y = p.baseY;
+        return o;
       },
       onInteract: () => take(p),
     });
@@ -237,9 +303,17 @@ export function create(ctx) {
       speed: 2.6, up: 1.2, life: 0.6, size: 0.22, sizeEnd: 0.04, gravity: -5, drag: 2.2, spread: 0.4,
     });
     const first = !seen.has(p.itemId);
+    const before = d.refills ? Object.fromEntries(Object.keys(d.refills).map((k) => [k, ammo[k] || 0])) : null;
     add(p.itemId, p.n);
     const ui = ctx.systems.ui;
-    if (p.itemId === 'candy') {
+    if (p.mapId) { try { ui?.removeMapMarker?.(p.mapId); } catch { /* the map is optional */ } }
+    if (p.isAmmo && before) {
+      for (const k in before) {
+        const g = (ammo[k] || 0) - before[k];
+        pendingAmmo.set(k, (pendingAmmo.get(k) || 0) + g);
+      }
+      pendingT = 0.75;
+    } else if (p.itemId === 'candy') {
       const c = count('candy');
       ui?.toast(`Candy +${p.n}  (${c})`, 2.2, { icon: 'spark' });
     } else if (d.refills) {
@@ -248,11 +322,11 @@ export function create(ctx) {
       ui?.toast(`${d.name} — F to cycle, click or X to ${d.hint || 'use'}`, 5.0, { icon: 'spark' });
       if (p.say) for (const line of p.say) ui?.say(line, { speaker: d.name, duration: 5.5 });
     }
-    if (first && d.ammo) ui?.toast(`${d.name}: ${ammo[d.ammo]} ${d.ammo === 'fuel' ? 'shots of fuel' : d.ammo}`, 3.4, { icon: 'spark' });
+    if (first && d.ammo) ui?.toast(`${d.name}: ${ammo[d.ammo]} ${d.ammo === 'fuel' ? 'shots of fuel' : (AMMO_WORD[d.ammo] || d.ammo).toLowerCase()}`, 3.4, { icon: 'spark' });
     if (p.respawn) p.respawnT = p.respawn;
   }
 
-  const count = (id) => (id === 'candy' || ITEMS[id] ? (entryFor(id)?.count ?? 0) : 0);
+  const count = (id) => entryFor(id)?.count ?? 0;
 
   // ── authored layout, once every builder's colliders exist ──────────────────
   function colliderClear(x, z, pad) {
@@ -290,17 +364,48 @@ export function create(ctx) {
     return null;
   }
 
+  // ── map markers (Contract G): weapons + ammo caches, if the map offers them ─
+  const caches = [];
+  const mapQueue = [];
+  let mapTry = 0;
+  function pushMarkers() {
+    const ui = ctx.systems.ui;
+    if (typeof ui?.addMapMarker !== 'function') return false;
+    for (const m of mapQueue) { try { ui.addMapMarker(m); } catch (err) { console.warn('[inventory] map marker', err?.message || err); break; } }
+    mapQueue.length = 0;
+    return true;
+  }
+  ctx.events.on('story:knows_spray', () => {
+    const p = pickups.find((q) => q.itemId === 'spray' && !q.taken);
+    if (p) { mapQueue.push({ id: p.mapId = 'weapon_spray', x: p.x, z: p.z, glyph: 'weapon', label: 'Spray Bottle' }); pushMarkers(); }
+  });
+
   ctx.events.on('world:ready', () => {
     let n = 0;
-    for (const spec of authorPickups(ctx, clear, nudge)) { registerPickup(spec); n++; }
+    for (const spec of authorPickups(ctx, clear, nudge)) {
+      const p = registerPickup(spec); n++;
+      const d = def(spec.itemId);
+      if (d.kind === 'weapon' && spec.map !== false) {
+        p.mapId = 'weapon_' + spec.itemId;
+        mapQueue.push({ id: p.mapId, x: p.x, z: p.z, glyph: 'weapon', label: d.name });
+      }
+      if (spec.cache && !caches.some((c) => c.id === spec.cache.id)) caches.push(spec.cache);
+      if (p.isAmmo && spec.respawn == null) p.respawn = 60 + ((p.phase * 997) % 31);   // 60–90 s, seeded
+    }
+    for (const c of caches) mapQueue.push({ id: 'ammo_' + c.id, x: c.x, z: c.z, glyph: 'ammo', label: c.label });
+    pushMarkers();
     const sweets = pickups.filter((p) => p.itemId === 'candy').length;
-    console.warn(`[inventory] ${n} pickups (${sweets} sweets, ${n - sweets} tools) · ${pools.size} pools`
-      + ` · ${poolTris} tris of geometry · ${pools.size} draw calls max`);
+    const am = pickups.filter((p) => p.isAmmo);
+    const per = { candy: 0, cat: 0 };
+    for (const p of am) { const isl = world.islandAt(p.x, p.z); if (isl) per[isl] = (per[isl] || 0) + 1; }
+    console.warn(`[inventory] ${n} pickups (${sweets} sweets, ${am.length} ammo: candy ${per.candy} / cat ${per.cat},`
+      + ` ${n - sweets - am.length} tools) · ${pools.size} pools · ${poolTris} tris of geometry`);
     for (const line of api.help) ctx.events.emit('ui:help', line);
   });
 
   // ── frame ──────────────────────────────────────────────────────────────────
   const _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _m = new THREE.Matrix4();
+  const _dir = new THREE.Vector3();
   const _col = new THREE.Color();
 
   function update(dt, ctx) {
@@ -311,6 +416,18 @@ export function create(ctx) {
     const cam = ctx.camera?.position;
     const px = cam ? cam.x : (pl ? pl.x : 0), pz = cam ? cam.z : (pl ? pl.z : 0);
     const sx = pl ? pl.x : px, sz = pl ? pl.z : pz;
+    // FOCUS: where the camera is actually looking (its ray meets the ground),
+    // so ammo — small and numerous — only costs draw calls near the action.
+    let fx = sx, fz = sz;
+    if (cam && ctx.camera) {
+      ctx.camera.getWorldDirection(_dir);
+      const gy = pl ? pl.y : 0;
+      const k = _dir.y < -0.05 ? Math.min(260, (cam.y - gy) / -_dir.y) : 60;
+      fx = cam.x + _dir.x * k; fz = cam.z + _dir.z * k;
+    }
+    if (pendingT > 0 && (pendingT -= dt) <= 0) flushAmmoToast();
+    if (mapQueue.length && (mapTry -= dt) <= 0) { mapTry = 1; pushMarkers(); }
+    const canScoop = pl && !ctx.systems.player?.onFerry && !ctx.state.paused;
 
     if (ctx.input.pressed.has('KeyF')) {
       const h = cycle();
@@ -330,8 +447,17 @@ export function create(ctx) {
         continue;
       }
       const pool_ = pools.get(p.key); if (!pool_?.geo) continue;
-      const d2 = (p.x - px) * (p.x - px) + (p.z - pz) * (p.z - pz);
-      if (d2 > POOL_RANGE * POOL_RANGE) continue;
+      let d2 = (p.x - px) * (p.x - px) + (p.z - pz) * (p.z - pz);
+      if (p.isAmmo && canScoop && Math.abs(p.x - sx) < AUTO_R && Math.abs(p.z - sz) < AUTO_R
+        && (p.x - sx) * (p.x - sx) + (p.z - sz) * (p.z - sz) < AUTO_R * AUTO_R
+        && Math.abs(pl.y - p.discY) < 2.2) { take(p); continue; }
+      // cull by where the camera LOOKS (not where it stands): the far side of
+      // the island costs no draw calls, and free overview cameras still see
+      // what they are aimed at
+      const f2 = (p.x - fx) * (p.x - fx) + (p.z - fz) * (p.z - fz);
+      const R = p.isAmmo ? AMMO_RANGE : POOL_RANGE;
+      if (f2 > R * R) continue;
+      if (p.isAmmo) d2 = Math.min(d2, f2 * 0.6);
       pool_.near = true;
       const i = pool_.count++;
       if (i >= pool_.cap) continue;                 // grown next frame
@@ -345,15 +471,17 @@ export function create(ctx) {
       if (p.V.tint && pool_.mesh) { _col.set(p.tint || 0xffffff); pool_.mesh.setColorAt(i, _col); }
 
       // ── the marker: a pulsing pool of light and the shaft standing in it ────
-      if (d2 < MARK_RANGE * MARK_RANGE) {
+      const MR = p.isAmmo ? AMMO_MARK_RANGE : MARK_RANGE;
+      if (d2 < MR * MR) {
         const dist = Math.sqrt(d2);
-        const fade = Math.min(1, (MARK_RANGE - dist) / 18);
+        const fade = Math.min(1, (MR - dist) / 18);
         const pulse = 1 + 0.11 * Math.sin(t * 2.0 + p.phase);
-        const gain = markGain * fade * (0.86 + 0.14 * Math.sin(t * 2.0 + p.phase));
+        const gain = markGain * fade * (0.86 + 0.14 * Math.sin(t * 2.0 + p.phase)) * (p.isAmmo ? 0.8 : 1);
         markers.disc(p.x, p.discY, p.z, p.markR * pulse, p.hue, gain, p.discQuat);
         const h = Math.max(0.4, _p.y - p.discY - 0.10);
-        markers.shaft(p.x, p.discY + 0.02, p.z, p.markR * 0.78, h,
-          Math.atan2(px - p.x, pz - p.z), p.hue, gain * 0.72);
+        // ammo wears a shorter, dimmer shaft: a cache reads as one glow, not a picket fence
+        markers.shaft(p.x, p.discY + 0.02, p.z, p.markR * 0.78, p.isAmmo ? h * 0.8 : h,
+          Math.atan2(px - p.x, pz - p.z), p.hue, gain * (p.isAmmo ? 0.42 : 0.72));
       }
 
       // a twinkle every second or so, only close enough to see
@@ -361,10 +489,10 @@ export function create(ctx) {
       if (sd2 < SPARKLE_RANGE * SPARKLE_RANGE) {
         p.sparkleT -= dt;
         if (p.sparkleT <= 0) {
-          p.sparkleT = (p.isTool ? 1.25 : 0.9) + (p.phase % 1) * 0.8;
-          ctx.systems.particles?.sparkle(p.x, _p.y + 0.16, p.z, p.tint || p.hue || 0xfff2c0, p.isTool ? 5 : 3);
+          p.sparkleT = (p.isAmmo ? 2.2 : p.isTool ? 1.25 : 0.9) + (p.phase % 1) * 0.8;
+          ctx.systems.particles?.sparkle(p.x, _p.y + 0.16, p.z, p.tint || p.hue || 0xfff2c0, p.isAmmo ? 2 : p.isTool ? 5 : 3);
           // tools also breathe a slow ember up out of the shaft
-          if (p.isTool) ctx.systems.particles?.burst({
+          if (p.isTool && !p.isAmmo) ctx.systems.particles?.burst({
             x: p.x, y: p.discY + 0.10, z: p.z, count: 2, color: [p.hue, 0xffffff],
             area: p.markR * 0.6, speed: 0.25, up: 0.5, vy: 0.55, vyJitter: 0.25,
             life: 1.9, size: 0.16, sizeEnd: 0.02, gravity: 0.35, drag: 0.8,
@@ -389,10 +517,10 @@ export function create(ctx) {
 
   // ── public API ─────────────────────────────────────────────────────────────
   const api = {
-    group, items, pickups, pools, ITEMS,
+    group, items, pickups, pools, ITEMS, ORDER, caches,
     get held() { return held; },
     set held(v) { setHeld(v); },
-    ammo, addAmmo, useAmmo,
+    ammo, addAmmo, useAmmo, caps: AMMO_CAP,
     add, spend, count, def, setHeld, cycle, registerPickup,
     has: (id) => count(id) > 0,
     heldDef: () => (held ? def(held) : null),
@@ -410,6 +538,8 @@ export function create(ctx) {
       { keys: ['Click', 'X'], text: 'use the held item' },
       { keys: ['F'], text: 'cycle held item' },
     ],
+    /** Debug / views: put a weapon (loaded) in your hand. */
+    give(id, n = 1) { add(id, n); if (ITEMS[id]?.mode) setHeld(id); return held; },
     stats() {
       let calls = 0, tris = 0;
       for (const p of pools.values()) if (p.mesh?.visible && p.mesh.count) { calls++; tris += p.tris * p.mesh.count; }
@@ -417,6 +547,7 @@ export function create(ctx) {
       return {
         calls: calls + mk.calls, triangles: tris + mk.triangles,
         pickups: pickups.length, pools: pools.size, markers: mk.calls,
+        ammoPickups: pickups.filter((p) => p.isAmmo).length,
       };
     },
     update,

@@ -1,0 +1,135 @@
+{
+  "maphistory_walk_day": {
+    "pos": [
+      -64,
+      32
+    ],
+    "time": 11,
+    "walk": {
+      "x": 0,
+      "y": 1,
+      "n": 200
+    },
+    "frames": 30,
+    "call": {
+      "ui.setMapMode": "history"
+    }
+  },
+  "maphistory_walk_night": {
+    "pos": [
+      46,
+      22
+    ],
+    "time": 22.5,
+    "walk": {
+      "x": 0.7,
+      "y": -0.7,
+      "n": 200
+    },
+    "frames": 30,
+    "call": {
+      "ui.setMapMode": "history"
+    }
+  },
+  "maphistory_world_day": {
+    "pos": [
+      152,
+      6
+    ],
+    "time": 13,
+    "frames": 45,
+    "call": {
+      "ui.setMapMode": "world"
+    }
+  },
+  "maphistory_near_markers": {
+    "pos": [
+      -140,
+      40
+    ],
+    "time": 11,
+    "frames": 45,
+    "call": {
+      "ui.setMapMode": "local",
+      "ui.addMapMarker": [
+        [
+          {
+            "id": "test_key",
+            "x": -122,
+            "z": 30,
+            "glyph": "key",
+            "label": "Cave key"
+          },
+          {
+            "id": "test_winch",
+            "x": -158,
+            "z": 54,
+            "glyph": "winch",
+            "label": "Winch"
+          },
+          {
+            "id": "test_ammo",
+            "x": -128,
+            "z": 50,
+            "glyph": "ammo",
+            "label": "Jawbreakers"
+          },
+          {
+            "id": "test_far_key",
+            "x": 188,
+            "z": -64,
+            "glyph": "key",
+            "label": "Far key"
+          }
+        ]
+      ]
+    }
+  },
+  "maphistory_off": {
+    "pos": [
+      118,
+      0
+    ],
+    "time": 15,
+    "frames": 30,
+    "call": {
+      "ui.setMapMode": "off"
+    }
+  },
+  "maphistory_near_mainst": {
+    "pos": [
+      118,
+      0
+    ],
+    "time": 12,
+    "frames": 40,
+    "call": {
+      "ui.setMapMode": "local",
+      "ui.addMapMarker": [
+        [
+          {
+            "id": "test_key",
+            "x": 104,
+            "z": 12,
+            "glyph": "key",
+            "label": "Cave key"
+          },
+          {
+            "id": "test_weapon",
+            "x": 108,
+            "z": 14,
+            "glyph": "weapon",
+            "label": "Cannon"
+          },
+          {
+            "id": "test_winch",
+            "x": 92,
+            "z": 44,
+            "glyph": "winch",
+            "label": "Winch"
+          }
+        ]
+      ]
+    }
+  }
+}

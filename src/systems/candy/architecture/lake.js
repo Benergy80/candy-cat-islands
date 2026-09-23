@@ -359,7 +359,7 @@ function buildBoathouse(A, x, z, rotY, WY) {
   B.tor('matte', 0.3, 0.075, 5, 12, { at: [moor[0][0], jy + 0.9, moor[0][2]], rot: [1.2, rotY, 0], color: C.licorice });
 
   // ── the swan paddle boat, striped, tied alongside ────────────────────────
-  const bb = createBuilder(A.mats, A.signUV);
+  const bb = createBuilder(A.mats, A.signUV, null, A.builderOpts);
   bb.stripeBox(1.72, 0.66, 3.5, { at: [0, 0, 0], variant: 0, axisH: 1.5 });
   bb.cyl('matte', 0.82, 0.82, 1.7, 3, { at: [0, 0, 1.95], rot: [Math.PI / 2, 0, 0], scale: [1, 1, 0.62], color: C.cream });
   bb.box('matte', 1.46, 0.16, 3.62, { at: [0, 0.36, 0], color: C.licoriceRed });     // gunwale

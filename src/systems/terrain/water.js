@@ -17,6 +17,88 @@ void tWave(vec2 p, vec2 dir, float len, float amp, float spd, float t, inout flo
 }
 `;
 
+// ─────────────────────────────────────────────── MOBILE WATER (Contract I) ──
+// The water shaders are the most expensive pixels in the game: the sea alone
+// runs 57 value-noise lookups per fragment (8 four-octave fbm calls, a
+// five-octave LOD ripple stack, four chop octaves, two three-octave glint
+// masks) and at the sea views it covers most of a phone screen. On the mobile
+// tier every water material is built from the SAME source with the heavy
+// helpers swapped for cheaper twins of identical signature (33 lookups by
+// day, 35 at night; the albedo chop drops to its two middle octaves):
+//   tFbm → mFbm (2 octaves, remapped to the 4-octave mean and spread, so
+//   every threshold downstream still lands where it was tuned) · tRippleLod →
+//   mRippleLod (3 LOD octaves instead of 5, same constant-RMS slope) ·
+//   tSunGlint → mSunGlint (same lobe + glitter band, 2 sparkle octaves, and
+//   skipped outright where its gain is 0 — the moon glint by day).
+// tCrestLines is NOT swapped (its tFbm warps live inside common.js's
+// GLSL_WATER, which the swap never touches): tried at 2 octaves, the crest
+// phases lost their jitter and ran as long regular threads — a moire the eye
+// reads before anything else on the water.
+// Kept in full: the shore foam ring (surf, wet line, backwash, pier rings, the
+// ferry's wake rings), the turquoise shelf, the crest highlights, the sun
+// sparkle and the twinkle lattice — the things that make the sea READ. There
+// is no sampled reflection or refraction on either tier (the sky term is an
+// analytic gradient); the ripple normals it reflects are simply fewer octaves.
+// The desktop source is untouched: wpatch() only rewrites strings when mobile.
+const GLSL_NOISE_MOBILE = /* glsl */`
+// tFbm2 remapped to tFbm's mean (0.516) and spread (std ×0.917): a plain
+// 2-octave sum is ~20% contrastier, which turned the crest-break and foam
+// masks into hard on/off patches
+float mFbm(vec2 p){ return 0.516 + (tFbm2(p) - 0.465) * 0.917; }
+`;
+const GLSL_WATER_MOBILE = /* glsl */`
+vec2 mRippleLod(vec2 w, float t, float fp, float amp){
+  // three of tRippleLod's five octaves — the middle band the game camera
+  // actually resolves — with the same gains and constant-RMS renormalisation;
+  // the 1.85 grain is sub-pixel at a phone's resolution and the 0.055 swell
+  // was what painted broad N·L blotches once it carried a third of the slope
+  float a4 = tResolve(fp, 0.78) * 0.85, a3 = tResolve(fp, 0.33) * 1.00, a2 = 1.10;
+  vec2 g = tRipOct(w, t, 0.78, vec2(0.062, -0.048), 5.3) * a4
+         + tRipOct(w, t, 0.33, vec2(-0.041, 0.027), 11.9) * a3
+         + tRipOct(w, t, 0.135, vec2(0.022, 0.018), 23.1) * a2;
+  return g * (amp / max(sqrt(a4 * a4 + a3 * a3 + a2 * a2), 0.30));
+}
+vec3 mSunGlint(vec3 wpos, vec3 n, vec3 camPos, vec3 sunDir, vec3 sunCol, float t, float sharp, float gain){
+  if (gain <= 0.0 || sunDir.y < -0.14) return vec3(0.0);
+  vec3 V = normalize(camPos - wpos);
+  vec3 L = normalize(sunDir);
+  float sunUp = smoothstep(-0.14, 0.04, L.y);
+  float nh = max(dot(n, normalize(V + L)), 0.0);
+  float band = tGlintBand(wpos, camPos, sunDir);
+  float spec = pow(nh, sharp) * 6.0 + pow(nh, sharp * 0.22) * 0.26;
+  float fp = tFootprint(wpos);
+  float sB = tResolve(fp, 1.10), sC = tResolve(fp, 0.34);
+  float sparkle = (smoothstep(0.42, 0.84, tVNoise(wpos.xz * 1.10 + vec2(t * 0.14, -t * 0.085))) * sB
+                 + smoothstep(0.46, 0.88, tVNoise(wpos.xz * 0.34 + vec2(-t * 0.06, t * 0.04))) * sC)
+                / max(sB + sC, 0.30);
+  return sunCol * sunUp * gain * (spec * (0.10 + 0.90 * band) + band * sparkle * 1.15);
+}
+`;
+const toMobileGLSL = (src) => src
+  .replace(/\btFbm\(/g, 'mFbm(').replace(/\btRippleLod\(/g, 'mRippleLod(')
+  .replace(/\btSunGlint\(/g, 'mSunGlint(');
+/** patchMaterial, with the mobile twins swapped in on the mobile tier (see above). */
+function wpatch(mat, o, mobile) {
+  if (!mobile) return patchMaterial(mat, o);
+  const head = o.fragmentHead || '';
+  const hasWater = head.includes(GLSL_WATER), hasNoise = head.includes(GLSL_NOISE);
+  if (!hasNoise) return patchMaterial(mat, o);
+  const m = { ...o, key: (o.key || 'terrain-water') + '-m', fragmentHead: head + GLSL_NOISE_MOBILE + (hasWater ? GLSL_WATER_MOBILE : '') };
+  for (const k of ['fragmentColor', 'fragmentRough', 'fragmentNormal', 'fragmentEmissive']) {
+    if (!m[k]) continue;
+    m[k] = hasWater ? toMobileGLSL(m[k]) : m[k].replace(/\btFbm\(/g, 'mFbm(');
+  }
+  return patchMaterial(mat, m);
+}
+
+// the sea's albedo chop on mobile: the two middle octaves of the desktop four
+// (normalised as if ~one more octave were live, so each keeps the share it has
+// on desktop instead of being boosted into mottling)
+const CHOP_MOBILE = /* glsl */`float cA = tResolve(gFp, 1.55), cB = tResolve(gFp, 0.62);
+        float chop = (tVNoise(w * 1.55 + vec2(-uTime * 0.22, uTime * 0.15)) - 0.5) * cA
+                   + (tVNoise(w * 0.62 + vec2(uTime * 0.11, -uTime * 0.08)) - 0.5) * cB;
+        chop /= max(sqrt(cA * cA + cB * cB + 0.8), 0.30);`;
+
 // ─────────────────────────────────────────────────────────────── SEA ────────
 export function buildSea(ctx, uniforms, field) {
   const { world } = ctx;
@@ -30,8 +112,12 @@ export function buildSea(ctx, uniforms, field) {
     for (let i = 0; i < extra; i++) { d *= growth; lo -= d; hi += d; pre.unshift(lo); post.push(hi); }
     return pre.concat(core, post);
   };
-  const xs = axis(312, 5.2, 1.62, 8);
-  const zs = axis(174, 5.2, 1.62, 8);
+  // mobile tier (Contract I): a 7.8 u core grid instead of 5.2 — the three
+  // swells are 71, 43 and 24 u long, so the surface still carries all of them,
+  // at ~45% of the triangles
+  const SEA_STEP = ctx.state?.mobile ? 7.8 : 5.2;
+  const xs = axis(312, SEA_STEP, 1.62, 8);
+  const zs = axis(174, SEA_STEP, 1.62, 8);
   const nx = xs.length, nz = zs.length;
 
   const pos = new Float32Array(nx * nz * 3);
@@ -73,7 +159,8 @@ export function buildSea(ctx, uniforms, field) {
     uShoal: { value: colorOf(0x35c9c2) },     // the turquoise shallow band
     uShallow: { value: colorOf(0x1794c6) }, uDeep: { value: colorOf(0x123f78) },
     uShore: { value: colorOf(0x2a9d92) } };
-  patchMaterial(mat, {
+  const MOBILE = !!ctx.state?.mobile;
+  wpatch(mat, {
     key: 'terrain-sea', uniforms: u,
     vertexHead: GLSL_FIELD + GLSL_WAVE + /* glsl */`
       uniform float uTime;
@@ -211,7 +298,7 @@ export function buildSea(ctx, uniforms, field) {
         // gradient. Three octaves, LOD-gated and renormalised so the visible
         // grain always sits at 2-3 screen pixels: never sub-pixel (that is the
         // moire camouflage the earlier rounds fought), never 30 units wide.
-        float c0 = tResolve(gFp, 3.60), cA = tResolve(gFp, 1.55);
+        ${MOBILE ? CHOP_MOBILE : `float c0 = tResolve(gFp, 3.60), cA = tResolve(gFp, 1.55);
         float cB = tResolve(gFp, 0.62), cC = tResolve(gFp, 0.24);
         float chop = (tVNoise(w * 3.60 + vec2(uTime * 0.34, -uTime * 0.26)) - 0.5) * c0
                    + (tVNoise(w * 1.55 + vec2(-uTime * 0.22, uTime * 0.15)) - 0.5) * cA
@@ -220,7 +307,7 @@ export function buildSea(ctx, uniforms, field) {
         // QUADRATURE normalisation (independent octaves add in quadrature): a
         // plain sum-normalise silently halves the amplitude whenever more than
         // one octave is live, which is most of the frame.
-        chop /= max(sqrt(c0 * c0 + cA * cA + cB * cB + cC * cC), 0.30);
+        chop /= max(sqrt(c0 * c0 + cA * cA + cB * cB + cC * cC), 0.30);`}
         col *= 1.0 + chop * 0.34 * (0.30 + 0.70 * gOpen) * (1.0 - gFoam * 0.6);
 
         // ── the sea belongs to the sky (but stays ONE sea) ────────────────────
@@ -331,7 +418,7 @@ export function buildSea(ctx, uniforms, field) {
                                  * tGlintBand(vWPos, cameraPosition, uSunDir)
                                  * smoothstep(-0.02, 0.18, uSunDir.y) * 0.55;
       }`,
-  });
+  }, MOBILE);
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'terrain_sea';
@@ -403,14 +490,14 @@ export function riverProfile(world) {
   return { P, N, k, lip, poolTop, total, bottom: surf[Math.min(N - 1, k + 4)], width: world.RIVER.width };
 }
 
-function syrupMaterial(uniforms, prof, isFall = false) {
+function syrupMaterial(uniforms, prof, isFall = false, mobile = false) {
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff, roughness: 0.16, metalness: 0.0, transparent: true,
     emissive: new THREE.Color(0x5a0f30), emissiveIntensity: 0.05, side: THREE.DoubleSide,
   });
   const u = { ...uniforms, uFallV: { value: prof.lip.along }, uTotal: { value: prof.total },
     uFall: { value: isFall ? 1 : 0 } };
-  return patchMaterial(mat, {
+  return wpatch(mat, {
     // separate cache keys: the curtain and the ribbon share this source but need
     // their own program + uniform block (uFall switches the lip/spray branch)
     key: isFall ? 'terrain-syrup-fall' : 'terrain-syrup', uniforms: u,
@@ -547,7 +634,7 @@ function syrupMaterial(uniforms, prof, isFall = false) {
         // never goes pure black (it is still magic syrup)
         totalEmissiveRadiance += vec3(0.085, 0.012, 0.046) * night * 0.60;
       }`,
-  });
+  }, mobile);
 }
 
 export function buildRiver(ctx, uniforms, prof) {
@@ -588,7 +675,7 @@ export function buildRiver(ctx, uniforms, prof) {
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
 
-  const mesh = new THREE.Mesh(geo, syrupMaterial(uniforms, prof));
+  const mesh = new THREE.Mesh(geo, syrupMaterial(uniforms, prof, false, !!ctx.state?.mobile));
   mesh.name = 'terrain_river';
   mesh.receiveShadow = false; mesh.castShadow = false;
   mesh.renderOrder = 1;
@@ -732,7 +819,7 @@ export function buildWaterfall(ctx, uniforms, prof) {
   geo.setIndex(idx);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
-  const mat = syrupMaterial(uniforms, prof, true);
+  const mat = syrupMaterial(uniforms, prof, true, !!ctx.state?.mobile);
   mat.userData.fall = true;
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'terrain_waterfall';
@@ -827,7 +914,7 @@ export function buildLake(ctx, uniforms, surface, deckAt = null) {
     emissive: new THREE.Color(0x120802), emissiveIntensity: 0.5,
   });
   const LC = `vec2(${L.x.toFixed(1)}, ${L.z.toFixed(1)})`;
-  patchMaterial(mat, {
+  wpatch(mat, {
     key: 'terrain-lake', uniforms: { ...uniforms },
     vertexHead: /* glsl */`
       attribute vec3 aEdge; attribute float aDeck;
@@ -990,7 +1077,7 @@ export function buildLake(ctx, uniforms, surface, deckAt = null) {
         //    at night the lake still shows the moonlit sky it reflects
         totalEmissiveRadiance += vec3(0.0085, 0.0040, 0.0020) + mix(vec3(0.016, 0.017, 0.026), vec3(0.0), uDaylight);
       }`,
-  });
+  }, !!ctx.state?.mobile);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'terrain_lake';
   mesh.renderOrder = 1;

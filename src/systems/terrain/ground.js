@@ -314,10 +314,51 @@ function catPaint(world, x, z, h, grad, rel, coast, out, _lakeSurf, sd) {
   };
 }
 
+// ── mobile tier: the LITE fragment path ──────────────────────────────────────
+// docs/BRIEF.md Contract I. Same material, same zones, same colours; on a phone
+// the per-pixel detail stops nearer the lens and the finest octave (the 0.15 u
+// grain, the second sprinkle lattice, the second sparkle hash) is not computed
+// at all — at 1.5 px per css pixel on a 6-inch screen none of it resolves.
+// Every edit is an exact-string replacement; a missing anchor throws at load so
+// a later edit to the shader cannot silently disable the lite path.
+function lite(src, edits) {
+  for (const [from, to] of edits) {
+    if (!src.includes(from)) throw new Error('[terrain/ground] lite anchor missing: ' + from.slice(0, 60));
+    src = src.split(from).join(to);
+  }
+  return src;
+}
+// The piped swirls, blotches and bluff strata are the look of the ground and
+// cost next to nothing (their noise is sampled for the base colour anyway), so
+// they keep their desktop ranges, only a touch nearer. What goes is the work:
+// the finest octave, the second sprinkle lattice (the loop is the expensive
+// part — and it now stops at 70 u), and the second sparkle hash.
+const CANDY_LITE = [
+  ['float near  = 1.0 - smoothstep(45.0, 112.0, vdist);', 'float near  = 1.0 - smoothstep(42.0, 100.0, vdist);'],
+  ['float dMid  = 1.0 - smoothstep(12.0, 42.0, vdist);', 'float dMid  = 1.0 - smoothstep(11.0, 36.0, vdist);'],
+  ['float dFine = 1.0 - smoothstep(5.0, 17.0, vdist);', 'float dFine = 0.0;'],
+  ['float n4 = tVNoise(w * 5.20 + vec2(3.7, -1.1));', 'float n4 = 0.5;'],
+  ['float amt = vData.x * (1.0 - smoothstep(42.0, 95.0, vdist))', 'float amt = vData.x * (1.0 - smoothstep(34.0, 70.0, vdist))'],
+  ['for (int L = 0; L < 2; L++) {', 'for (int L = 0; L < 1; L++) {'],
+  ['spk = max(spk, smoothstep(0.972, 1.0, tHash21(floor(sg * 27.0 + 3.3))) * dFine);', ''],
+];
+const CAT_LITE = [
+  ['float near  = 1.0 - smoothstep(40.0, 105.0, vdist);', 'float near  = 1.0 - smoothstep(38.0, 94.0, vdist);'],
+  ['float dMid  = 1.0 - smoothstep(11.0, 38.0, vdist);', 'float dMid  = 1.0 - smoothstep(10.0, 33.0, vdist);'],
+  ['float close = 1.0 - smoothstep(5.0, 16.0, vdist);', 'float close = 0.0;'],
+  ['float n4 = tVNoise(w * 6.10 + vec2(-2.3, 5.9));', 'float n4 = 0.5;'],
+  ['float s2 = tHash21(floor(sg * 24.0 + 7.1));', 'float s2 = 0.0;'],
+];
+/** Desktop: the options untouched. Mobile: the lite fragment + its own cache key. */
+function tier(opts, mobile, edits) {
+  if (!mobile) return opts;
+  return { ...opts, key: opts.key + '-lite', fragmentColor: lite(opts.fragmentColor, edits) };
+}
+
 // ── materials ────────────────────────────────────────────────────────────────
-function candyMaterial(uniforms, peak) {
+function candyMaterial(uniforms, peak, mobile = false) {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.84, metalness: 0.0 });
-  return patchMaterial(m, {
+  return patchMaterial(m, tier({
     key: 'terrain-ground-candy',
     uniforms: { ...uniforms, uPeak: { value: new THREE.Vector2(peak.x, peak.z) } },
     vertexHead: /* glsl */`
@@ -560,12 +601,12 @@ function candyMaterial(uniforms, peak) {
           normal = normalize((viewMatrix * vec4(wn, 0.0)).xyz);
         }
       }`,
-  });
+  }, mobile, CANDY_LITE));
 }
 
-function catMaterial(uniforms) {
+function catMaterial(uniforms, mobile = false) {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.0 });
-  return patchMaterial(m, {
+  return patchMaterial(m, tier({
     key: 'terrain-ground-cat',
     uniforms,
     vertexHead: /* glsl */`
@@ -651,7 +692,7 @@ function catMaterial(uniforms) {
           normal = normalize((viewMatrix * vec4(wn, 0.0)).xyz);
         }
       }`,
-  });
+  }, mobile, CAT_LITE));
 }
 
 // ── builder ──────────────────────────────────────────────────────────────────
@@ -733,10 +774,56 @@ export function buildGround(ctx, id, uniforms, lakeSurf = 3.1) {
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
 
-  const mat = id === 'candy' ? candyMaterial(uniforms, world.LANDMARKS.frosting_peak) : catMaterial(uniforms);
+  const mobile = !!ctx.state?.mobile;
+  const mat = id === 'candy' ? candyMaterial(uniforms, world.LANDMARKS.frosting_peak, mobile) : catMaterial(uniforms, mobile);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'terrain_ground_' + id;
   mesh.receiveShadow = true; mesh.castShadow = false;
   mesh.matrixAutoUpdate = false; mesh.updateMatrix();
-  return { mesh, tris: idx.length / 3, heights: H, grid: { x0, z0, step, N, V } };
+  const tiles = mobile ? groundTiles(idx, H, { x0, z0, step, N, V }, TILES) : null;
+  return { mesh, tiles, tris: idx.length / 3, heights: H, grid: { x0, z0, step, N, V } };
+}
+
+// ── mobile tier: the ground's index runs, per tile ───────────────────────────
+// One island-wide mesh is drawn whole whenever any corner of it is in view —
+// from Cat Island's Main Street that was all of Candyland's ground too. On the
+// mobile tier terrain.js hands these T × T runs (each with tight bounds) to the
+// culler (terrain/instcull.js → addIndexed), which rewrites the index buffer
+// with only the tiles in the frustum: same vertices, same shading, same seams,
+// still ONE draw call per island.
+const TILES = 6;
+function groundTiles(idx, H, g, T) {
+  const { N, V, x0, z0, step } = g;
+  const IA = V * V > 65535 ? Uint32Array : Uint16Array;
+  const lists = Array.from({ length: T * T }, () => []);
+  for (let q = 0; q < idx.length; q += 6) {
+    // idx holds two triangles per kept quad; the quad's corner `a` is idx[q]
+    const a = idx[q], i = a % V, j = (a - i) / V;
+    const t = Math.min(T - 1, Math.floor((j * T) / N)) * T + Math.min(T - 1, Math.floor((i * T) / N));
+    const L = lists[t];
+    for (let k = 0; k < 6; k++) L.push(idx[q + k]);
+  }
+  // one static master (tile runs back to back; each tile's index is a view)
+  // — addIndexed's ray proxy reads it whole, so no second full copy is made
+  let total = 0; for (const L of lists) total += L.length;
+  const master = new IA(total);
+  const tiles = [];
+  let w = 0;
+  for (let t = 0; t < T * T; t++) {
+    const L = lists[t];
+    if (!L.length) continue;
+    let minY = Infinity, maxY = -Infinity;
+    for (let k = 0; k < L.length; k++) { const h = H[L[k]]; if (h < minY) minY = h; if (h > maxY) maxY = h; }
+    const ti = t % T, tj = (t - ti) / T;
+    const i0 = Math.floor((ti * N) / T), i1 = Math.min(N, Math.ceil(((ti + 1) * N) / T) + 1);
+    const j0 = Math.floor((tj * N) / T), j1 = Math.min(N, Math.ceil(((tj + 1) * N) / T) + 1);
+    const box = new THREE.Box3(
+      new THREE.Vector3(x0 + i0 * step, minY - 0.5, z0 + j0 * step),
+      new THREE.Vector3(x0 + i1 * step, maxY + 0.5, z0 + j1 * step));
+    master.set(L, w);
+    tiles.push({ box, index: master.subarray(w, w + L.length) });
+    w += L.length;
+  }
+  tiles.master = master;
+  return tiles;
 }

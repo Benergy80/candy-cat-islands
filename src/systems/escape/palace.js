@@ -699,9 +699,13 @@ export function create(ctx, escape) {
       B.cone('flow', 0.19, L, 6, { at: at(x, CEIL - L / 2, z), rot: [Math.PI, 0, 0], color: 0x8a4a2a });
       B.sph('flow', 0.5 + rnd() * 0.4, 10, 6, { at: at(x, CF + 0.06, z), scale: [1, 0.1, 1], color: 0x7a3f22 });
     }
-    // casks of sprinkles + a shelf of jars
+    // casks of sprinkles + a shelf of jars. They live against the WEST wall in a
+    // 2×2 cluster: a row along the stair side (z = wz1 - 1.1) stood their r 0.7
+    // colliders straight across the stair landing (x -3.6..-1.0), and once the
+    // collision core stopped letting the visitor slip between them the cave door
+    // was walled off (Ben, 2026-09-22: "barrels blocking the entry to the cave").
     for (let i = 0; i < 4; i++) {
-      const x = wx0 + 1.3 + i * 1.55, z = wz1 - 1.1;
+      const x = wx0 + 1.05 + (i % 2) * 1.35, z = wz0 + 1.15 + Math.floor(i / 2) * 1.4;
       B.cyl('matte', 0.62, 0.7, 1.5, 12, { at: at(x, CF + 0.75, z), color: C.chocMilk });
       for (const y of [0.35, 1.15]) B.tor('licorice', 0.66, 0.08, 5, 12, { at: at(x, CF + y, z), rot: [Math.PI / 2, 0, 0], color: C.licorice });
       B.cyl('gloss', 0.56, 0.56, 0.12, 12, { at: at(x, CF + 1.54, z), color: SPRINKLE[i % 6] });

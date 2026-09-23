@@ -1,0 +1,155 @@
+{
+ "wa_held_cannon": {
+  "pos": [
+   -131,
+   75.5
+  ],
+  "time": 11,
+  "az": 0.9,
+  "el": 0.28,
+  "dist": 8,
+  "frames": 40,
+  "call": {
+   "inventory.give": "jawbreaker_cannon"
+  }
+ },
+ "wa_held_whip": {
+  "pos": [
+   -131,
+   75.5
+  ],
+  "time": 11,
+  "az": 0.9,
+  "el": 0.28,
+  "dist": 8,
+  "frames": 40,
+  "call": {
+   "inventory.give": "licorice_whip"
+  }
+ },
+ "wa_held_poprocks": {
+  "pos": [
+   -131,
+   75.5
+  ],
+  "time": 11,
+  "az": 0.9,
+  "el": 0.28,
+  "dist": 8,
+  "frames": 40,
+  "call": {
+   "inventory.give": "poprocks"
+  }
+ },
+ "wa_held_gum": {
+  "pos": [
+   -131,
+   75.5
+  ],
+  "time": 11,
+  "az": 0.9,
+  "el": 0.28,
+  "dist": 8,
+  "frames": 40,
+  "call": {
+   "inventory.give": "bubblegum_blower"
+  }
+ },
+ "wa_held_marsh": {
+  "pos": [
+   -131,
+   75.5
+  ],
+  "time": 11,
+  "az": 0.9,
+  "el": 0.28,
+  "dist": 8,
+  "frames": 40,
+  "call": {
+   "inventory.give": "marshmallow_launcher"
+  }
+ },
+ "wa_held_boomerang": {
+  "pos": [
+   -131,
+   75.5
+  ],
+  "time": 11,
+  "az": 0.9,
+  "el": 0.28,
+  "dist": 8,
+  "frames": 40,
+  "call": {
+   "inventory.give": "peppermint_boomerang"
+  }
+ },
+ "wa_held_balloon": {
+  "pos": [
+   -131,
+   75.5
+  ],
+  "time": 11,
+  "az": 0.9,
+  "el": 0.28,
+  "dist": 8,
+  "frames": 40,
+  "call": {
+   "inventory.give": "water_balloon"
+  }
+ },
+ "wa_ammo_palace": {
+  "free": [
+   -129,
+   -52
+  ],
+  "time": 11,
+  "az": 0.78,
+  "el": 0.62,
+  "dist": 30,
+  "frames": 40
+ },
+ "wa_ammo_harbor": {
+  "free": [
+   106,
+   60
+  ],
+  "time": 11,
+  "az": 0.78,
+  "el": 0.62,
+  "dist": 33,
+  "frames": 40
+ },
+ "wa_ammo_harbor_night": {
+  "free": [
+   106,
+   60
+  ],
+  "time": 22,
+  "az": 0.78,
+  "el": 0.62,
+  "dist": 33,
+  "frames": 40
+ },
+ "wa_cannon_site": {
+  "free": [
+   -122,
+   -52
+  ],
+  "time": 11,
+  "az": 0.78,
+  "el": 0.5,
+  "dist": 16,
+  "frames": 40
+ },
+ "wa_balloons_site": {
+  "free": [
+   102,
+   46
+  ],
+  "time": 11,
+  "az": 0.78,
+  "el": 0.5,
+  "dist": 16,
+  "frames": 40
+ }
+}

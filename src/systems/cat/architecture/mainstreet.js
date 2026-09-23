@@ -285,7 +285,7 @@ export function buildStreet(T) {
     x: pbF.px(pbDX, PBD / 2 + 0.36), z: pbF.pz(pbDX, PBD / 2 + 0.36),
     say: 'warm milk. it is always warm milk. it is always exactly right.', speaker: 'PURRBUCKS',
   });
-  purrbucksInterior(T, frame(pbF.x, pbY, pbF.z, pbF.ry), { hw: (PBW - PBT * 2) / 2, hd: (PBD - PBT * 2) / 2, doorX: pbDX });
+  T.roomDetail('purrbucks', () => purrbucksInterior(T, frame(pbF.x, pbY, pbF.z, pbF.ry), { hw: (PBW - PBT * 2) / 2, hd: (PBD - PBT * 2) / 2, doorX: pbDX }));
   // outdoor tables
   for (let i = 0; i < 3; i++) {
     const tx = 97.5 + i * 2.6, tz = streetZ(tx) - 5.4, ty = T.ground(tx, tz) + 0.3;
@@ -354,7 +354,7 @@ export function buildStreet(T) {
     x: taF.px(taDX, TAD / 2 + 0.36), z: taF.pz(taDX, TAD / 2 + 0.36),
     say: 'the door is not locked. it has never been locked. nobody has opened it in years.', speaker: 'TRAVEL AGENCY',
   });
-  travelInterior(T, frame(taF.x, taY, taF.z, taF.ry), { hw: (TAW - TAT * 2) / 2, hd: (TAD - TAT * 2) / 2, doorX: taDX });
+  T.roomDetail('travel', () => travelInterior(T, frame(taF.x, taY, taF.z, taF.ry), { hw: (TAW - TAT * 2) / 2, hd: (TAD - TAT * 2) / 2, doorX: taDX }));
   // dust, cobwebs and a CLOSED placard on the door
   const closedCell = T.plaque(1.3, 0.9, [{ t: 'CLOSED', s: 0.38, c: '#7a2f24' }, { t: 'for the season', s: 0.2, c: '#5a5248' }, { t: 'all seasons', s: 0.2, c: '#5a5248', weight: 'italic bold' }], { bg: '#e0d8c4', border: '#7a2f24', borderW: 0.06, grime: 0.2, dpu: 140 });
   // A CLOSED card taped to the glass is a decal; a CLOSED board hung on a
@@ -542,11 +542,14 @@ export function buildStreet(T) {
   // cylinders, and it casts no shadow: a 7 cm rope shadow across a lit street
   // is pure aliasing.
   const bulbCols = [0xcf8f30, 0xb8762a, 0xdca43e, 0xc1832c, 0xe0ab4c];
+  // mobile tier: every span is authored into ONE shared part (cord + bulbs = 2
+  // draw calls for the whole street instead of 2 per span); desktop unchanged
+  const spanBuilds = T.mobile ? [] : null;
   for (let i = 0; i < lampPos.length - 1; i++) {
     const a = lampPos[i], c = lampPos[i + 1];
     const SAG = 1.7, NB = 11;
     const at2 = (t) => [a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t - Math.sin(t * Math.PI) * SAG, a[2] + (c[2] - a[2]) * t];
-    const span = T.part((p) => {
+    const buildSpan = (p) => {
       const cord = [];
       for (let k = 0; k <= 18; k++) cord.push(at2(k / 18));
       p.tube(cord, 0.05, 0x4a3f30, { rseg: 4, seg: 30 });
@@ -560,7 +563,16 @@ export function buildStreet(T) {
       // per-span spill bucket is a third draw call for every span in the street,
       // and a soft blob does not need to sway with the cord.
       for (let k = 1; k < NB; k++) { const q = at2(k / NB); halo(b, q[0], q[1] - 0.42, q[2], 0.85); }
-    }, 'lights' + i);
+    };
+    if (spanBuilds) {
+      spanBuilds.push(buildSpan);
+      for (const t of [0.3, 0.5, 0.7]) {
+        const mx = a[0] + (c[0] - a[0]) * t, mz = a[2] + (c[2] - a[2]) * t;
+        pool(b, mx, T.ground(mx, mz) + 0.2, mz, 3.4 - Math.abs(t - 0.5) * 4);
+      }
+      continue;
+    }
+    const span = T.part(buildSpan, 'lights' + i);
     span.userData.noShadow = true;
     // the pool the strung bulbs throw on the road below them
     for (const t of [0.3, 0.5, 0.7]) {
@@ -574,6 +586,10 @@ export function buildStreet(T) {
       arr[j] = bs[j] + Math.sin(t * 0.9 + u) * 0.05;
     });
     T.anim((t) => sway(t));
+  }
+  if (spanBuilds && spanBuilds.length) {
+    const spans = T.part((p) => { for (const f of spanBuilds) f(p); }, 'lights');
+    spans.userData.noShadow = true;
   }
   // ── planters, in CLUSTERS ─────────────────────────────────────────────────
   // Seven identical terracotta drums at 6.6 m centres is a metronome; four
@@ -755,7 +771,7 @@ export function buildMeowDonalds(T) {
     id: 'meow', room: mdRoom, y: f.y, ry: 0, w: 2.35, h: 3.2, color: MDR, x: f.px(mdDX, MD / 2 + 0.4), z: f.pz(mdDX, MD / 2 + 0.4),
     say: 'a cat in a paper hat holds the door for you. "in?" she says. "in," you agree.', speaker: "MEOW DONALD'S",
   });
-  meowInterior(T, frame(f.x, mdY, f.z, 0), { hw: (MW - MDT * 2) / 2, hd: (MD - MDT * 2) / 2 });
+  T.roomDetail('meow', () => meowInterior(T, frame(f.x, mdY, f.z, 0), { hw: (MW - MDT * 2) / 2, hd: (MD - MDT * 2) / 2 }));
 
   // ── THE ARCHES (they are ears, and they are REAL arches) ──────────────────
   // They used to be two solid cones, which read as a pair of yellow teeth. Now
