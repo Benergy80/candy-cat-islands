@@ -79,7 +79,11 @@ for (const [name, mod] of SYSTEMS) {
 ctx.events.emit('world:ready', ctx);
 
 // ── Loop ─────────────────────────────────────────────────────────────────────
-const loop = { fps: 0, frameMs: 0, tick, last: performance.now(), acc: 0, frames: 0 };
+// ?prof=1 — per-system update() timing for the frame-rate pass (Contract J): window.game.prof()
+// returns {system: {ms, max, n}} accumulated since the last call to game.prof(true) (which resets).
+const PROF = params.get('prof') === '1';
+const prof = {};
+const loop = { fps: 0, frameMs: 0, tick, last: performance.now(), acc: 0, frames: 0, prof, PROF };
 function tick(dt, render = true) {
   const s = ctx.state;
   s.elapsed += dt;
@@ -91,7 +95,10 @@ function tick(dt, render = true) {
   if (p?.position) s.island = world.islandAt(p.position.x, p.position.z) || (s.ferry ? 'sea' : s.island);
   for (const [name] of SYSTEMS) {
     const sys = ctx.systems[name];
-    if (sys?.update) { try { sys.update(dt, ctx); } catch (err) { if (!sys.__warned) { console.error(`[system ${name}] update error`, err); sys.__warned = true; } } }
+    if (!sys?.update) continue;
+    const t0 = PROF ? performance.now() : 0;
+    try { sys.update(dt, ctx); } catch (err) { if (!sys.__warned) { console.error(`[system ${name}] update error`, err); sys.__warned = true; } }
+    if (PROF) { const ms = performance.now() - t0; const r = prof[name] || (prof[name] = { ms: 0, max: 0, n: 0 }); r.ms += ms; r.n++; if (ms > r.max) r.max = ms; }
   }
   ctx.input.endFrame();
   if (!render) return;

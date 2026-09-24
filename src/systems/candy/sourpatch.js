@@ -100,6 +100,17 @@
 //    in the water the hunters pace the shore and hiss, and every 6–10 s one
 //    of them over-commits (a 'lunge') and melts (r3: the nearest one with no
 //    fence between it and the water — stats().shore.walled / .balked). Emits 'sourpatch:melt' { id, x, z, color, kind, why }.
+//    Fixer r4 (lungeBrain): a lunger with HIS BODY between it and the water
+//    (he wades a step off the sand) steps round his rim — the way that
+//    reaches water soonest without crossing the pier's salt line — and goes
+//    in; it used to be shoved back out of his jumper every frame, lunging on
+//    the spot, six times a minute, and nobody melted. Pinned all the same =
+//    under 0.25 u NET in 0.6 s (not k.moving): it balks and sits out the
+//    over-commits for 15 s (k.lungeCd), so the next nearest goes; pinned
+//    atop a steep bank with water a drop below, it hops in instead
+//    (stats().shore.rim / .leaps). A lunge that reaches the water on its
+//    last frame is a 'lunge' melt, not a 'walk'. And the salt line's ease-
+//    out (keepOutOfSalt) never drags a walker into the sea along the shore.
 //  · TEN AT A TIME. At most HUNT_CAP kids hold a hunting slot (circle, ring,
 //    pounce). Everyone else out at night WATCHES from the edge of the light,
 //    crouched, eyes glowing, muttering — and steps in the moment a hunter
@@ -206,6 +217,18 @@ const WATCH_R = 20.5;         // watchers stand this far from the visitor (+ 0�
 const WATCH_DOCK = 6.5;       // …or this far outside the salt line when he is on the pier
 const LUNGE_EVERY = [6, 10];  // s between over-commits while the visitor stands in the water
 const LUNGE_SEC = 3.0;        // an over-committed kid gives it this long to reach the water
+// fixer r4 (verifier: "a hunter pinned against a wading visitor's body lunges
+// on the spot forever and never goes into the water"): a lunge is judged by
+// where the kid REALLY went, not by k.moving (a shove back out of his jumper
+// every frame never zeroes it)
+const LUNGE_WIN = 0.6;        // s: a lunger that got under LUNGE_NET u further in this long is pinned…
+const LUNGE_NET = 0.25;       // …(net displacement over the window)
+const LUNGE_BENCH = 15;       // s: …and sits out the over-commits this long (k.lungeCd): the next nearest goes
+const LEAP_DROP = 0.3;        // a STEEP bank: its feet at least this far over the water it would land in…
+const LEAP_R = [0.5, 0.8, 1.1, 1.4, 1.7];   // …which is this close (u): pinned at the edge, it hops in
+const LEAP_FAN = [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2];   // rad off "at him" tried for that hop
+const LEAP_SPEED = 5.5;       // u/s along the hop
+const RIM_STEP = Math.PI / 9, RIM_N = 9;     // the way round him is walked in 20° steps, up to half a turn each way
 
 // scratch
 const _gp = new THREE.Vector3();
@@ -955,7 +978,10 @@ export function create(ctx) {
       // fixer r3: a breather instead of a puff in view, the walk's own time
       // cap (a breather in view grants another STROLL_MORE), and which way
       // round the visitor it is stepping (±1) and for how long
-      breathT: 0, strollCap: STROLL_GIVEUP, sideS: 0, sideT: 0, lungeSkip: -1, lungeStuck: 0,
+      breathT: 0, strollCap: STROLL_GIVEUP, sideS: 0, sideT: 0, lungeSkip: -1,
+      // fixer r4: the over-commit — its own bench after a balk (lungeCd), the
+      // net-displacement window (lungeW*), and the hop off a steep bank (leap*)
+      lungeCd: 0, lungeWT: 0, lungeWX: 0, lungeWZ: 0, leapOn: false, leapX: 0, leapZ: 0, leapT: 0,
     };
     k.r = KID_R * k.scale;
     kids.push(k);
@@ -1082,7 +1108,7 @@ export function create(ctx) {
   // over-committing; the dawn turn's hold on the night face; a time JUMP this
   // frame (harness setTime) as opposed to the clock running into morning
   let visitorWet = false, lunger = null, lunges = 0, meltToast = false;
-  const lungeStat = { none: 0, walled: 0, balked: 0 };   // fixer r3: tries with nobody in reach / a wall first / pinned mid-lunge
+  const lungeStat = { none: 0, walled: 0, balked: 0, rim: 0, leaps: 0 };   // fixer r3: tries with nobody in reach / a wall first / pinned mid-lunge; r4: frames stepping round his rim, hops off a steep bank
   let dawnHold = 0, dawnCount = 0, dawns = 0, timeJump = false;
   const meltWhy = Object.create(null);
   const meltLog = [];
@@ -1180,12 +1206,29 @@ export function create(ctx) {
     k.moving = 0; k.desYaw = Math.atan2(ux, uz); k.bumped = true;
     return d;
   }
+  // fixer r4: the pier's salt line eases a kid out — but never INTO the water a
+  // walker may not enter (where the line runs along the shore, straight out
+  // from the pier is the sea: a hunter whose lunge ended inside the line was
+  // dragged in and melted as a 'walk'). Then along the line, else it stays.
+  const SALT_OUT = [0.3, -0.3, 0.6, -0.6];
   function keepOutOfSalt(k, dt) {
     const d = dist2d(k.x, k.z, DOCK.x, DOCK.z);
     if (d < SAFE_R) {
       const ux = (k.x - DOCK.x) / (d || 1), uz = (k.z - DOCK.z) / (d || 1);
       const tx = DOCK.x + ux * (SAFE_R + 0.6), tz = DOCK.z + uz * (SAFE_R + 0.6);
-      k.x = lerp(k.x, tx, Math.min(1, dt * 4)); k.z = lerp(k.z, tz, Math.min(1, dt * 4));
+      const f = Math.min(1, dt * 4);
+      let nx = lerp(k.x, tx, f), nz = lerp(k.z, tz, f);
+      if (!landOK(nx, nz)) {
+        let ok = false;
+        const a0 = Math.atan2(uz, ux);
+        for (let j = 0; j < SALT_OUT.length && !ok; j++) {
+          const a = a0 + SALT_OUT[j];
+          nx = lerp(k.x, DOCK.x + Math.cos(a) * (SAFE_R + 0.6), f); nz = lerp(k.z, DOCK.z + Math.sin(a) * (SAFE_R + 0.6), f);
+          ok = landOK(nx, nz);
+        }
+        if (!ok) return;
+      }
+      k.x = nx; k.z = nz;
     }
   }
   function hopTick(k, dt, rate, amp) {
@@ -2075,7 +2118,7 @@ export function create(ctx) {
     if (fresh) {
       nightNo++;
       let given = 0;
-      for (const k of kids) { k.slot = false; k.lunge = 0; k.sated = false; }
+      for (const k of kids) { k.slot = false; k.lunge = 0; k.sated = false; k.lungeCd = 0; }
       for (let j = 0; j < N && given < HUNT_CAP; j++) {
         const k = kids[(j + nightNo * 7) % N];
         if (hits.absent(k) || hits.melting(k) || k.gaveUp) continue;
@@ -2207,23 +2250,10 @@ export function create(ctx) {
    * water lets them (it is a wall: they stop at the shore and slide along it),
    * PACE the waterline back and forth, lean out, paw and hiss. Every 6–10 s
    * the scheduler in update() picks one to over-commit: its `lunge` lets it
-   * into the water (wetOK) and it goes for him — and melts.
+   * into the water (wetOK) and it goes for him — and melts (lungeBrain).
    */
   function shoreBrain(k, dt, t, p, dp) {
-    if (k.lunge > 0) {
-      k.lunge -= dt;
-      moveTo(k, p.x, p.z, 6.4, dt);
-      // pinned against something after all: it thinks better of it, and the
-      // next nearest gets its chance a second later
-      k.lungeStuck = k.moving < 0.01 ? (k.lungeStuck || 0) + dt : 0;
-      if (k.lungeStuck > 0.5) { lungeStat.balked++; k.lunge = 0; k.lungeStuck = 0; if (lunger === k) lunger = null; night.lungeCd = Math.min(night.lungeCd, 1.0); return; }
-      faceThing(k, p.x, p.z, 10, dt);
-      k.armMode = 'reach'; k.lean = damp(k.lean, 0.5, 8, dt);
-      k.mouthOpen = damp(k.mouthOpen, 0.8, 8, dt);
-      hopTick(k, dt, 11, 0.12);
-      if (k.lunge <= 0 && lunger === k) lunger = null;
-      return;
-    }
+    if (k.lunge > 0) { lungeBrain(k, dt, p); return; }
     // pace: along the shore toward a slot close to him, turning back at every
     // snag — the water stops them, so the ring collapses onto the waterline
     if ((k.bumped || k.wasBumped) && k.turnCd <= 0) { k.orbitDir *= -1; k.turnCd = 1.6; }
@@ -2242,6 +2272,135 @@ export function create(ctx) {
       if (dp < 28 && k.sayCd <= 0 && rand() < 0.35 && say(k, V.SHORE[k.lineIdx++ % V.SHORE.length])) k.sayCd = 16;
     }
     k.mouthOpen = damp(k.mouthOpen, 0.12, 3, dt);
+  }
+
+  /**
+   * THE OVER-COMMIT (fixer r4). It goes for him, and the water is what it
+   * finds. Verifier: a hunter 1.00 u from a visitor wading a step off the
+   * sand 'lunged' six times in a minute, on the spot, and never went in —
+   * HIS OWN BODY stood between it and the water, separate() shoved it back
+   * out of his jumper every frame, so k.moving read 6.4 u/s and the old
+   * stuck test (k.moving < 0.01) never fired. Now:
+   *  · it steps round his RIM (visitorInWay), the way that reaches water
+   *    soonest without crossing the pier's salt line (lungeSide), into that
+   *    water — and melts;
+   *  · PINNED all the same is judged by NET DISPLACEMENT (under LUNGE_NET u
+   *    in LUNGE_WIN s): it thinks better of it, sits out the over-commits
+   *    for LUNGE_BENCH s (k.lungeCd, per kid), and the next nearest with a
+   *    clear line gets its chance a second later;
+   *  · pinned at the top of a STEEP bank (the water only reachable by a
+   *    drop, LEAP_DROP or more below its feet, LEAP_R away, nothing solid
+   *    in between), it commits anyway: a hop off the edge into the water.
+   * A lunge that runs its LUNGE_SEC out dry is benched the same way.
+   */
+  function lungeBrain(k, dt, p) {
+    k.lunge -= dt;
+    faceThing(k, p.x, p.z, 10, dt);
+    k.armMode = 'reach'; k.lean = damp(k.lean, 0.5, 8, dt);
+    k.mouthOpen = damp(k.mouthOpen, 0.8, 8, dt);
+    if (k.leapOn) {
+      // the hop: straight off the edge (the line was checked when it chose
+      // it); its feet are in the water the moment it clears the bank
+      const dx = k.leapX - k.x, dz = k.leapZ - k.z, d = Math.hypot(dx, dz);
+      const st = Math.min(d, LEAP_SPEED * dt);
+      if (d > 1e-3) { k.x += dx / d * st; k.z += dz / d * st; k.desYaw = Math.atan2(dx, dz); }
+      k.moving = LEAP_SPEED; k.leapT += dt;
+      hopTick(k, dt, 9, 0.3);
+      k.lunge = Math.max(k.lunge, dt * 2);                 // still over-committed until its feet are wet
+      if (k.leapT > 1.0) lungeBalk(k);                     // (never: the landing is water — but never forever)
+      return;
+    }
+    // where it REALLY went: the net displacement over the last LUNGE_WIN s
+    k.lungeWT += dt;
+    if (k.lungeWT >= LUNGE_WIN) {
+      const moved = Math.hypot(k.x - k.lungeWX, k.z - k.lungeWZ);
+      k.lungeWT = 0; k.lungeWX = k.x; k.lungeWZ = k.z;
+      if (moved < LUNGE_NET) {
+        if (leapFind(k, p)) { k.leapOn = true; k.leapT = 0; k.hopT = 0; k.squash = -0.25; lungeStat.leaps++; return; }
+        lungeBalk(k); return;
+      }
+    }
+    // his own body between it and the water: round his rim, the deeper side
+    if (lungeBlocked(k, p)) {
+      if (!k.sideS) k.sideS = lungeSide(k, p);
+    } else k.sideS = 0;
+    if (k.sideS && visitorInWay(k, p.x, p.z, dt)) {
+      moveTo(k, _vs.x, _vs.z, 6.4, dt);
+      if (k.moving < 0.01) k.sideS = -k.sideS;            // walled on that side: the other way next
+      else lungeStat.rim++;
+    } else moveTo(k, p.x, p.z, 6.4, dt);
+    hopTick(k, dt, 11, 0.12);
+    if (k.lunge <= 0) {                                   // ran its time out, dry: benched like a balk
+      k.lungeCd = LUNGE_BENCH;
+      if (lunger === k) lunger = null;
+    }
+  }
+  /** Is it his body, not the water, that it meets going straight at him? Close
+   *  to him (within SIDE_LOOK of stepping round him) with no water on the
+   *  line before it would touch his jumper. Water first: straight in. */
+  function lungeBlocked(k, p) {
+    const vx = p.x - k.x, vz = p.z - k.z, vd = Math.hypot(vx, vz);
+    if (vd > VISITOR_R + k.r + SIDE_PAD + SIDE_LOOK || vd < 1e-4) return false;
+    const reach = vd - (VISITOR_R + k.r);                  // where separate() stops it
+    for (let q = 0.25; q <= reach + 1e-3; q += 0.25) if (water.wet(k.x + vx / vd * q, k.z + vz / vd * q)) return false;
+    return true;
+  }
+  /** A pinned lunger thinks better of it: benched, and the next nearest goes. */
+  function lungeBalk(k) {
+    lungeStat.balked++;
+    k.lunge = 0; k.leapOn = false; k.lungeCd = LUNGE_BENCH;
+    if (lunger === k) lunger = null;
+    night.lungeCd = Math.min(night.lungeCd, 1.0);
+  }
+  /** Which way round him (visitorInWay's sideS): the way that reaches water
+   *  soonest along his rim, walked in RIM_STEP steps each way until it finds
+   *  water, the pier's salt line (it would be shoved straight back out of it
+   *  — keepOutOfSalt), salt or something solid; neither way: the side where
+   *  the water beside him is deeper. −1 walks it round toward increasing
+   *  atan2(z − his z, x − his x) (visitorInWay's tangent is (−uz·sideS,
+   *  ux·sideS), u the unit line from it to him), +1 the other way. */
+  function lungeSide(k, p) {
+    const a0 = Math.atan2(k.z - p.z, k.x - p.x), R = VISITOR_R + k.r + SIDE_PAD + 0.1;
+    let best = 0, bestN = 99, deep = 0;
+    for (let sg = -1; sg <= 1; sg += 2) {                 // sg +1: toward increasing angle
+      for (let n = 1; n <= RIM_N; n++) {
+        const a = a0 + sg * n * RIM_STEP, x = p.x + Math.cos(a) * R, z = p.z + Math.sin(a) * R;
+        if (dist2d(x, z, DOCK.x, DOCK.z) < SAFE_R || salt.blocked(x, z) || blocked(x, z, k.r * 0.8)) break;
+        if (water.wet(x, z)) { if (n < bestN) { bestN = n; best = sg; } break; }
+      }
+      const a = a0 + sg * Math.PI * 0.5;
+      deep += sg * clamp(water.depth(p.x + Math.cos(a) * R, p.z + Math.sin(a) * R), -1, 2);
+    }
+    if (!best) best = deep >= 0 ? 1 : -1;
+    return best > 0 ? -1 : 1;
+  }
+  /** A STEEP bank: water it can only reach by a drop, a hop away toward him
+   *  (LEAP_FAN × LEAP_R), its feet LEAP_DROP or more over that water, and
+   *  nothing solid, no salt, not him, between. → true and leapX/leapZ. */
+  function leapFind(k, p) {
+    const b = Math.atan2(p.x - k.x, p.z - k.z);
+    for (let i = 0; i < LEAP_FAN.length; i++) {
+      const a = b + LEAP_FAN[i], sx = Math.sin(a), sz = Math.cos(a);
+      for (let j = 0; j < LEAP_R.length; j++) {
+        const r = LEAP_R[j], x = k.x + sx * r, z = k.z + sz * r;
+        if (!candyWater(x, z)) continue;
+        water.depth(x, z);
+        if (!(k.groundY - water.surf >= LEAP_DROP)) break;          // a wade, not a drop: no hop this way
+        if (dist2d(x, z, DOCK.x, DOCK.z) < SAFE_R) break;             // never over the pier's salt line
+        // not into him, nor over him
+        const t = clamp(((p.x - k.x) * sx + (p.z - k.z) * sz) / r, 0, 1);
+        if (dist2d(p.x, p.z, k.x + sx * r * t, k.z + sz * r * t) < VISITOR_R + k.r * 0.6) break;
+        let clear = !blocked(x, z, k.r * 0.7);
+        for (let q = 0.3; clear && q < r; q += 0.3) {
+          const qx = k.x + sx * q, qz = k.z + sz * q;
+          if (blocked(qx, qz, k.r * 0.5) || salt.blocked(qx, qz)) clear = false;
+        }
+        if (!clear) break;
+        k.leapX = x; k.leapZ = z;
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Pressed up against the salt, pacing sideways, pawing at the line. */
@@ -2949,7 +3108,7 @@ export function create(ctx) {
             for (let pass = 0; pass < HUNT_CAP && !best; pass++) {
               let cand = null, cd = bd;
               for (const k of kids) {
-                if (!k.slot || k.hurt || k.vis < 0.8 || k.lungeSkip === frame) continue;
+                if (!k.slot || k.hurt || k.vis < 0.8 || k.lungeSkip === frame || k.lungeCd > 0) continue;
                 const d = dist2d(k.x, k.z, p.x, p.z);
                 if (d < cd) { cd = d; cand = k; }
               }
@@ -2959,6 +3118,8 @@ export function create(ctx) {
             }
             if (best) {
               best.lunge = LUNGE_SEC; lunger = best; lunges++;
+              best.lungeWT = 0; best.lungeWX = best.x; best.lungeWZ = best.z;     // fixer r4: the net-displacement window
+              best.sideS = 0; best.sideT = 0; best.leapOn = false; best.leapT = 0;
               say(best, V.LUNGE[best.lineIdx++ % V.LUNGE.length], true);
               best.hopT = 0; best.squash = -0.2;
               night.lungeCd = LUNGE_EVERY[0] + rand() * (LUNGE_EVERY[1] - LUNGE_EVERY[0]);
@@ -3014,6 +3175,7 @@ export function create(ctx) {
       for (const k of kids) {
         k.sayCd = Math.max(0, k.sayCd - dt);
         k.turnCd = Math.max(0, k.turnCd - dt);
+        if (k.lungeCd > 0) k.lungeCd -= dt;              // fixer r4: benched from over-committing (a balk)
         k.px = k.x; k.pz = k.z;                          // where it stood (resolveProps' fallback)
         k.wasBumped = k.bumped; k.bumped = false;
         k.gaitPre = k.gaitAmp;                           // (the gait guard below: what a brain forced this frame)
@@ -3021,8 +3183,11 @@ export function create(ctx) {
         // water is a wall to this kid's movement this frame — unless it is
         // fleeing in a panic or has over-committed at the shore
         const hm = k.hurt ? k.hurt.mode : null;
-        if (k.lunge > 0 && (!visitorWet || k.hurt)) { k.lunge = 0; if (lunger === k) lunger = null; }   // he got out: never mind
-        wetOK = k.lunge > 0 || hm === 'flee' || hm === 'panic';
+        if (k.lunge > 0 && (!visitorWet || k.hurt)) { k.lunge = 0; k.leapOn = false; if (lunger === k) lunger = null; }   // he got out: never mind
+        // (fixer r4: read BEFORE the brain — a lunge that reaches the water on
+        // its last frame has already counted its lunge down to 0 by the melt)
+        const wasLunge = k.lunge > 0;
+        wetOK = wasLunge || hm === 'flee' || hm === 'panic';
         // being hit outranks having a job: the reaction owns the kid while it runs
         if (hits.brain(k, dt, t, p, dp)) {
           if (k.hurt && k.hurt.mode !== 'gone' && k.hurt.mode !== 'sulk') keepOutOfSalt(k, dt);
@@ -3120,7 +3285,7 @@ export function create(ctx) {
         }
         // WATER: feet in the sea, the lake or the river — it melts, and a pool
         // of its own colour floats where it went in
-        if (k.vis > 0.3 && !hits.melting(k) && !(k.air > 0.05) && water.wet(k.x, k.z)) meltInWater(k);
+        if (k.vis > 0.3 && !hits.melting(k) && !(k.air > 0.05) && water.wet(k.x, k.z)) meltInWater(k, wasLunge ? 'lunge' : undefined);
         wetOK = false;
         // hard containment net: whatever any brain did, a kid that is no longer
         // standing on Candyland goes straight back to its own front door

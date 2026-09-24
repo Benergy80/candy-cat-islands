@@ -1026,7 +1026,7 @@ export function create(ctx) {
       // SIDE of it as the lens sees it (never in front: he would hide it).
       const floor = (px, pz) => (s.kind === 'deck' ? deckAt(px, pz) : floorAt(px, pz));
       const tol = s.kind === 'jump' ? 0.9 : 0.45;
-      const az = ctx.systems.camera?.params?.azimuth ?? Math.PI / 4;
+      const az = ctx.systems.camera?.current?.azimuth ?? ctx.systems.camera?.params?.azimuth ?? Math.PI / 4;
       let bestScore = -Infinity;
       for (const dd of [dist, dist * 0.7, dist * 1.35]) {
         const tries = bearing === null ? 24 : 1;
@@ -1049,7 +1049,7 @@ export function create(ctx) {
     pl.teleport(best.x, best.z);
     // turn him half toward the lens, half toward the star: face and prize both read
     try {
-      const az = ctx.systems.camera?.params?.azimuth ?? Math.PI / 4;
+      const az = ctx.systems.camera?.current?.azimuth ?? ctx.systems.camera?.params?.azimuth ?? Math.PI / 4;
       const sx = s.x - pl.position.x, sz = s.z - pl.position.z, sl = Math.hypot(sx, sz) || 1;
       pl.facing = Math.atan2(sx / sl + Math.sin(az) * 1.3, sz / sl + Math.cos(az) * 1.3);
     } catch { /* read-only facing: fine */ }

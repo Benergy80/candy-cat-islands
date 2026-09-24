@@ -873,13 +873,15 @@ export function create(ctx, escape) {
     return Math.atan2(-n.ux, -n.uz);
   }
   /** A corridor needs a steeper, closer lens than an island does — see the
-   *  SIGHTLINE RULE at the top: the geometry is cut to THESE numbers. */
-  function caveCam(on) {
+   *  SIGHTLINE RULE at the top: the geometry is cut to THESE numbers.
+   *  `at` is where he is about to stand (enterCave's spawn): the aim is taken
+   *  from there, not from the island he is still standing on. */
+  function caveCam(on, at = null) {
     const cam = ctx.systems.camera;
     if (!cam?.params || !cam.setParams) return;
     if (on && !camSave) {
       camSave = { elevation: cam.params.elevation, distance: cam.params.distance, azimuth: cam.params.azimuth };
-      const p = ctx.systems.player?.position;
+      const p = at || ctx.systems.player?.position;
       const az = p ? corridorAz(p.x - CX, p.z - CZ) : cam.params.azimuth;
       cam.setParams({ elevation: CAM.elevation, distance: CAM.distance, azimuth: az });
       azSet = az; azFree = 0;
@@ -899,12 +901,12 @@ export function create(ctx, escape) {
     azSet = want;
   }
   let bubbles = null;
-  function show(v) {
+  function show(v, at = null) {
     group.visible = v; hatchGroup.visible = true;
     for (const L of lights) L.visible = v;
     amb.intensity = v ? 1.0 : 0;
     fill.intensity = v ? 0.40 : 0;
-    caveCam(v);
+    caveCam(v, at);
     // a drifting field of bubbles, born on the walkway and rising through the
     // shafts — ~90 alive at any moment, all in the shared particle pool
     if (v && !bubbles) {
@@ -927,8 +929,12 @@ export function create(ctx, escape) {
     if (busy) return; busy = true;
     escape.start('cave', { from });
     escape.transition(() => {
-      inCave = true; show(true);
+      // Aim the lens from the SPAWN. show() still runs before the teleport (its
+      // setParams pins the framing and the teleport is what lifts the pin), but
+      // an aim taken from the cellar door or the hatch was 0.7-0.9 rad off the
+      // corridor, and followCorridor swung it back through the whole fade-in.
       const s = spawn(from === 'palace' ? 'palace' : 'cat');
+      inCave = true; show(true, s);
       ctx.systems.player?.teleport(s.x, s.z);
       if (from === 'palace') { armPal = false; armCat = true; } else { armCat = false; armPal = true; }
       escape.banner('The Undersea Cave', from === 'palace' ? 'the cats never sealed it' : 'no humans beyond this point', 4, 'candy');

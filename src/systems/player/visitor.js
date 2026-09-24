@@ -281,21 +281,42 @@ export function createVisitor() {
   // The camera's capsule sweep moves the lens around big meshes, but it cannot
   // see instanced palm fronds and it cannot dolly past a plinth the visitor is
   // standing behind. So the body is drawn a SECOND time, flat cream-amber,
-  // where — and only where — something is in front of it:
+  // where — and only where — SOMETHING ELSE is in front of it:
   //   depthTest ON with depthFunc = GreaterDepth, depthWrite OFF. A fragment
   //   passes exactly when the depth buffer already holds something NEARER, i.e.
   //   that pixel of the visitor is hidden. Nothing in front of him? Nothing
   //   draws, and the pass is free.
-  // The catch is that the body occludes ITSELF (the far arm behind the chest,
-  // the head behind the brim), which would paint cream over a perfectly visible
-  // visitor. Hence SIL_PUSH: the silhouette is shifted SIL_PUSH units toward the
-  // lens in VIEW space by the vertex shader, which is more than the body's own
-  // depth, so self-occlusion can never trigger it — only a real blocker at
-  // least SIL_PUSH in front does. MeshBasicMaterial + toneMapped:false means it
-  // reads the same at midnight as at noon.
+  // The catch is that the body occludes ITSELF (the hat in front of the torso
+  // at a steep lens, the far arm behind the chest), which would paint amber
+  // bands over a perfectly visible visitor — and no depth bias can fix that,
+  // because at elevation 0.95 the hat stands ~1.5 u nearer the lens than the
+  // shoes. So the fix is ORDER, not bias: the pass runs BEFORE his body is in
+  // the depth buffer.
+  //   · the silhouette sits in the OPAQUE queue (transparent: false, blended
+  //     through CustomBlending so the 76% still applies) at SIL_ORDER, after
+  //     every scene opaque (they are all ≤ 12);
+  //   · every body mesh draws at BODY_ORDER = SIL_ORDER + 1, right after it.
+  // When the silhouette tests, the depth buffer holds the scene and nothing of
+  // him, so self-overlap can never pass; the body then draws normally and
+  // covers whatever amber landed on a pixel where he turns out visible (none:
+  // those pixels failed GreaterDepth against the scene behind him). No stencil
+  // (the renderer has none), no extra render target, no extra pass.
+  // Transparent blockers (a camera-faded prop, depthWrite off) never reached
+  // the depth buffer before either, and the held item (weapons.js, transparent
+  // queue at 9995) still comes after both.
+  // SIL_PUSH is now only about CONTACT — a shoe dug 5 cm into a slope, a hand
+  // through a hedge, a seat edge against the thighs: the pass needs a blocker
+  // at least SIL_PUSH nearer the lens than the body. It moves DEPTH only
+  // (gl_Position.z); x/y stay put, so the amber registers exactly on the body
+  // instead of swelling ~3% about the screen centre the way pushing the whole
+  // vertex did. MeshBasicMaterial + toneMapped:false means it reads the same at
+  // midnight as at noon.
   const SIL_PUSH = 0.75;
+  const SIL_ORDER = 9990, BODY_ORDER = 9991;
   const silMat = new THREE.MeshBasicMaterial({
-    color: 0xffab45, transparent: true, opacity: 0.76,
+    color: 0xffab45, transparent: false, opacity: 0.76,
+    blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     depthWrite: false, depthTest: true, depthFunc: THREE.GreaterDepth,
     fog: false, toneMapped: false, side: THREE.FrontSide,
   });
@@ -304,20 +325,26 @@ export function createVisitor() {
     if (!sh.vertexShader.includes('#include <project_vertex>')) return;    // never break the render
     sh.vertexShader = 'uniform float silPush;\n' + sh.vertexShader.replace(
       '#include <project_vertex>',
-      '#include <project_vertex>\n\tmvPosition.z += silPush;\n\tgl_Position = projectionMatrix * mvPosition;',
+      '#include <project_vertex>\n\t{\n\t\tvec4 silP = projectionMatrix * vec4( mvPosition.xy, mvPosition.z + silPush, 1.0 );\n\t\tgl_Position.z = silP.z / max( silP.w, 1e-4 ) * gl_Position.w;\n\t}',
     );
   };
-  silMat.customProgramCacheKey = () => 'visitor-silhouette';
+  silMat.customProgramCacheKey = () => 'visitor-silhouette-2';
   const silMeshes = [];
   {
-    const hosts = [];
-    root.traverse((o) => { if (o.isMesh && !o.userData.faceDetail && !o.userData.silhouette) hosts.push(o); });
+    const hosts = [], body = [];
+    root.traverse((o) => {
+      if (!o.isMesh || o.userData.silhouette) return;
+      body.push(o);
+      if (!o.userData.faceDetail) hosts.push(o);
+    });
+    // every mesh of his own — face details included — draws after the pass
+    for (const o of body) o.renderOrder = BODY_ORDER;
     for (const o of hosts) {
       const g = new THREE.Mesh(o.geometry, silMat);
       g.name = 'visitor_silhouette';
       g.position.copy(o.position); g.quaternion.copy(o.quaternion); g.scale.copy(o.scale);
       g.castShadow = false; g.receiveShadow = false; g.frustumCulled = false;
-      g.renderOrder = 9990;                       // after every opaque and every ghosted blocker
+      g.renderOrder = SIL_ORDER;                  // after every scene opaque, before his body
       g.userData.silhouette = true; g.userData.noFade = true; g.userData.noOcclude = true; g.userData.noShadow = true;
       o.parent.add(g);
       silMeshes.push(g);

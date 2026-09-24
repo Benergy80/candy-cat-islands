@@ -962,7 +962,14 @@ export function create(ctx, escape) {
         const cam = c.systems.camera;
         if (cam?.params) {
           if (any) { camSave = { distance: cam.params.distance, elevation: cam.params.elevation }; cam.setParams?.({ distance: Math.min(camSave.distance, 17), elevation: Math.max(camSave.elevation, 0.95) }); }
-          else if (camSave) { cam.setParams?.(camSave); camSave = null; }
+          else if (camSave) {
+            // leaving the cellar INTO THE CAVE (its diorama sits at x≈1400) must not restore the island framing
+            // over the cave's own 0.95 / 22 lens — the cave sets and clears its params itself (2026-09-24)
+            const pl = c.systems.player?.position;
+            const intoCave = !!pl && Math.abs(pl.x - 1400) < 500;
+            if (!intoCave) cam.setParams?.(camSave);
+            camSave = null;
+          }
         }
         // the HUD names the place you are actually standing in (ui reads it)
         c.state.placeOverride = any

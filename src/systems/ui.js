@@ -85,6 +85,13 @@
 // the minimap footer lives BANNER_ECHO seconds, not its full term; and the
 // top-centre column slides right rather than reach into the left 30% of the
 // frame, which belongs to the world (Meow Donald's billboard band).
+//
+// THE PILL AND THE VISITOR (wave-3 camera polish): the interaction pill fades
+// out while the V look is on (camera.looking > PROMPT_LOOK: the pan is not at
+// the thing it names) and is never drawn over HIM — his silhouette is his
+// feet (camera.playerScreen) plus BODY_H projected; a pill that would cover it
+// slides sideways to the side with room (never onto the minimap, its chip or
+// the hotbar), or over his hat / under his feet, its tail still aimed home.
 // ─────────────────────────────────────────────────────────────────────────────
 import { CSS, injectFonts } from './ui/style.js';
 import { createMinimap } from './ui/minimap.js';
@@ -118,6 +125,13 @@ const TOAST_QUEUE = 4;          // waiting toasts kept (oldest chatter dropped)
 const TOAST_TTL = 14;           // a toast that waited this long is no longer news
 const WEAPON_HINT_LIFE = 14;    // seconds the 'first weapon' sub-line stays up
 const PROMPT_NEAR = 40;         // px: the prompt never sits further from its object
+// The pill and the visitor (wave-3 camera polish): it is never drawn over HIM.
+const PROMPT_LOOK = 0.05;       // camera.looking above this: the pill steps out (a V look pans away from the thing)
+const BODY_H = 1.8;             // u: his height, feet (camera.playerScreen) → head, projected with the lens
+const BODY_R = 0.45;            // u: his half-width (hat brim, arms), along the lens's right vector
+const BODY_GAP = 8;             // px of air kept between the pill (tail included) and his silhouette
+const PROMPT_EASE = 14;         // 1/s: the pill slides clear of him (and back home) at this rate
+const HUD_READ = 0.25;          // s: the minimap / map chip / hotbar boxes are re-read this often while needed
 
 // What an ellipsis-only line ('...') shows instead of three dots in a speech box.
 const BEATS = ['stares at you.', 'says nothing. Loudly.', 'just watches you.', 'looks you up and down.'];
@@ -192,7 +206,7 @@ export function create(ctx) {
   injectFonts();
   const root = ctx.uiRoot;
   const world = ctx.world;
-  const V3 = new ctx.THREE.Vector3(), V3b = new ctx.THREE.Vector3();
+  const V3 = new ctx.THREE.Vector3(), V3b = new ctx.THREE.Vector3(), V3c = new ctx.THREE.Vector3();
 
   const style = document.createElement('style');
   style.textContent = CSS;
@@ -382,6 +396,89 @@ export function create(ctx) {
   const hotbar = createHotbar(ctx, panel);
   root.appendChild(hotbar.el);
   let barLift = 0, lastLift = -1;
+
+  // ── the pill never sits on the visitor ─────────────────────────────────────
+  // His silhouette on screen: feet from camera.playerScreen (CSS px, after the
+  // lens's final pitch), head BODY_H above them and BODY_R either side, both
+  // projected with the same camera the pill is. When the pill's box (tail and
+  // bob included) would cover that, it slides sideways — to the side that has
+  // room inside the frame and clear of the minimap, its chip and the hotbar,
+  // the shorter move when both do, the side it already took while that still
+  // works — or, failing both, above his hat / below his feet. Eased from
+  // update(dt), like every HUD motion.
+  const body = { l: 0, t: 0, r: 0, b: 0 };
+  const pillBox = { l: 0, t: 0, r: 0, b: 0 };
+  let pShiftX = 0, pShiftY = 0, pSide = 0;
+  const hudBoxes = [];
+  let hudReadT = 0;
+  /** His silhouette in CSS px → body; false when he is not in the frame (or the lens is free). */
+  function bodyOnScreen(w, h) {
+    const cam = ctx.systems.camera, ps = cam?.playerScreen, P = ctx.systems.player?.position;
+    if (!ps || !ps.on || !P || !Number.isFinite(ps.x) || !Number.isFinite(ps.y)) return false;
+    V3c.set(P.x, P.y + BODY_H, P.z).project(ctx.camera);
+    if (!(V3c.z < 1)) return false;
+    const hx = (V3c.x * 0.5 + 0.5) * w, hy = (-V3c.y * 0.5 + 0.5) * h;
+    const e = ctx.camera.matrixWorld.elements, my = P.y + BODY_H * 0.5;
+    V3c.set(P.x, my, P.z).project(ctx.camera);
+    const mx = V3c.x;
+    V3c.set(P.x + e[0] * BODY_R, my + e[1] * BODY_R, P.z + e[2] * BODY_R).project(ctx.camera);
+    const hw = clamp(Math.abs(V3c.x - mx) * 0.5 * w, 8, 200);
+    body.l = Math.min(ps.x, hx) - hw; body.r = Math.max(ps.x, hx) + hw;
+    body.t = Math.min(ps.y, hy) - hw * 0.35; body.b = Math.max(ps.y, hy) + 4;   // (the hat's brim; the shoe soles)
+    return true;
+  }
+  /** The corner furniture the pill may never slide onto (rects re-read HUD_READ s apart, only while needed). */
+  function readHudBoxes(dt) {
+    hudReadT -= dt;
+    if (hudReadT > 0) return;
+    hudReadT = HUD_READ;
+    hudBoxes.length = 0;
+    const els = [mapAnim.visible && map.el, mapChipAnim.visible && map.chip, hotbar.visible && hotbar.el];
+    for (const el of els) {
+      if (!el) continue;
+      const rc = el.getBoundingClientRect();
+      if (rc.width >= 1 && rc.height >= 1) hudBoxes.push({ l: rc.left - 6, t: rc.top - 6, r: rc.right + 6, b: rc.bottom + 6 });
+    }
+  }
+  /** Is the pill box, moved by (dx, dy), inside [edge, w − edge] × [top, low] and off every HUD box? */
+  function pillFits(dx, dy, w, top, low) {
+    const l = pillBox.l + dx, r = pillBox.r + dx, t = pillBox.t + dy, b = pillBox.b + dy;
+    if (l < 12 || r > w - 12 || t < top || b > low) return false;
+    for (const a of hudBoxes) if (r > a.l && l < a.r && b > a.t && t < a.b) return false;
+    return true;
+  }
+  /**
+   * Where the pill should be pushed (px) so it clears his silhouette. pillBox holds its HOME box;
+   * top / low are the frame's usable band for the pill's box. Returns false when it already clears him.
+   */
+  function clearOfHim(w, h, top, low, dt, out) {
+    const G = BODY_GAP;
+    if (!bodyOnScreen(w, h) || !(pillBox.r > body.l - G && pillBox.l < body.r + G && pillBox.b > body.t - G && pillBox.t < body.b + G)) {
+      hudReadT = 0;                                  // (clear of him: the next overlap reads the HUD boxes fresh)
+      return false;
+    }
+    readHudBoxes(dt);
+    const dR = body.r + G - pillBox.l, dL = body.l - G - pillBox.r;        // > 0 / < 0
+    const okR = pillFits(dR, 0, w, top, low), okL = pillFits(dL, 0, w, top, low);
+    let side = 0;
+    if (okR && okL) {
+      // both have room: keep the side already taken unless the other is a much shorter move, else the shorter
+      // move (the pill stays nearest its object), a near tie going to the roomier half of the frame
+      const roomR = w - body.r, roomL = body.l;
+      if (pSide > 0 && dR <= -dL + 60) side = 1;
+      else if (pSide < 0 && -dL <= dR + 60) side = -1;
+      else if (Math.abs(dR + dL) < 16) side = roomR >= roomL ? 1 : -1;
+      else side = dR < -dL ? 1 : -1;
+    } else if (okR) side = 1;
+    else if (okL) side = -1;
+    if (side) { pSide = side; out.x = side > 0 ? dR : dL; out.y = 0; return true; }
+    // no room either side: over his hat, then under his feet
+    const dU = body.t - G - pillBox.b, dD = body.b + G - pillBox.t;
+    if (pillFits(0, dU, w, top, low)) { out.x = 0; out.y = dU; return true; }
+    if (pillFits(0, dD, w, top, low)) { out.x = 0; out.y = dD; return true; }
+    return false;
+  }
+  const shiftGoal = { x: 0, y: 0 };
 
   // ── dialogue ───────────────────────────────────────────────────────────────
   const sayEl = add('cci cci-say', `
@@ -859,8 +956,8 @@ export function create(ctx) {
       promptOn = true;
       promptNeedsW = true;                          // re-measured once, when visible
       // While a line is open the dialogue box owns E (see update): two E cues
-      // on screen at once is the HUD arguing with itself.
-      if (!current) promptAnim.show();
+      // on screen at once is the HUD arguing with itself. A V look hides it too.
+      if (!current && !((Number(ctx.systems.camera?.looking) || 0) > PROMPT_LOOK)) promptAnim.show();
     },
     toast(text, secs = 3.6, opts = {}) { return makeToast(text, secs, opts); },
     banner(title, subtitle = '', secs = 3.6, island) {
@@ -958,6 +1055,12 @@ export function create(ctx) {
     get hudShown() { return !root.classList.contains('cci-cinema'); },
     get here() { return hereId; },
     get mapMode() { return mapOn ? mapMode : 'off'; },
+    /** QA: the interaction pill as it stands (allocates; not for per-frame use). home = its box before the
+     *  slide clear of the visitor, shift = that slide (px), body = his silhouette the last time it was read. */
+    get promptState() {
+      return { on: promptOn, visible: promptAnim.visible, p: promptAnim.p, label: promptOn ? promptTxt.textContent : null,
+        tail: promptTail, home: { ...pillBox }, shift: [pShiftX, pShiftY], side: pSide, body: { ...body } };
+    },
 
     // ── frame ────────────────────────────────────────────────────────────────
     update(dt, ctx) {
@@ -1056,11 +1159,25 @@ export function create(ctx) {
       // ONE 'E' cue at a time. The dialogue box shows its own E chip and even
       // swallows the keypress, so the world prompt steps aside for the length
       // of the line and comes back when the talking stops.
-      if (promptOn) { if (current) promptAnim.hide(); else promptAnim.show(); }
+      // A V look (camera.looking) pans the frame away from the thing the pill names — a 'Talk to Tartlet'
+      // floating over some distant street is a cue about nothing — so the pill fades out for the look and
+      // comes back as the lens settles home (E at the thing still works, and ends the look).
+      const lookK = Number(ctx.systems.camera?.looking) || 0;
+      if (promptOn) { if (current || lookK > PROMPT_LOOK) promptAnim.hide(); else promptAnim.show(); }
       if (promptAnim.visible) {
+        // a pill that is only now appearing (or was just re-measured for a new label) takes its slide at once:
+        // it must not pop up on him and then walk off
+        let snap = promptAnim.p <= 0;
         if (promptNeedsW && promptEl.offsetWidth) {
           promptW = promptEl.offsetWidth; promptHgt = promptEl.offsetHeight || promptHgt; promptNeedsW = false;
+          snap = true;
         }
+        const w = window.innerWidth, h = window.innerHeight;
+        const topLimit = banAnim.visible ? 168 : 108;   // clear of the top column
+        const lowLimit = h - (current ? 200 : 120) - barLift;   // clear of hotbar / dialogue
+        // the pill's HOME: (L, T) and the fraction of its box that sits left of / above that point (its base
+        // translate), then its tail. Written once below, after the slide clear of the visitor is added.
+        let L = 0, T = 0, ax = 0.5, ay = 1, tail = 'none', px = NaN;
         let anchored = false;
         if (promptEntry) {
           const pos = promptEntry.getPos ? promptEntry.getPos() : (typeof promptEntry.x === 'number' ? promptEntry : null);
@@ -1069,10 +1186,7 @@ export function create(ctx) {
             V3.set(pos.x, wy, pos.z);
             V3.project(ctx.camera);
             if (V3.z < 1) {
-              const w = window.innerWidth, h = window.innerHeight;
-              const topLimit = banAnim.visible ? 168 : 108;   // clear of the top column
-              const lowLimit = h - (current ? 200 : 120) - barLift;   // clear of hotbar / dialogue
-              const px = (V3.x * 0.5 + 0.5) * w;
+              px = (V3.x * 0.5 + 0.5) * w;
               const py = (-V3.y * 0.5 + 0.5) * h;
               // How big is the thing on screen? One interaction radius along the
               // camera's right vector — a signpost's arms are two metres of
@@ -1090,32 +1204,48 @@ export function create(ctx) {
               const side = (rw >= 3.2 || above - promptHgt < topLimit)
                 ? ((w - px) >= px ? 1 : -1) : 0;
               if (side === 0) {
-                promptEl.style.left = clamp(px, edge + promptW / 2, Math.max(edge + promptW / 2, w - edge - promptW / 2)).toFixed(1) + 'px';
-                promptEl.style.top = clamp(above, topLimit + promptHgt, Math.max(topLimit + promptHgt, lowLimit)).toFixed(1) + 'px';
-                promptAnim.o.base = 'translate(-50%,-100%)';
-                setTail('down');
+                L = clamp(px, edge + promptW / 2, Math.max(edge + promptW / 2, w - edge - promptW / 2));
+                T = clamp(above, topLimit + promptHgt, Math.max(topLimit + promptHgt, lowLimit));
+                ax = 0.5; ay = 1; tail = 'down';
               } else {
                 const off = clamp(13 + rPx * 0.3, 13, PROMPT_NEAR);
-                const sx = side > 0
+                L = side > 0
                   ? clamp(px + off, edge, Math.max(edge, w - promptW - edge))
                   : clamp(px - off, Math.min(w - edge, promptW + edge), w - edge);
-                promptEl.style.left = sx.toFixed(1) + 'px';
-                promptEl.style.top = clamp(py, topLimit, Math.max(topLimit, lowLimit)).toFixed(1) + 'px';
-                promptAnim.o.base = side > 0 ? 'translate(0,-50%)' : 'translate(-100%,-50%)';
-                setTail(side > 0 ? 'left' : 'right');
+                T = clamp(py, topLimit, Math.max(topLimit, lowLimit));
+                ax = side > 0 ? 0 : 1; ay = 0.5; tail = side > 0 ? 'left' : 'right';
               }
-              promptEl.style.bottom = 'auto';
               anchored = true;
             }
           }
         }
-        if (!anchored) {
-          promptEl.style.left = '50%'; promptEl.style.top = 'auto';
-          promptEl.style.bottom = ((current ? 230 : 168) + barLift).toFixed(0) + 'px';
-          promptAnim.o.base = 'translateX(-50%)';
-          setTail('none');                            // nothing to point at
+        if (!anchored) {                              // nothing to point at: parked over the bottom centre
+          L = w / 2; T = h - ((current ? 230 : 168) + barLift);
+          ax = 0.5; ay = 1; tail = 'none';
         }
-      }
+        // …never over HIM: the home box (tail and the 4 px bob included) against his silhouette
+        pillBox.l = L - ax * promptW - (tail === 'left' ? 8 : 0);
+        pillBox.r = L + (1 - ax) * promptW + (tail === 'right' ? 8 : 0);
+        pillBox.t = T - ay * promptHgt - 5;
+        pillBox.b = T + (1 - ay) * promptHgt + (tail === 'down' ? 8 : 1);
+        if (!clearOfHim(w, h, Math.min(topLimit, pillBox.t), Math.max(lowLimit, pillBox.b), dt, shiftGoal)) {
+          shiftGoal.x = 0; shiftGoal.y = 0; pSide = 0;
+        }
+        const k = snap ? 1 : Math.min(1, dt * PROMPT_EASE);
+        pShiftX += (shiftGoal.x - pShiftX) * k; pShiftY += (shiftGoal.y - pShiftY) * k;
+        if (Math.abs(shiftGoal.x - pShiftX) < 0.5) pShiftX = shiftGoal.x;
+        if (Math.abs(shiftGoal.y - pShiftY) < 0.5) pShiftY = shiftGoal.y;
+        // slid off the thing's head point: the tail turns to point back at it
+        if (anchored && pShiftX) {
+          const l = pillBox.l + pShiftX, r = pillBox.r + pShiftX;
+          if (l > px) tail = 'left'; else if (r < px) tail = 'right';
+        }
+        promptEl.style.left = (L + pShiftX).toFixed(1) + 'px';
+        promptEl.style.top = (T + pShiftY).toFixed(1) + 'px';
+        promptEl.style.bottom = 'auto';
+        promptAnim.o.base = `translate(${-ax * 100}%,${-ay * 100}%)`;
+        setTail(tail);
+      } else { pShiftX = 0; pShiftY = 0; pSide = 0; hudReadT = 0; }
 
       // location banner from landmark zones
       const pl = ctx.systems.player;

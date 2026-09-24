@@ -1190,7 +1190,7 @@ export function create(ctx, api) {
   /** Bearing from (x, z) toward the lens: the camera's azimuth (it sits at
    *  target + (sin az, cos az) · d), or its live position as a fallback. */
   function camBearing(x, z) {
-    const az = ctx.systems.camera?.params?.azimuth;
+    const az = ctx.systems.camera?.current?.azimuth ?? ctx.systems.camera?.params?.azimuth;   // the lens bearing in every mode (params.azimuth is stale in mode 2)
     if (Number.isFinite(az)) return az;
     const cp = ctx.camera.position;
     return Math.atan2(cp.x - x, cp.z - z);
