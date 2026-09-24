@@ -70,6 +70,21 @@ function flipV(geo) { const a = geo.attributes.uv.array; for (let i = 1; i < a.l
 
 // ── instance pool: one draw call per body-part type ──────────────────────────
 const _c = new THREE.Color();
+// Per-pass culling for the pools (Contract J). A draw whose live bounds miss the
+// frustum of the camera drawing it — the lens, or the sun's shadow camera — is
+// skipped by a negative drawRange count (vendored three r170 returns from
+// renderBufferDirect before any GL call; onAfter* puts the range back, so a
+// raycast never sees it). One frustum per camera per frame.
+const _cullF = new THREE.Frustum(), _cullM = new THREE.Matrix4();
+let _cullCam = null, _cullFrame = -1;
+function cullPass(cam, bounds, renderer) {
+  const f = renderer.info.render.frame;
+  if (cam !== _cullCam || f !== _cullFrame) {
+    _cullCam = cam; _cullFrame = f;
+    _cullF.setFromProjectionMatrix(_cullM.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+  }
+  return !_cullF.intersectsSphere(bounds);
+}
 export class Pool {
   constructor(name, geo, material, opts = {}) {
     this.name = name; this.geo = geo; this.material = material; this.opts = opts;
@@ -83,7 +98,24 @@ export class Pool {
     const n = this.nodes.length; if (!n) return null;
     const m = new THREE.InstancedMesh(this.geo, this.material, n);
     m.name = 'catcitizen_' + this.name;
+    // Culled against LIVE bounds (Contract J): sync() fits this.bounds round the
+    // instances that have any size this frame, so a pool that is all folded to
+    // nothing — every tiger part by day, the day clothes after dark — is hidden,
+    // and one that is wholly outside the frustum of the pass drawing it — a hat
+    // three streets away, the Mayor's sash — skips its draw (see cullPass). They
+    // were all unculled: 44 + 11 calls. m.boundingSphere / frustumCulled stay
+    // exactly as they were: the camera's instanced sweep and every raycaster
+    // read the mesh's own (lazily computed) sphere, and must go on reading it.
+    if (!this.geo.boundingSphere) this.geo.computeBoundingSphere();
+    const gs = this.geo.boundingSphere;
+    this.geoR = gs.center.length() + gs.radius;
+    this.bounds = new THREE.Sphere();
     m.frustumCulled = false;
+    const bounds = this.bounds;
+    m.onBeforeRender = (r, s, cam, geo) => { geo.drawRange.count = cullPass(cam, bounds, r) ? -1 : Infinity; };
+    m.onAfterRender = (r, s, cam, geo) => { geo.drawRange.count = Infinity; };
+    m.onBeforeShadow = (r, o, cam, shadowCam, geo) => { geo.drawRange.count = cullPass(shadowCam, bounds, r) ? -1 : Infinity; };
+    m.onAfterShadow = (r, o, cam, shadowCam, geo) => { geo.drawRange.count = Infinity; };
     m.castShadow = !!this.opts.cast;
     m.receiveShadow = this.opts.receive !== false;
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -98,9 +130,40 @@ export class Pool {
   }
   sync() {
     const m = this.mesh; if (!m) return;
-    const nodes = this.nodes;
-    for (let i = 0; i < nodes.length; i++) m.setMatrixAt(i, nodes[i].matrixWorld);
-    m.instanceMatrix.needsUpdate = true;
+    const nodes = this.nodes, arr = m.instanceMatrix.array;
+    // Copy each bone's matrixWorld in, noting whether anything actually moved
+    // (a pool of cats the animation LOD skipped this frame uploads nothing), and
+    // fit the live bounds: translation box + the largest axis scale, ignoring
+    // instances folded to nothing.
+    let changed = false, live = 0, s2max = 0;
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < nodes.length; i++) {
+      const e = nodes[i].matrixWorld.elements, o = i * 16;
+      for (let k = 0; k < 16; k++) {
+        const v = Math.fround(e[k]);
+        if (arr[o + k] !== v) { arr[o + k] = v; changed = true; }
+      }
+      const sa = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
+      const sb = e[4] * e[4] + e[5] * e[5] + e[6] * e[6];
+      const sc = e[8] * e[8] + e[9] * e[9] + e[10] * e[10];
+      const s2 = sa > sb ? (sa > sc ? sa : sc) : (sb > sc ? sb : sc);
+      // folded away (scale ≤ 1e-3: the tiger parts by day, the fangs at 1e-4
+      // until the stripes come) or NaN: under a hundredth of a pixel, not drawn
+      if (!(s2 > 1e-6)) continue;
+      live++;
+      if (s2 > s2max) s2max = s2;
+      const x = e[12], y = e[13], z = e[14];
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (z < z0) z0 = z; if (z > z1) z1 = z;
+    }
+    if (changed) m.instanceMatrix.needsUpdate = true;
+    m.visible = live > 0;
+    if (live > 0) {
+      const hx = (x1 - x0) * 0.5, hy = (y1 - y0) * 0.5, hz = (z1 - z0) * 0.5;
+      this.bounds.center.set(x0 + hx, y0 + hy, z0 + hz);
+      this.bounds.radius = Math.sqrt(hx * hx + hy * hy + hz * hz) + this.geoR * Math.sqrt(s2max);
+    }
   }
   /** Repaint one instance at runtime (eye colour: house cat → tiger). */
   setColor(i, hex) {

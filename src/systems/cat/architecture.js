@@ -51,8 +51,8 @@ import { createInstanceCuller, triangleTiles } from '../terrain/instcull.js';
 //   · every district's bulk matte (the casting town masses) is drawn through
 //     the index runs of the 32 u tiles in view + the tiles its shadow needs
 //     (terrain/instcull.js) — same calls, a fraction of the triangles;
-//   · the six street PointLights become anchors of the shared constant LAMP
-//     POOL (terrain/lamppool.js);
+//   · (both tiers since Contract J) the six street lamps are anchors of the
+//     shared constant LAMP POOL (terrain/lamppool.js), not PointLights;
 //   · the additive night spill is culled and skipped entirely by day;
 //   · shadows come from the buildings only — the town-wide ironwork pool and
 //     the small animated parts (signs, vanes, clock hands) do not cast;
@@ -72,7 +72,7 @@ export function create(ctx) {
   group.name = 'catArchitecture';
   ctx.scene.add(group);
   const MOBILE = !!ctx.state?.mobile;
-  const lampPool = MOBILE ? getLampPool(ctx, 3) : null;
+  const lampPool = getLampPool(ctx);   // 3 slots on mobile, 9 on desktop (the pool decides)
 
   const atlas = new SignAtlas(2048);
   const kit = new Kit();
@@ -142,8 +142,9 @@ export function create(ctx) {
     }),
   };
 
-  // mobile: an additive decal needs no back-face pass (one draw, not two)
-  if (MOBILE) mats.spill.forceSinglePass = true;
+  // an additive decal needs no back-face pass (one draw, not two) — both tiers
+  // since Contract J (A/B-diffed: 0 px at cat_night)
+  mats.spill.forceSinglePass = true;
 
   // ── the shared authoring context handed to every district ──────────────────
   const T = {
@@ -228,15 +229,9 @@ export function create(ctx) {
     // ── night lights (budget: 6) ─────────────────────────────────────────────
     light(x, y, z, color = 0xffb055, intensity = 1, dist = 26) {
       if (lights.length >= 6) return null;
-      if (lampPool) {
-        const a = lampPool.add({ x, y, z, color, dist, decay: 1.5 });
-        a.peak = intensity; lights.push(a);
-        return null;
-      }
-      const L = new THREE.PointLight(color, 0, dist, 1.5);
-      L.position.set(x, y, z);
-      L.userData.peak = intensity;
-      group.add(L); lights.push(L); return L;
+      const a = lampPool.add({ x, y, z, color, dist, decay: 1.5 });
+      a.peak = intensity; lights.push(a);
+      return null;
     },
 
     // ── animation ────────────────────────────────────────────────────────────
@@ -517,13 +512,17 @@ export function create(ctx) {
   // ── mobile packaging (see the header) ─────────────────────────────────────
   const spillMeshes = [];
   const roomDetail = [];      // { room, meshes, shown }
+  // Both tiers (the desktop half since Contract J): the additive night spill is
+  // frustum-culled (its bounds are exact — the kit used to leave it unculled, so
+  // it drew 2 calls from Candyland), and skipped entirely by day, when additive
+  // × opacity 0 adds exactly nothing to the frame.
+  group.traverse((o) => {
+    if (o.isMesh && o.material === mats.spill) { o.frustumCulled = true; spillMeshes.push(o); }
+  });
   if (MOBILE) {
     for (const m of out.meshes) {
       if (m.material === mats.metal) m.castShadow = false;
     }
-    group.traverse((o) => {
-      if (o.isMesh && o.material === mats.spill) { o.frustumCulled = true; spillMeshes.push(o); }
-    });
     for (const r of rooms) {
       const list = out.meshes.filter((m) => m.name === 'cat_int_' + r.id + '_matte');
       if (!list.length) continue;
@@ -690,12 +689,10 @@ export function create(ctx) {
         // the fadeable shells own private copies of whatever they use: keep the
         // night glow on those in step with the town-wide originals
         for (const sh of shells) for (const k in sh.clones) if (mats[k].emissiveIntensity !== undefined) sh.clones[k].emissiveIntensity = mats[k].emissiveIntensity;
-        if (lampPool) { for (const a of lights) a.level = a.peak * ev * 34; }
-        else for (const L of lights) L.intensity = L.userData.peak * ev * 34;
-        // mobile: additive spill × opacity 0 is invisible by day — skip the draw
+        for (const a of lights) a.level = a.peak * ev * 34;
+        // additive spill × opacity 0 is invisible by day — skip the draw
         for (let i = 0; i < spillMeshes.length; i++) spillMeshes[i].visible = ev > 0.004;
       }
-      if (lampPool) lampPool.update(dt);
       // mobile: interior furniture only while the room can be seen into
       // (edge-triggered, so the camera's own per-mesh culling is never fought)
       for (let i = 0; i < roomDetail.length; i++) {

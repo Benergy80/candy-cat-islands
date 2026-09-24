@@ -1669,9 +1669,15 @@ export function create(ctx) {
   // Main Street empty at ten o'clock".
   const crowd = cats.filter((c) => c.spec.crowd);
   function applyCrowd(cat) {
-    const s = (cat.spec.size ?? 1) * (1 - (cat.hideK || 0));
-    cat.rig.root.scale.setScalar(Math.max(s, 1e-4));
-    cat.rig.root.updateMatrixWorld(true);
+    const s = Math.max((cat.spec.size ?? 1) * (1 - (cat.hideK || 0)), 1e-4);
+    // The root keeps its scale between frames and the animator already rebuilt
+    // the bone matrices with it; only a CHANGED scale needs the whole cat
+    // re-multiplied (this used to run ~40 matrix updates per crowd cat per frame).
+    const root = cat.rig.root;
+    if (root.scale.x !== s || root.scale.y !== s || root.scale.z !== s) {
+      root.scale.setScalar(s);
+      root.updateMatrixWorld(true);
+    }
     if (cat.entry) cat.entry.enabled = (cat.hideK || 0) < 0.5;
   }
 
@@ -1835,9 +1841,9 @@ export function create(ctx) {
     // rank the tigers by distance so only the nearest few actually hunt
     const pp = ctx.systems.player?.position;
     if (pp) {
-      const live = [];
+      const live = rankList; live.length = 0;
       for (const c of cats) { c.huntRank = 99; if (c.tigerK > 0.5) live.push(c); }
-      live.sort((a, b) => ((a.x - pp.x) ** 2 + (a.z - pp.z) ** 2) - ((b.x - pp.x) ** 2 + (b.z - pp.z) ** 2));
+      if (live.length) { sortPX = pp.x; sortPZ = pp.z; live.sort(byPlayerDist); }
       for (let i = 0; i < live.length; i++) live[i].huntRank = i;
     }
 
@@ -2020,6 +2026,36 @@ export function create(ctx) {
 
   // ── update ─────────────────────────────────────────────────────────────────
   let noteT = 0, zT = 0, lastHour = null;
+  const liveTigers = [], rankList = [];
+  let sortPX = 0, sortPZ = 0;
+  const byPlayerDist = (a, b) => ((a.x - sortPX) ** 2 + (a.z - sortPZ) ** 2) - ((b.x - sortPX) ** 2 + (b.z - sortPZ) ** 2);
+
+  // ── ANIMATION LOD (Contract J frame-rate pass) ─────────────────────────────
+  // catCitizens was the most expensive update() in the game (1.4–1.75 ms a
+  // frame): every one of ~68 cats decided, moved, settled, posed and rebuilt
+  // ~40 bone matrices every frame, visible or not. Now a cat the lens cannot
+  // see thinks and poses at LOD_OFF_DT, one beyond LOD_NEAR of the lens at
+  // LOD_FAR_DT, and the rest every frame; a skipped cat banks its dt and gets
+  // it all at its next update (movement, timers and damping are dt-driven, so
+  // it arrives where it would have). Anything within LOD_KEEP of the visitor
+  // (talk, look-at, the catch, the hunt) is never skipped. OFF under ?shot:
+  // the render harness teleports the lens every view (a stale frustum would
+  // skip cats that are about to be on screen) and its frames must stay
+  // step-for-step identical to the full-rate simulation.
+  const LOD_NEAR = 60, LOD_KEEP = 15;
+  const LOD_FAR_DT = 1 / 30, LOD_OFF_DT = 1 / 10;
+  const LOD_R = 6;                               // bounding radius: a tiger + its low-sun shadow
+  const _lodFrus = new THREE.Frustum(), _lodPM = new THREE.Matrix4(), _lodS = new THREE.Sphere();
+  function lodInterval(cat, d2p) {
+    if (d2p < LOD_KEEP * LOD_KEEP) return 0;
+    if (T.carrying && T.carrying.cat === cat) return 0;
+    if (cat.hideK >= 1) return LOD_OFF_DT;       // a crowd cat gone indoors for the night
+    _lodS.center.set(cat.x, cat.y + 0.8, cat.z); _lodS.radius = LOD_R;
+    if (!_lodFrus.intersectsSphere(_lodS)) return LOD_OFF_DT;
+    const cp = ctx.camera.position;
+    const dx = cat.x - cp.x, dz = cat.z - cp.z;
+    return dx * dx + dz * dz > LOD_NEAR * LOD_NEAR ? LOD_FAR_DT : 0;
+  }
   const api = {
     group, cats, pools: lib.pools, materials: lib.materials,
     get count() { return cats.length; },
@@ -2246,12 +2282,28 @@ export function create(ctx) {
       // and nobody catches him (nor mid-dodge-roll, i-frames are i-frames)
       const star = !!ctx.systems.powerups?.active;
       const safe = star || !!ctx.systems.player?.invulnerable;
-      for (const cat of cats) {
+      const cam = ctx.camera;
+      _lodPM.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+      _lodFrus.setFromProjectionMatrix(_lodPM);
+      for (let ci = 0; ci < cats.length; ci++) {
+        const cat = cats[ci];
         const d2 = (cat.x - player.x) ** 2 + (cat.z - player.z) ** 2;
         cat.lookAt = d2 < 225 ? player : null;
         cat.nearCam = d2 < 4900;
         if (star) starReact(cat, d2, player);
-        updateCat(cat, dt, ctx, S);           // decide → move → settle (pushOut + ground) → pose
+        // animation LOD: bank the time and skip this cat (see LOD_NEAR above).
+        // The first skip is staggered by the cat's index so the far crowd does
+        // not all land on the same frame.
+        const iv = star || ctx.shot ? 0 : lodInterval(cat, d2);
+        if (cat.lodAcc === undefined) cat.lodAcc = iv > 0 ? ((ci * 0.37) % 1) * iv : 0;
+        cat.lodAcc += dt;
+        if (iv > 0 && cat.lodAcc < iv - 1e-6) {
+          if (cat.plan && cat.plan.catch && !T.carrying && d2 < 5.0 && S.elapsed > T.graceUntil && !safe) startCarry(cat);
+          continue;
+        }
+        const cdt = Math.min(cat.lodAcc, 0.25);
+        cat.lodAcc = 0;
+        updateCat(cat, cdt, ctx, S);          // decide → move → settle (pushOut + ground) → pose
         // a kitten that keeps running into the same bench: the game moves on
         if (cat.sched === 'kitten' && cat.bumpT > 1.5 && S.kittenT > 0.5) { S.kittenT = 0; cat.bumpT = 0; }
         cat.pos.set(cat.x, cat.y, cat.z);
@@ -2287,11 +2339,11 @@ export function create(ctx) {
       // after that there are no lanterns, only tigers, so the light pools
       // around the two nearest ones and their eyes do the rest.
       if (night > 0.12) {
-        const src = striped
-          ? cats.filter((c) => c.tigerK > 0.5)
-          : lanternCats;
-        const carriers = src.sort((a, b) =>
-          ((a.x - player.x) ** 2 + (a.z - player.z) ** 2) - ((b.x - player.x) ** 2 + (b.z - player.z) ** 2));
+        // (reused list + comparator: this ran a filter and a fresh closure every night frame)
+        let src = lanternCats;
+        if (striped) { liveTigers.length = 0; for (const c of cats) if (c.tigerK > 0.5) liveTigers.push(c); src = liveTigers; }
+        sortPX = player.x; sortPZ = player.z;
+        const carriers = src.sort(byPlayerDist);
         for (let i = 0; i < lampLights.length; i++) {
           const c = carriers[i], L = lampLights[i];
           if (c && (c.x - player.x) ** 2 + (c.z - player.z) ** 2 < 3600) {

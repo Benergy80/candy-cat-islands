@@ -101,11 +101,14 @@ vec2 tRippleLod(vec2 w, float t, float fp, float amp){
   // per-octave gains: the coarse layers carry a little more so the far field
   // keeps a swell-like roll rather than going glassy
   float a5 = w5 * 0.62, a4 = w4 * 0.85, a3 = w3 * 1.00, a2 = w2 * 1.10, a1 = w1 * 1.20;
-  vec2 g = tRipOct(w, t, 1.85, vec2(-0.101, 0.074), 0.0) * a5
-         + tRipOct(w, t, 0.78, vec2(0.062, -0.048), 5.3) * a4
-         + tRipOct(w, t, 0.33, vec2(-0.041, 0.027), 11.9) * a3
-         + tRipOct(w, t, 0.135, vec2(0.022, 0.018), 23.1) * a2
-         + tRipOct(w, t, 0.055, vec2(-0.012, 0.009), 37.7) * a1;
+  // an octave tResolve has retired (weight exactly 0) adds exactly 0: skip its
+  // two noise lookups (Contract J — the far half of every water body)
+  vec2 g = vec2(0.0);
+  if (a5 > 0.0) g += tRipOct(w, t, 1.85, vec2(-0.101, 0.074), 0.0) * a5;
+  if (a4 > 0.0) g += tRipOct(w, t, 0.78, vec2(0.062, -0.048), 5.3) * a4;
+  if (a3 > 0.0) g += tRipOct(w, t, 0.33, vec2(-0.041, 0.027), 11.9) * a3;
+  if (a2 > 0.0) g += tRipOct(w, t, 0.135, vec2(0.022, 0.018), 23.1) * a2;
+  if (a1 > 0.0) g += tRipOct(w, t, 0.055, vec2(-0.012, 0.009), 37.7) * a1;
   // constant RMS: independent octaves add in quadrature
   float norm = sqrt(a5 * a5 + a4 * a4 + a3 * a3 + a2 * a2 + a1 * a1);
   return g * (amp / max(norm, 0.30));
@@ -121,11 +124,14 @@ vec2 tRippleLod(vec2 w, float t, float fp, float amp){
 // straight across the bay. Returns -1..1 plus the surface gradient of the field.
 float tCrestLines(vec2 w, float t, float fp, vec2 dir, out vec2 g){
   float n = tFbm(w * 0.042);
-  float n2 = tFbm(w * 0.145 + 3.7);
   vec2 d2 = normalize(dir + vec2(-dir.y, dir.x) * (n - 0.5) * 1.1);
   float s = dot(w, d2);
   float wA = tResolve(fp, 1.05), wB = tResolve(fp, 0.42), wC = tResolve(fp, 0.17);
-  float pa = s * 6.60 + n2 * 7.4 + t * 1.45;
+  // n2 only ever reaches the result through pa, and pa only through wA: once
+  // the finest layer has retired (wA exactly 0) sin(pa)·wA and cos(pa)·wA are
+  // exactly 0 whatever pa is — skip its four lookups (Contract J: the far field)
+  float pa = 0.0;
+  if (wA > 0.0) pa = s * 6.60 + tFbm(w * 0.145 + 3.7) * 7.4 + t * 1.45;
   float pb = s * 2.64 + n * 11.0 - t * 0.85;
   float pc = s * 1.07 + n * 7.0 + t * 0.45;
   float nr = max(wA + wB + wC, 0.25);
@@ -174,8 +180,13 @@ float tGlintBand(vec3 wpos, vec3 camPos, vec3 sunDir){
 // 3.6-cycle lattice is invisible mush past ~40 u, so the glitter road used to
 // stop existing exactly where the game camera sees the sea.
 vec3 tSunGlint(vec3 wpos, vec3 n, vec3 camPos, vec3 sunDir, vec3 sunCol, float t, float sharp, float gain){
-  vec3 V = normalize(camPos - wpos);
+  // the whole term is multiplied by gain and sunUp: when either is exactly 0
+  // (the moon glint by day, the sun glint at night) it is exactly 0 — return
+  // before three noise lookups and the band (Contract J)
+  if (gain <= 0.0) return vec3(0.0);
   vec3 L = normalize(sunDir);
+  if (L.y <= -0.14) return vec3(0.0);
+  vec3 V = normalize(camPos - wpos);
   float sunUp = smoothstep(-0.14, 0.04, L.y);   // a LOW sun is when a glitter road is strongest
   vec3 Hv = normalize(V + L);
   float nh = max(dot(n, Hv), 0.0);
@@ -185,12 +196,18 @@ vec3 tSunGlint(vec3 wpos, vec3 n, vec3 camPos, vec3 sunDir, vec3 sunCol, float t
   // paints the whole bay in soft grey cloud blotches (it reads as dirty water,
   // not as shine). The narrow core is what actually glints.
   float spec = pow(nh, sharp) * 6.0 + pow(nh, sharp * 0.22) * 0.26;
-  float fp = tFootprint(wpos);
-  float sA = tResolve(fp, 3.20), sB = tResolve(fp, 1.10), sC = tResolve(fp, 0.34);
-  float sparkle = (smoothstep(0.34, 0.80, tVNoise(wpos.xz * 3.20 - vec2(t * 0.30, t * 0.19))) * sA
-                 + smoothstep(0.42, 0.84, tVNoise(wpos.xz * 1.10 + vec2(t * 0.14, -t * 0.085))) * sB
-                 + smoothstep(0.46, 0.88, tVNoise(wpos.xz * 0.34 + vec2(-t * 0.06, t * 0.04))) * sC)
-                / max(sA + sB + sC, 0.30);
+  // off the glitter road (band exactly 0 — most of any frame) the sparkle is
+  // multiplied by 0: skip its three lookups (Contract J; the same expression
+  // with band = 0, so the pixel is unchanged)
+  float sparkle = 0.0;
+  if (band > 0.0) {
+    float fp = tFootprint(wpos);
+    float sA = tResolve(fp, 3.20), sB = tResolve(fp, 1.10), sC = tResolve(fp, 0.34);
+    sparkle = (smoothstep(0.34, 0.80, tVNoise(wpos.xz * 3.20 - vec2(t * 0.30, t * 0.19))) * sA
+             + smoothstep(0.42, 0.84, tVNoise(wpos.xz * 1.10 + vec2(t * 0.14, -t * 0.085))) * sB
+             + smoothstep(0.46, 0.88, tVNoise(wpos.xz * 0.34 + vec2(-t * 0.06, t * 0.04))) * sC)
+            / max(sA + sB + sC, 0.30);
+  }
   return sunCol * sunUp * gain * (spec * (0.10 + 0.90 * band) + band * sparkle * 1.15);
 }
 // Fresnel sky tint. Water is a mirror at grazing angles; this is what stops the
@@ -224,7 +241,7 @@ export function patchMaterial(material, opts = {}) {
   const {
     uniforms = {}, vertexHead = '', vertexBody = '', fragmentHead = '',
     fragmentColor = '', fragmentRough = '', fragmentNormal = '', fragmentEmissive = '',
-    key = 'terrain-' + (patchId++),
+    key = 'terrain-' + (patchId++), noPointLights = false, noShadowReceive = false,
   } = opts;
   material.userData.uniforms = uniforms;
   material.onBeforeCompile = (shader) => {
@@ -236,6 +253,22 @@ export function patchMaterial(material, opts = {}) {
     if (fragmentRough) shader.fragmentShader = shader.fragmentShader.replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n' + fragmentRough);
     if (fragmentNormal) shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + fragmentNormal);
     if (fragmentEmissive) shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + fragmentEmissive);
+    // Light-loop code a surface can never use (Contract J — the sea's; see
+    // water.js). Skipped code still costs a heavy shader registers, so these
+    // take it out of the program instead of branching round it:
+    //   noPointLights   — a twin with no point-light loop at all: only ever
+    //                     drawn when no lit point light can reach it;
+    //   noShadowReceive — a mesh with receiveShadow = false multiplies every
+    //                     light by exactly 1.0 instead of its shadow, so the
+    //                     directional-shadow lookups are dead code for it.
+    // Either way the frame is the same frame.
+    if (noPointLights || noShadowReceive) {
+      let lb = THREE.ShaderChunk.lights_fragment_begin;
+      const cut = (on, why) => { if (lb.includes(on)) lb = lb.replace(on, '#if 0 /* ' + why + ' */'); else console.warn('[terrain] light-loop trim "' + why + '": three chunk changed, not applied'); };
+      if (noPointLights) cut('#if ( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )', 'no point lights');
+      if (noShadowReceive) cut('#if defined( USE_SHADOWMAP ) && ( UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS )', 'never receives shadows');
+      shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_begin>', lb);
+    }
     material.userData.shader = shader;
   };
   material.customProgramCacheKey = () => key;
@@ -282,6 +315,48 @@ export function bakeField(world) {
   tex.wrapS = THREE.ClampToEdgeWrapping; tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.generateMipmaps = false; tex.needsUpdate = true;
   return { tex, rect: new THREE.Vector4(x0, z0, x1 - x0, z1 - z0) };
+}
+
+/**
+ * A lower bound on the distance (world units) from any point to the nearest
+ * fragment the SEA MESH can draw. `mark(x0, z0, x1, z1)` is handed to the
+ * caller (water.js), which marks the xz box of every sea quad it keeps; the
+ * query is a chamfer transform over those cells at the baked field's
+ * resolution. Outside the field rect it is open sea (0). The lamp pool uses it
+ * to know when no lit lamp can reach the water (see terrain/lamppool.js).
+ */
+export function seaDistance(build) {
+  const { x0, x1, z0, z1, w, h } = FIELD_RECT;
+  const cw = (x1 - x0) / w, ch = (z1 - z0) / h, diag = Math.hypot(cw, ch);
+  const INF = 1e9, d = new Float32Array(w * h).fill(INF);
+  build((ax, az, bx, bz) => {
+    const i0 = Math.max(0, Math.floor((ax - x0) / cw)), i1 = Math.min(w - 1, Math.floor((bx - x0) / cw));
+    const j0 = Math.max(0, Math.floor((az - z0) / ch)), j1 = Math.min(h - 1, Math.floor((bz - z0) / ch));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) d[j * w + i] = 0;
+  });
+  // the sea runs on past the field's edge
+  for (let i = 0; i < w; i++) { d[i] = 0; d[(h - 1) * w + i] = 0; }
+  for (let j = 0; j < h; j++) { d[j * w] = 0; d[j * w + w - 1] = 0; }
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+    const k = j * w + i; let v = d[k];
+    if (i > 0) v = Math.min(v, d[k - 1] + cw);
+    if (j > 0) { v = Math.min(v, d[k - w] + ch); if (i > 0) v = Math.min(v, d[k - w - 1] + diag); if (i < w - 1) v = Math.min(v, d[k - w + 1] + diag); }
+    d[k] = v;
+  }
+  for (let j = h - 1; j >= 0; j--) for (let i = w - 1; i >= 0; i--) {
+    const k = j * w + i; let v = d[k];
+    if (i < w - 1) v = Math.min(v, d[k + 1] + cw);
+    if (j < h - 1) { v = Math.min(v, d[k + w] + ch); if (i < w - 1) v = Math.min(v, d[k + w + 1] + diag); if (i > 0) v = Math.min(v, d[k + w - 1] + diag); }
+    d[k] = v;
+  }
+  // an 8-neighbour chamfer over-states a Euclidean distance by ≤ 8.3% (× 0.92),
+  // and the query point and the nearest sea point each sit anywhere in their
+  // cells (− one cell diagonal): what is left is a true lower bound
+  return (x, z) => {
+    if (x <= x0 || x >= x1 || z <= z0 || z >= z1) return 0;
+    const i = Math.min(w - 1, Math.floor((x - x0) / cw)), j = Math.min(h - 1, Math.floor((z - z0) / ch));
+    return Math.max(0, d[j * w + i] * 0.92 - diag);
+  };
 }
 
 /**

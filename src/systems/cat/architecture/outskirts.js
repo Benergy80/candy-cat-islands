@@ -1046,6 +1046,7 @@ export function buildWatchtower(T) {
   const beamMat = new THREE.MeshBasicMaterial({
     color: 0xffd88a, vertexColors: true, transparent: true, opacity: 0.0,
     depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    forceSinglePass: true,   // additive: one pass is the same picture (Contract J)
   });
   const beam = new THREE.Mesh(beamGeo, beamMat);
   beam.position.set(LX, topY + 2.3, LZ);
@@ -1069,7 +1070,7 @@ export function buildWatchtower(T) {
     spotPool.visible = beam.visible;
     spotMat.opacity = ev * 0.5;
   });
-  const spotMat = new THREE.MeshBasicMaterial({ map: T.blob, color: 0xffcf82, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+  const spotMat = new THREE.MeshBasicMaterial({ map: T.blob, color: 0xffcf82, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true });
   const spotPool = new THREE.Mesh(new THREE.PlaneGeometry(15, 22).rotateX(-Math.PI / 2), spotMat);
   spotPool.frustumCulled = false; spotPool.renderOrder = 7;
   T.group.add(spotPool);

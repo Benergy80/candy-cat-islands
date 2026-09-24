@@ -288,15 +288,9 @@ export function buildCupcake(A) {
     // this one burns constantly (the village gives up a lamp to pay for it).
     const glx = X + Math.cos(BITE_A) * (CRAD(0, 0.55) + 2.0);
     const glz = Z + Math.sin(BITE_A) * (CRAD(0, 0.55) + 2.0);
-    if (A.lampPool) {
-      // mobile tier: a constant anchor of the shared lamp pool (always lit, so
-      // it holds a slot whenever you are near the cupcake)
-      A.lampPool.add({ x: glx, y: y + 5.4, z: glz, color: 0xffca82, dist: 21, decay: 2 }).level = 58;
-    } else {
-      const craterLight = new A.THREE.PointLight(0xffca82, 58, 21, 2);
-      craterLight.position.set(glx, y + 5.4, glz);
-      A.addObject(craterLight);
-    }
+    // a constant anchor of the shared lamp pool (always lit, so it holds a
+    // slot whenever its light can reach the frame) — both tiers
+    A.lampPool.add({ x: glx, y: y + 5.4, z: glz, color: 0xffca82, dist: 21, decay: 2 }).level = 58;
     // and a hot ember line along the lower jam seam, so the glow has a source
     for (let i = 0; i <= 6; i++) {
       const u = -0.86 + (1.72 * i) / 6, a = BITE_A + u * BITE_HW;

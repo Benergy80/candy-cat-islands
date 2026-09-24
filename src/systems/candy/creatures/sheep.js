@@ -4,7 +4,7 @@
 // comes bouncing. Nobody has ever seen the shepherd.
 import * as THREE from 'three';
 import { rng, hash } from '../../../core/util.js';
-import { Pool, part, mergeParts, shadeAxis, TAU, walkable, turnToward, wrapAngle, uiToast, uiSay, HIT, WET } from './common.js';
+import { Pool, part, mergeParts, shadeAxis, TAU, walkable, turnToward, wrapAngle, uiToast, uiSay, HIT, WET, LOD } from './common.js';
 
 // Contract A body (units of the sheep's scale): a pivot circle as wide as the
 // splayed hooves, plus a nose probe and a tail probe — a sheep is ~2.2 scale
@@ -266,8 +266,11 @@ export function create(env) {
           if (s.mode === 'home' || s.mode === 'sleep') { s.mode = 'graze'; s.timer = 1 + r() * 4; }
         }
       }
+      const dtFrame = dt;
       for (let i = 0; i < N; i++) {
         const s = flock[i];
+        const dt = LOD.step(s, dtFrame, s.x, s.y, s.z, 3);   // animation LOD (common.js)
+        if (!dt) continue;
         s.bell = Math.max(0, s.bell - dt);
         s.hop = Math.max(0, s.hop - dt * 1.8);
         const settled = s.mode === 'home' || s.mode === 'sleep';

@@ -635,14 +635,25 @@ export function create(ctx) {
     // A material with its own shader patch (a held weapon's glow, say) would
     // lose it in a clone, and sharing the patch could steal its owner's uniform
     // handle. Leave those alone: the body is what needs to shine.
-    if (Object.prototype.hasOwnProperty.call(m, 'onBeforeCompile')) return null;
+    // The visitor's own body material (player/visitor.js, one skinned mesh) is
+    // the exception: it opts in with userData.flashChain, its patch runs first
+    // and ours after it, and the clone shares its uniforms (night glow).
+    if (m.userData?.powerupFlash) return null;              // already one of ours
+    const chain = !!m.userData?.flashChain;
+    if (!chain && Object.prototype.hasOwnProperty.call(m, 'onBeforeCompile')) return null;
     let c = flash.clones.get(m);
     if (!c) {
       c = m.clone();
       c.name = (m.name || 'visitor') + '_starflash';
       c.userData = { ...m.userData, powerupFlash: true };
-      c.onBeforeCompile = rimPatch;
-      c.customProgramCacheKey = rimKey;
+      if (chain) {
+        const base = m.onBeforeCompile, baseKey = m.customProgramCacheKey.bind(m);
+        c.onBeforeCompile = (sh, r) => { base.call(m, sh, r); rimPatch(sh); };
+        c.customProgramCacheKey = () => baseKey() + '|' + rimKey();
+      } else {
+        c.onBeforeCompile = rimPatch;
+        c.customProgramCacheKey = rimKey;
+      }
       flash.clones.set(m, c);
       flash.cloneList.push({ orig: m, clone: c });
     }
@@ -686,13 +697,15 @@ export function create(ctx) {
     const proxy = new THREE.Scene();
     const done = new Set();
     g.traverse((o) => {
-      if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || o.userData?.silhouette) return;
+      if (!o.isMesh || o.isInstancedMesh || o.userData?.silhouette) return;
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of mats) {
         const c = flashMaterial(m);
         if (!c || done.has(c)) continue;
         done.add(c);
-        const pm = new THREE.Mesh(o.geometry, c);
+        // the visitor is one SkinnedMesh now: compile the skinned variant
+        const pm = o.isSkinnedMesh ? new THREE.SkinnedMesh(o.geometry, c) : new THREE.Mesh(o.geometry, c);
+        if (o.isSkinnedMesh) pm.bind(o.skeleton, o.bindMatrix);
         pm.castShadow = o.castShadow; pm.receiveShadow = o.receiveShadow;
         proxy.add(pm);
       }

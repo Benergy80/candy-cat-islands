@@ -60,6 +60,10 @@ const K_NONE = 0, K_SOLID = 1, K_TALL = 2, K_LOW = 3;
 export const KINDS = ['none', 'solid', 'tall', 'low'];
 export const CLEAR = 0.1;                                   // feet this close under a top have cleared it
 
+// Object.is, written out so it inlines: the builtin boxed both numbers on every
+// call (the rolling sweep + every narrow-phase refresh: KBs of garbage a frame).
+const sameValue = (a, b) => (a === b ? (a !== 0 || 1 / a === 1 / b) : (a !== a && b !== b));
+
 export function createGroundCore(ctx, world, opts = {}) {
   const LAKE = world.LAKE;
   const SEA_WADE = opts.seaWade ?? 0.85, LAKE_WADE = opts.lakeWade ?? 0.32;
@@ -97,13 +101,13 @@ export function createGroundCore(ctx, world, opts = {}) {
   }
   let _deck = false;
 
-  const boundR = (c) => c.box ? 0.5 * Math.hypot(c.w || 0, c.d || 0) : (c.r || 0);
+  const boundR = (c) => { if (!c.box) return c.r || 0; const w = c.w || 0, d = c.d || 0; return 0.5 * Math.sqrt(w * w + d * d); };   // (Math.hypot allocates)
 
   /** Classify one collider (cached on the object). */
   function classify(c) {
     const h = c.h;
     let m = meta.get(c);
-    if (m && Object.is(m.h, h)) return m;
+    if (m && sameValue(m.h, h)) return m;
     if (!m) { m = { h, kind: K_SOLID, top: NaN, rel: 0, base: 0, lo: 0, vis: NaN, ghost: false }; meta.set(c, m); }
     m.h = h; m.top = NaN; m.rel = 0; m.base = 0; m.lo = 0; m.vis = NaN; m.ghost = false; stats.reclassified++;
     if (typeof h !== 'number' || h !== h) { m.kind = K_SOLID; return m; }
@@ -285,7 +289,7 @@ export function createGroundCore(ctx, world, opts = {}) {
       const c = cols[i];
       if (c !== ref[i]) { dirty = true; return; }
       if (!c) continue;
-      if (!Object.is(c.h, hSeen[i])) apply(i, c, classify(c));
+      if (!sameValue(c.h, hSeen[i])) apply(i, c, classify(c));
       const br = boundR(c);
       if (c.x === insX[i] && c.z === insZ[i] && br <= insB[i]) continue;
       // moved or grew: harmless if it is still inside the square it was binned in,
@@ -316,7 +320,7 @@ export function createGroundCore(ctx, world, opts = {}) {
     }
     return Math.sqrt(dx * dx + dz * dz) - (c.r || 0);
   }
-  function refresh(i, c) { if (!Object.is(c.h, hSeen[i])) apply(i, c, classify(c)); }
+  function refresh(i, c) { if (!sameValue(c.h, hSeen[i])) apply(i, c, classify(c)); }
 
   // ── groundAt ───────────────────────────────────────────────────────────────
   const scratch = { h: 0, deck: false, water: 0, limit: SEA_WADE, floor: 0, prop: null, top: 0, base: 0 };

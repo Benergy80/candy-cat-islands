@@ -22,7 +22,7 @@
 import * as THREE from 'three';
 import { rng, hash } from '../../../core/util.js';
 import { CANDY } from '../../../core/palette.js';
-import { Pool, part, mergeParts, shadeAxis, uiSay, turnToward } from './common.js';
+import { Pool, part, mergeParts, shadeAxis, uiSay, turnToward, LOD } from './common.js';
 import { flowerBeds } from './flowers.js';
 
 // Contract A body, in units of the ant's scale (scale 1 = a 1 u long ant):
@@ -478,9 +478,18 @@ export function create(env) {
 
   const HILL_R = 1.25, HILL_H = 0.85, HILL_SLOPE = HILL_H / HILL_R;
   const counters = { dodging: 0, waiting: 0, blocked: 0 };
+  // animation LOD (common.js) for the column as ONE body: the queue is coupled
+  // ant to ant, so the whole highway steps together, at a lower rate when its
+  // bounding circle (hill ↔ crumbs + dodge room) is off screen or far away
+  let trailR = 8;
+  for (const [x, z] of TRAIL) trailR = Math.max(trailR, Math.hypot(x - (HILL[0] + CRUMBS[0]) / 2, z - (HILL[1] + CRUMBS[1]) / 2) + 6);
+  const lodC = { x: (HILL[0] + CRUMBS[0]) / 2, z: (HILL[1] + CRUMBS[1]) / 2, y: 0 };
+  lodC.y = world.height(lodC.x, lodC.z) + 0.5;
   return {
     name: 'ants', trailLength: LEN, loopLength: LOOP, spacing: SPACING, at, loopAt, column, bakeStats, samples, counters,
-    update(dt, ctx) {
+    update(dtFrame, ctx) {
+      const dt = LOD.step(lodC, dtFrame, lodC.x, lodC.y, lodC.z, trailR);
+      if (!dt) return;
       const t = ctx.state.elapsed;
       const night = 1 - (ctx.state.daylight ?? 1);
       const rejoin = Math.exp(-REJOIN * dt);

@@ -83,11 +83,13 @@ export function createMarkers(ctx, { cap = 48 } = {}) {
   const discMat = new THREE.MeshBasicMaterial({
     map: discTexture(), transparent: true, blending: THREE.AdditiveBlending,
     depthWrite: false, side: THREE.DoubleSide, fog: false,
+    forceSinglePass: true,              // additive: one pass is the same picture (three draws DoubleSide transparents twice)
     polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   });
   const shaftMat = new THREE.MeshBasicMaterial({
     map: shaftTexture(), transparent: true, blending: THREE.AdditiveBlending,
     depthWrite: false, side: THREE.DoubleSide, fog: false,
+    forceSinglePass: true,
   });
 
   let discs = null, shafts = null, capacity = 0;

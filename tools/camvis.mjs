@@ -1973,11 +1973,15 @@ function perfLib(n) {
   const g = window.game, ctx = g.ctx, c = ctx.systems.camera;
   const s = { n: 0, ms: [], sweep: [], target: n };
   const orig = c.update;
+  // a sweep frame = one whose update() ran the capsule sweep: the camera's own counter (sweepsDone) where it has
+  // one — occMs is timed at the browser's 0.1 ms clock grain, and a sweep the accelerator (camera/bvh.js) makes
+  // cheap often reads the same value twice running — else occMs changing, as before
+  const hasN = typeof c.sweepsDone === 'number';
   c.update = function (dt, cx) {
-    const o0 = c.occMs; const t = performance.now();
+    const o0 = hasN ? c.sweepsDone : c.occMs; const t = performance.now();
     orig.call(this, dt, cx);
     const ms = performance.now() - t;
-    if (s.n < s.target) { s.ms.push(ms); s.sweep.push(c.occMs !== o0); s.n++; }
+    if (s.n < s.target) { s.ms.push(ms); s.sweep.push((hasN ? c.sweepsDone : c.occMs) !== o0); s.n++; }
   };
   window.__cvPerf = s;
   let gl = '?'; try { const x = ctx.renderer.getContext(); const e = x.getExtension('WEBGL_debug_renderer_info'); gl = e ? x.getParameter(e.UNMASKED_RENDERER_WEBGL) : x.getParameter(x.RENDERER); } catch { /* keep ? */ }
@@ -2001,7 +2005,30 @@ async function acquire() {
     await new Promise((r) => setTimeout(r, 1000 + Math.random() * 1000));
   }
 }
-function release() { if (touchTimer) clearInterval(touchTimer); touchTimer = null; if (slot) { try { fs.rmSync(slot, { recursive: true, force: true }); } catch {} slot = null; } }
+function release() { if (touchTimer) clearInterval(touchTimer); touchTimer = null; if (slot) { try { fs.rmSync(slot, { recursive: true, force: true }); } catch {} slot = null; } for (const p of extra.splice(0)) { try { fs.rmSync(p, { recursive: true, force: true }); } catch {} } }
+// --script perf times the camera on hardware GL: it holds EVERY slot (as tools/fpsbench.mjs does), so no SwiftShader
+// render competes for the CPU while update() is timed (Contract J)
+// (all or nothing: it never sits on one slot waiting for another — two all-slot benches would deadlock)
+const extra = [];
+async function acquireAll() {
+  const t0 = Date.now();
+  while (true) {
+    const got = [];
+    for (let i = 0; i < MAX_SLOTS; i++) {
+      const p = path.join(lockDir, 'slot' + i);
+      try { const st = fs.statSync(p); if (Date.now() - st.mtimeMs > 6 * 60 * 1000) fs.rmSync(p, { recursive: true, force: true }); } catch {}
+      try { fs.mkdirSync(p); got.push(p); } catch {}
+    }
+    if (got.length === MAX_SLOTS) {
+      slot = got[0]; extra.push(...got.slice(1));
+      touchTimer = setInterval(() => { const t = new Date(); for (const p of [slot, ...extra]) { try { fs.utimesSync(p, t, t); } catch {} } }, 60000);
+      return;
+    }
+    for (const p of got) { try { fs.rmSync(p, { recursive: true, force: true }); } catch {} }
+    if (Date.now() - t0 > WAIT_MIN * 60 * 1000) throw new Error(`render slot wait (all slots) timed out after ${WAIT_MIN} min`);
+    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1500));
+  }
+}
 process.on('exit', release); process.on('SIGINT', () => { release(); process.exit(1); }); process.on('SIGTERM', () => { release(); process.exit(1); });
 
 /** --what-if noghost (header): serve the owner's file with the requested edit, before the page loads. */
@@ -2053,7 +2080,7 @@ if (typeof args.retable === 'string') {
   console.log(`retabled ${path.relative(root, jf)} + .md`);
   process.exit(0);
 }
-await acquire();
+if (PERF) await acquireAll(); else await acquire();
 const launchArgs = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'];
 let browser;
 try {
@@ -2091,7 +2118,7 @@ try {
     const mean = (a) => a.length ? +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(3) : null;
     const hwOk = !/swiftshader|software|llvmpipe/i.test(env.gl) && sw.length > 0;   // no sweep frame = the camera never ran (free)
     out.timing.userAgent = env.ua; out.timing.glRenderer = env.gl;
-    out.timing.perf = { view: 'cat_residential', frames: s.n, mean: mean(s.ms), p95: p95(s.ms), max: +Math.max(...s.ms).toFixed(3), sweepFrames: sw.length, sweepP95: p95(sw), nonSweepP95: p95(ns), hardwareGL: hwOk };
+    out.timing.perf = { view: 'cat_residential', frames: s.n, mean: mean(s.ms), p95: p95(s.ms), max: +Math.max(...s.ms).toFixed(3), sweepFrames: sw.length, sweepP95: p95(sw), nonSweepP95: p95(ns), sweepMax: sw.length ? +Math.max(...sw).toFixed(3) : null, hardwareGL: hwOk, load: os.loadavg().map((x) => +x.toFixed(2)), slots: 1 + extra.length };
     out.scripts.perf = { status: hwOk ? 'ok' : !sw.length ? 'no sweep frame in the window: the camera was not running (free / title) — not an A13 number' : 'measured on software GL — not an A13 number (run with --gl hw on the M1 Pro)',
       checks: [{ id: 'camMs p95 non-sweep ≤ 1.5 ms', value: p95(ns), op: '<=', limit: 1.5, pass: hwOk && p95(ns) <= 1.5 }, { id: 'camMs p95 sweep ≤ 6 ms', value: p95(sw), op: '<=', limit: 6, pass: hwOk && p95(sw) <= 6 }] };
     console.log('perf', JSON.stringify(out.timing.perf), env.gl);

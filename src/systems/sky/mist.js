@@ -102,6 +102,8 @@ export function createMist(world) {
   const material = new THREE.ShaderMaterial({
     uniforms, fog: false, transparent: true, depthWrite: false, depthTest: true,
     side: THREE.DoubleSide, blending: THREE.NormalBlending,
+    // two flat sheets seen from above: the back-face pass never draws a pixel
+    forceSinglePass: true,
     vertexShader: /* glsl */`
       attribute float aMask; attribute float aLayer;
       varying float vMask; varying float vDist; varying vec3 vW; varying float vL;

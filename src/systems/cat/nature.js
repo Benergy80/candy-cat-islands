@@ -961,10 +961,11 @@ export function create(ctx) {
   const matBlob = new THREE.MeshStandardMaterial({ color: 0x1d2a18, roughness: 1, metalness: 0, transparent: true, opacity: 0.3, depthWrite: false });
   const birds = createBirds(ctx, G.gGull(), G.gPigeon(), matBird, G.gBirdBlob(), matBlob);
   for (const m of birds.meshes) { group.add(m); instances += m.count; triangles += m.count * G.triCount(m.geometry); }
-  // Mobile: the birds and koi are written every frame and were never culled
-  // (they drew from Candyland). Fixed spheres around where they can ever be —
-  // the flocks' wheel + scatter radii, the pond — let three cull them normally.
-  if (MOBILE) {
+  // Both tiers (desktop since Contract J): the birds and koi are written every
+  // frame and were never culled (they drew from Candyland). Fixed spheres
+  // around where they can ever be — the flocks' wheel + scatter radii, the
+  // pond — let three cull them normally.
+  {
     const fence = (m, x, y, z, r) => { if (!m) return; m.boundingSphere = new THREE.Sphere(new THREE.Vector3(x, y, z), r); m.frustumCulled = true; };
     for (const m of birds.meshes) fence(m, 122, 14, 4, 125);
     if (koiMesh && props.meta.pond) fence(koiMesh, props.meta.pond.x, props.meta.pond.y, props.meta.pond.z, (props.meta.pond.r || 6) + 3);

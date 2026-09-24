@@ -163,6 +163,48 @@ export class Pool {
   get visible() { return this.mesh.visible; }
 }
 
+// ── animation LOD (Contract J frame-rate pass) ──────────────────────────────
+// The walkers (beetles, snails, sheep) each ran a full Contract-A ground.step
+// every frame wherever they were. A walker the lens cannot see now steps at
+// offDt, one beyond `near` of the lens at farDt, anything within `keep` of the
+// visitor every frame; a skipped walker banks its dt and integrates it all at
+// its next step (its pose and shadow simply hold). creatures.js calls
+// LOD.begin(ctx) once a frame. Off under ?shot (the harness teleports the lens
+// each view, and its frames stay identical to the full-rate simulation).
+const _lodF = new THREE.Frustum(), _lodM = new THREE.Matrix4(), _lodS = new THREE.Sphere();
+export const LOD = {
+  near: 60, keep: 15, farDt: 1 / 30, offDt: 1 / 10,
+  cx: 0, cz: 0, px: 1e9, pz: 1e9, off: false,
+  begin(ctx) {
+    this.off = !!ctx.shot;
+    const c = ctx.camera;
+    _lodM.multiplyMatrices(c.projectionMatrix, c.matrixWorldInverse);
+    _lodF.setFromProjectionMatrix(_lodM);
+    this.cx = c.position.x; this.cz = c.position.z;
+    const p = ctx.systems.player?.position;
+    this.px = p ? p.x : 1e9; this.pz = p ? p.z : 1e9;
+  },
+  interval(x, y, z, r) {
+    if (this.off) return 0;
+    const dpx = x - this.px, dpz = z - this.pz;
+    if (dpx * dpx + dpz * dpz < this.keep * this.keep) return 0;
+    _lodS.center.set(x, y, z); _lodS.radius = r;
+    if (!_lodF.intersectsSphere(_lodS)) return this.offDt;
+    const dx = x - this.cx, dz = z - this.cz, far = this.near + r;
+    return dx * dx + dz * dz > far * far ? this.farDt : 0;
+  },
+  /** Bank `dt` on walker `e`: the dt to integrate now, or 0 = skip this frame. */
+  step(e, dt, x, y, z, r) {
+    const iv = this.interval(x, y, z, r);
+    if (e._lod === undefined) e._lod = iv > 0 ? (Math.abs(x * 7.31 + z * 3.17) % 1) * iv : 0;   // staggered start
+    e._lod += dt;
+    if (iv > 0 && e._lod < iv - 1e-6) return 0;
+    const d = e._lod > 0.25 ? 0.25 : e._lod;
+    e._lod = 0;
+    return d;
+  },
+};
+
 // ── wing-flap vertex hook (butterflies, birds) ───────────────────────────────
 // Rotates tagged vertices about the body's Z axis. aTag (per vertex) picks the
 // side, aPhase/aRate (per instance) desynchronise the flock.
@@ -307,10 +349,16 @@ export function ringTexture() {
   return _ringTex;
 }
 /** Flat additive ring decal; fade a ripple by tinting its instance to black. */
+// forceSinglePass (Contract J, here and on the glow / decal materials below):
+// three r170 draws a transparent DoubleSide material TWICE a frame (back faces,
+// then front faces, re-evaluating the program each time). Additive blending is
+// order-free and a flat decal only ever shows one side, so one pass is the same
+// picture for half the draws.
 export function rippleMaterial(opacity = 0.8) {
   return new THREE.MeshBasicMaterial({
     map: ringTexture(), transparent: true, opacity, vertexColors: true,
     blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+    forceSinglePass: true,
   });
 }
 
@@ -322,6 +370,7 @@ export function glowMaterial(opacity = 0.85, map = null) {
   return new THREE.MeshBasicMaterial({
     map: map || glowTexture(), transparent: true, opacity, vertexColors: true,
     blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+    forceSinglePass: true,
   });
 }
 
@@ -345,7 +394,7 @@ export function blobTexture() {
 export function decalMaterial(opacity = 0.3) {
   return new THREE.MeshBasicMaterial({
     map: blobTexture(), transparent: true, opacity, vertexColors: true,
-    depthWrite: false, toneMapped: false, side: THREE.DoubleSide,
+    depthWrite: false, toneMapped: false, side: THREE.DoubleSide, forceSinglePass: true,
   });
 }
 

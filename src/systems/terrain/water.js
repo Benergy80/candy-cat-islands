@@ -4,7 +4,8 @@
 import * as THREE from 'three';
 import { SEA, CANDY } from '../../core/palette.js';
 import { rng, hash } from '../../core/util.js';
-import { GLSL_NOISE, GLSL_FIELD, GLSL_WATER, GLSL_AO, patchMaterial, colorOf, smooth } from './common.js';
+import { GLSL_NOISE, GLSL_FIELD, GLSL_WATER, GLSL_AO, patchMaterial, colorOf, smooth, seaDistance } from './common.js';
+import { getLampPool } from './lamppool.js';
 
 const TAU = Math.PI * 2;
 
@@ -160,8 +161,11 @@ export function buildSea(ctx, uniforms, field) {
     uShallow: { value: colorOf(0x1794c6) }, uDeep: { value: colorOf(0x123f78) },
     uShore: { value: colorOf(0x2a9d92) } };
   const MOBILE = !!ctx.state?.mobile;
-  wpatch(mat, {
-    key: 'terrain-sea', uniforms: u,
+  const seaOpts = {
+    // the sea never receives shadows (mesh.receiveShadow = false below): its
+    // program drops the dead shadow lookups (−0.7 ms of GPU at the sea
+    // crossing, same pixels; common.js patchMaterial)
+    key: 'terrain-sea', uniforms: u, noShadowReceive: true,
     vertexHead: GLSL_FIELD + GLSL_WAVE + /* glsl */`
       uniform float uTime;
       varying vec3 vWPos; varying vec2 vWaveG; varying float vWaveH;`,
@@ -220,8 +224,16 @@ export function buildSea(ctx, uniforms, field) {
         // out to ~16 units, scalloped at its outer edge so it is a shelf, not a
         // stripe of paint. This is the single strongest "this is a sea" cue at
         // the iso camera and it was completely missing.
-        float shelfW = 16.0 + sin(alongS * 0.21 + tFbm(w * 0.03) * 6.0) * 5.0;
-        float shoal = (1.0 - smoothstep(2.0, shelfW, off)) * (1.0 - smoothstep(2.2, 7.5, dep));
+        // (EXACT SKIPS, Contract J: every block below that is multiplied by a
+        // factor that is exactly 0 over open water — beyond 7.5 deep, 9+ units
+        // offshore, off the crests — is simply not evaluated there. Bounds use
+        // tFbm ∈ [0, 1.03]; the frame is bit-for-bit the same, the noise
+        // lookups a pixel of open sea pays drop by about half.)
+        float shoal = 0.0;
+        if (dep < 7.5 && off < 21.0) {          // shelfW ≤ 21, and the depth factor is 0 from 7.5
+          float shelfW = 16.0 + sin(alongS * 0.21 + tFbm(w * 0.03) * 6.0) * 5.0;
+          shoal = (1.0 - smoothstep(2.0, shelfW, off)) * (1.0 - smoothstep(2.2, 7.5, dep));
+        }
         col = mix(col, uShoal, clamp(shoal, 0.0, 1.0) * 0.78);
 
         // ── surf ring ────────────────────────────────────────────────────────
@@ -229,6 +241,11 @@ export function buildSea(ctx, uniforms, field) {
         // depth band is 30 units wide on a shallow shelf and invisible on a
         // steep one, which is why the shore used to read as a cut edge in half
         // the frames. This is a genuine 2.5-unit foam ring everywhere.
+        // |jitter| ≤ 1.55 + 0.72 + 0.80 = 3.07, so d2 ≥ off − 3.07: the ring
+        // (d2 < 2.7), the wet line (d2 < 1) and the backwash (d2 < 5.7) are all
+        // exactly 0 from 9 units offshore
+        float surf = 0.0, wetline = 0.0, back = 0.0;
+        if (off < 9.0) {
         float scalA = sin(alongS * 0.60 + tFbm(w * 0.055) * 5.4 + uTime * 0.09);
         float scalB = sin(alongS * 1.52 - tFbm(w * 0.135) * 3.6 - uTime * 0.14);
         float jitter = scalA * 1.55 + scalB * 0.72
@@ -238,11 +255,12 @@ export function buildSea(ctx, uniforms, field) {
         float roll = 0.5 + 0.5 * sin(uTime * 0.85 - d2 * 0.85 + lace * 3.2);
         float ring = 1.0 - smoothstep(0.0, 2.7, max(d2, 0.0));
         // sharper thresholds than r3: lacy scalloped edges, not an airbrush
-        float surf = ring * smoothstep(0.34, 0.58, lace * 0.70 + roll * 0.46);
-        float wetline = (1.0 - smoothstep(0.0, 1.0, max(d2, 0.0))) * (0.38 + 0.34 * roll);
+        surf = ring * smoothstep(0.34, 0.58, lace * 0.70 + roll * 0.46);
+        wetline = (1.0 - smoothstep(0.0, 1.0, max(d2, 0.0))) * (0.38 + 0.34 * roll);
         // an outer backwash line one lobe further out, so the surf has TWO edges
-        float back = (1.0 - smoothstep(0.0, 1.5, abs(d2 - 4.2))) * smoothstep(0.52, 0.80, lace)
+        back = (1.0 - smoothstep(0.0, 1.5, abs(d2 - 4.2))) * smoothstep(0.52, 0.80, lace)
                    * (0.25 + 0.55 * roll) * (1.0 - smoothstep(3.0, 9.0, dep));
+        }
 
         // ── ripple rings at anything standing in the water ───────────────────
         // The contact-AO map already marks every registered prop base (pier
@@ -251,8 +269,10 @@ export function buildSea(ctx, uniforms, field) {
         // grows the bands slide toward lower occlusion, i.e. outward.
         float pil = 1.0 - tContactAO(w);
         float shelf = 1.0 - smoothstep(1.5, 7.0, dep);
-        float collar = smoothstep(0.06, 0.40, pil) * gOpen * shelf
-                     * (0.45 + 0.55 * smoothstep(0.35, 0.75, tFbm(w * 1.4 + vec2(uTime * 0.2, 0.0))));
+        float collar = 0.0;   // exactly 0 unless pil > 0.06, dep > 0.4 (gOpen) and dep < 7 (shelf)
+        if (pil > 0.06 && dep > 0.4 && dep < 7.0)
+          collar = smoothstep(0.06, 0.40, pil) * gOpen * shelf
+                 * (0.45 + 0.55 * smoothstep(0.35, 0.75, tFbm(w * 1.4 + vec2(uTime * 0.2, 0.0))));
         float ringAmp = smoothstep(0.035, 0.15, pil) * (1.0 - smoothstep(0.30, 0.58, pil)) * gOpen * shelf;
         float pilRings = pow(0.5 + 0.5 * sin(pil * 44.0 - uTime * 2.3), 2.2) * ringAmp;
         // ...and the same for the ferry, whose hull MOVES (so it cannot be baked)
@@ -274,9 +294,14 @@ export function buildSea(ctx, uniforms, field) {
         // read as marbled endpaper, not as water. Crests come in gusts: a broad
         // patch field decides where there are crests at all, and a finer field
         // cuts each one into segments. Both drift, so the sea keeps moving.
-        float brk = smoothstep(0.32, 0.68, tFbm(w * 0.115 + vec2(uTime * 0.035, -uTime * 0.024)));
-        float brkF = smoothstep(0.26, 0.64, tVNoise(w * 0.62 - vec2(uTime * 0.08, uTime * 0.05)));
-        brk *= mix(1.0, brkF, tResolve(gFp, 0.62) * 0.85);
+        // brk only ever multiplies terms that are exactly 0 off the crests
+        // (cl ≤ 0.52) and in the shallows (dep ≤ 0.8): skip its 5 lookups there
+        float brk = 0.0;
+        if (cl > 0.52 && dep > 0.8) {
+          brk = smoothstep(0.32, 0.68, tFbm(w * 0.115 + vec2(uTime * 0.035, -uTime * 0.024)));
+          float brkF = smoothstep(0.26, 0.64, tVNoise(w * 0.62 - vec2(uTime * 0.08, uTime * 0.05)));
+          brk *= mix(1.0, brkF, tResolve(gFp, 0.62) * 0.85);
+        }
         gCrestHi = smoothstep(0.52, 0.86, cl) * smoothstep(0.8, 4.0, dep) * (0.18 + 0.82 * brk);
         float whiteCap = smoothstep(0.82, 0.99, cl) * smoothstep(0.20, 0.60, vWaveH + 0.30)
                        * smoothstep(1.6, 6.0, dep) * brk * 0.55;
@@ -300,10 +325,12 @@ export function buildSea(ctx, uniforms, field) {
         // moire camouflage the earlier rounds fought), never 30 units wide.
         ${MOBILE ? CHOP_MOBILE : `float c0 = tResolve(gFp, 3.60), cA = tResolve(gFp, 1.55);
         float cB = tResolve(gFp, 0.62), cC = tResolve(gFp, 0.24);
-        float chop = (tVNoise(w * 3.60 + vec2(uTime * 0.34, -uTime * 0.26)) - 0.5) * c0
-                   + (tVNoise(w * 1.55 + vec2(-uTime * 0.22, uTime * 0.15)) - 0.5) * cA
-                   + (tVNoise(w * 0.62 + vec2(uTime * 0.11, -uTime * 0.08)) - 0.5) * cB
-                   + (tVNoise(w * 0.24 - vec2(uTime * 0.05, uTime * 0.03)) - 0.5) * cC;
+        // a retired octave (weight exactly 0) adds exactly 0: skip its lookup
+        float chop = 0.0;
+        if (c0 > 0.0) chop += (tVNoise(w * 3.60 + vec2(uTime * 0.34, -uTime * 0.26)) - 0.5) * c0;
+        if (cA > 0.0) chop += (tVNoise(w * 1.55 + vec2(-uTime * 0.22, uTime * 0.15)) - 0.5) * cA;
+        if (cB > 0.0) chop += (tVNoise(w * 0.62 + vec2(uTime * 0.11, -uTime * 0.08)) - 0.5) * cB;
+        if (cC > 0.0) chop += (tVNoise(w * 0.24 - vec2(uTime * 0.05, uTime * 0.03)) - 0.5) * cC;
         // QUADRATURE normalisation (independent octaves add in quadrature): a
         // plain sum-normalise silently halves the amplitude whenever more than
         // one octave is live, which is most of the frame.
@@ -398,27 +425,37 @@ export function buildSea(ctx, uniforms, field) {
         // the same size on screen and the glitter reaches the far field instead
         // of stopping at 80 u. Two passes: sparse bright twinkles everywhere, and
         // a denser, dimmer sheet of sun sparkle inside the glitter road.
+        // (EXACT SKIPS, Contract J: the pellets are dots of radius 0.07 and
+        // 0.10 cell, so ~95% of pixels add exactly 0 — the tests below run
+        // cheapest first, and every skipped term was a product with a 0 in it)
         float k = mix(0.62, 0.085, smoothstep(0.08, 0.58, gFp));
         vec2 rw = mat2(0.803, -0.596, 0.596, 0.803) * vWPos.xz;
-        vec2 gid = floor(rw * k);
-        float rr = tHash21(gid);
-        float tw = sin(uTime * 2.0 + rr * 53.0) * 0.5 + 0.5;
-        float spark = pow(tw, 12.0) * step(0.905, tHash21(gid + 5.1));
         vec2 fl = fract(rw * k) - 0.5;
-        spark *= 1.0 - smoothstep(0.024, 0.070, length(fl));
-        spark *= gOpen;
-        totalEmissiveRadiance += mix(vec3(0.30, 0.44, 0.85), vec3(1.0, 0.97, 0.86) * 0.7, uDaylight) * spark * 0.9;
+        float dotA = 1.0 - smoothstep(0.024, 0.070, length(fl));
+        if (dotA > 0.0 && gOpen > 0.0) {
+          vec2 gid = floor(rw * k);
+          if (tHash21(gid + 5.1) >= 0.905) {                // step(0.905, ·) = 1
+            float tw = sin(uTime * 2.0 + tHash21(gid) * 53.0) * 0.5 + 0.5;
+            float spark = pow(tw, 12.0) * dotA * gOpen;
+            totalEmissiveRadiance += mix(vec3(0.30, 0.44, 0.85), vec3(1.0, 0.97, 0.86) * 0.7, uDaylight) * spark * 0.9;
+          }
+        }
         // sun sparkle: dense, small, and confined to the camera→sun bearing
-        vec2 gid2 = floor(rw * k * 2.15 + 17.3);
-        float tw2 = sin(uTime * 3.1 + tHash21(gid2) * 71.0) * 0.5 + 0.5;
-        float sp2 = pow(tw2, 6.0) * step(0.62, tHash21(gid2 + 9.7));
         vec2 fl2 = fract(rw * k * 2.15 + 17.3) - 0.5;
-        sp2 *= 1.0 - smoothstep(0.030, 0.100, length(fl2));
-        totalEmissiveRadiance += uSunCol * sp2 * gOpen * (1.0 - gFoam * 0.7)
-                                 * tGlintBand(vWPos, cameraPosition, uSunDir)
-                                 * smoothstep(-0.02, 0.18, uSunDir.y) * 0.55;
+        float dotB = 1.0 - smoothstep(0.030, 0.100, length(fl2));
+        float sunB = smoothstep(-0.02, 0.18, uSunDir.y);
+        if (dotB > 0.0 && gOpen > 0.0 && sunB > 0.0) {
+          float bandB = tGlintBand(vWPos, cameraPosition, uSunDir);
+          vec2 gid2 = floor(rw * k * 2.15 + 17.3);
+          if (bandB > 0.0 && tHash21(gid2 + 9.7) >= 0.62) {  // step(0.62, ·) = 1
+            float tw2 = sin(uTime * 3.1 + tHash21(gid2) * 71.0) * 0.5 + 0.5;
+            float sp2 = pow(tw2, 6.0) * dotB;
+            totalEmissiveRadiance += uSunCol * sp2 * gOpen * (1.0 - gFoam * 0.7) * bandB * sunB * 0.55;
+          }
+        }
       }`,
-  }, MOBILE);
+  };
+  wpatch(mat, seaOpts, MOBILE);
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'terrain_sea';
@@ -426,6 +463,39 @@ export function buildSea(ctx, uniforms, field) {
   mesh.renderOrder = 2;
   mesh.matrixAutoUpdate = false; mesh.updateMatrix();
   mesh.layers.enable(ctx.layers?.water ?? 1);
+
+  // ── the no-point-light twin (desktop, Contract J) ───────────────────────────
+  // The point-light slots are code in every lit program even when every light
+  // is skipped, and in this shader that code alone costs ~1.5 ms of GPU at the
+  // sea crossing. The twin is the same material compiled without the
+  // point-light loop (same uniforms objects, so it follows every update); the
+  // lamp pool swaps it in whenever no lit slot can reach a sea fragment — a
+  // point light is exactly 0 beyond its cutoff, so that frame is the same frame
+  // (terrain/lamppool.js setWater). The reach test runs against this mesh's own
+  // footprint: every quad kept above marks its xz box.
+  if (!MOBILE) {
+    const twin = new THREE.MeshStandardMaterial({
+      color: 0xffffff, roughness: 0.5, metalness: 0.0, transparent: true, depthWrite: true,
+    });
+    patchMaterial(twin, { ...seaOpts, key: 'terrain-sea-np', noPointLights: true });
+    const dist = seaDistance((mark) => {
+      for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
+        const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
+        if (land[a] && land[b] && land[c] && land[d]) continue;
+        mark(xs[i], zs[j], xs[i + 1], zs[j + 1]);
+      }
+    });
+    // waves lift the surface by at most 0.46 + 0.27 + 0.11 = 0.84 (vertexBody)
+    const hook = () => getLampPool(ctx).setWater({ dist, yBot: -1, yTop: 1, apply: (lit) => { mesh.material = lit ? mat : twin; } });
+    // registered once every system exists (the pool belongs to whoever asks
+    // first; the architectures create it) — and drawn once behind the title
+    // card so its first use is never a compile hitch (sky.js warm-up)
+    ctx.events?.on?.('world:ready', hook);
+    ctx.systems?.sky?.warmSwap?.(mesh, [mat, twin]);
+    // (for tools; non-enumerable so a userData JSON copy never walks a material)
+    Object.defineProperty(mesh.userData, 'seaTwin', { value: twin });
+    Object.defineProperty(mesh.userData, 'seaFull', { value: mat });
+  }
   return { mesh, tris: idx.length / 3 };
 }
 
@@ -494,6 +564,11 @@ function syrupMaterial(uniforms, prof, isFall = false, mobile = false) {
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff, roughness: 0.16, metalness: 0.0, transparent: true,
     emissive: new THREE.Color(0x5a0f30), emissiveIntensity: 0.05, side: THREE.DoubleSide,
+    // one pass (Contract J): three draws a transparent DoubleSide surface twice
+    // (back faces, then front) and re-evaluates its program twice a frame; a
+    // river ribbon and a fall curtain never show both faces at one pixel —
+    // A/B-diffed at candy_river / candy_lake: 0 px
+    forceSinglePass: true,
   });
   const u = { ...uniforms, uFallV: { value: prof.lip.along }, uTotal: { value: prof.total },
     uFall: { value: isFall ? 1 : 0 } };

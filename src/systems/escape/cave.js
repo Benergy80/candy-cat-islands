@@ -169,7 +169,7 @@ export function create(ctx, escape) {
   const mats = createMaterials();
   mats.crystal = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.25, metalness: 0, emissive: 0x6fe0ff, emissiveIntensity: 0.45, flatShading: true });
   mats.seaglass = new THREE.MeshStandardMaterial({ color: 0x63c7f0, roughness: 0.1, metalness: 0.05, transparent: true, opacity: 0.34, emissive: 0x3fa8dc, emissiveIntensity: 0.55, side: THREE.DoubleSide, depthWrite: false });
-  mats.shaft = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x8fd8ff, emissiveIntensity: 0.5, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  mats.shaft = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x8fd8ff, emissiveIntensity: 0.5, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
   // THE SEA ITSELF. The corridor is a trench with an open slot overhead (the
   // lens lives up there); these panels close the vault over the rock band on
   // both sides, so every frame has a lid of lit blue-green water in the top
@@ -184,6 +184,7 @@ export function create(ctx, escape) {
   mats.ray = new THREE.MeshStandardMaterial({
     color: 0x000000, emissive: 0x8fd8ff, emissiveIntensity: 0.22, transparent: true, opacity: 0.14,
     blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    forceSinglePass: true,   // additive: order-free, one pass (the sea/sea-glass keep two: they are not)
   });
   // wet rock at the waterline: glossy, dark, and the only low-roughness thing
   // down here apart from the crystals
@@ -417,7 +418,7 @@ export function create(ctx, escape) {
   const roof = (() => {
     const g = new THREE.BoxGeometry(220, 3, 430);
     const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x3a2b4c, roughness: 0.95 }));
-    m.position.set(CX, CEIL_Y, CZ); m.receiveShadow = false; m.castShadow = true; m.frustumCulled = false;
+    m.position.set(CX, CEIL_Y, CZ); m.receiveShadow = false; m.castShadow = true;   // culled: never in shot, still in the shadow frustum
     m.name = 'cave_roof'; group.add(m); return m;
   })();
 
@@ -652,8 +653,13 @@ export function create(ctx, escape) {
   // lights off; the same rock under an aqua sky / deep-blue bounce reads as
   // three hundred metres of water overhead, and it makes the pink and gold
   // crystals pop instead of blending into the walls.
+  // In the SCENE, not in the hidden cave group: at intensity 0 outside it adds
+  // exactly nothing, and a hemisphere light that joined the light list on the
+  // way in recompiled every lit program in the game (the constant-light-count
+  // rule of the frame-rate pass; the lamp pool adopts the four points above).
   const amb = new THREE.HemisphereLight(0x6fc8e0, 0x1c3a5c, 0);
-  amb.position.set(CX, FY + 12, CZ); group.add(amb);
+  amb.name = 'cave_hemi';
+  amb.position.set(CX, FY + 12, CZ); ctx.scene.add(amb);
   const fill = new THREE.AmbientLight(0x4a86ad, 0);
   group.add(fill);
 

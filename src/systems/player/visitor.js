@@ -1,5 +1,7 @@
-// THE VISITOR — a chunky procedural tourist. Built from primitives, baked into
-// ~14 vertex-coloured meshes (one per animated rig node) and posed procedurally.
+// THE VISITOR — a chunky procedural tourist. Built from primitives as ~15
+// vertex-coloured part meshes (one per animated rig node), then baked into ONE
+// SkinnedMesh with a rigid bone per part (see "ONE DRAW" below) and posed
+// procedurally through those bones.
 //
 // Proportions: feet at y=0, eyes at ~1.47, top of head 1.74, hat crown ~1.89.
 // The head is scaled 1.09 on top of that: at 25 units the face has to win the
@@ -329,27 +331,134 @@ export function createVisitor() {
     );
   };
   silMat.customProgramCacheKey = () => 'visitor-silhouette-2';
-  const silMeshes = [];
+
+  // ── ONE DRAW FOR THE WHOLE VISITOR (Contract J frame-rate pass) ─────────────
+  // Everything above is authored as 15 rigid part meshes, one per rig node, in
+  // five materials — which cost 15 main draws + 11 silhouette copies + 15
+  // shadow draws for one character. They are baked here into ONE SkinnedMesh:
+  // every part keeps its own rigid "bone" (a Bone standing exactly where the
+  // part mesh stood, so the animator, weapons.js's hand pose and catapult.js's
+  // torso read keep driving the same nodes), and the five materials become one
+  // MeshStandardMaterial whose per-material differences ride on vertex
+  // attributes: roughness, the night-glow emissive colour, and "receives
+  // shadows" (the face details never did). Normals are skinned with the
+  // inverse-transpose, so squash-and-stretch shades exactly as the separate
+  // meshes did. The silhouette is ONE skinned copy over the host range of the
+  // same vertex buffers (face details last, outside the range), and the body
+  // mesh is the single shadow caster. 41 draws → 3.
+  const HIDDEN = 1e-4;                     // a hidden part (the "o" mouth) is a bone scaled to nothing
+  const NIGHT_EM = new Map([               // setNightGlow(1) per old material (rgb × night)
+    [bodyMat, [0.085, 0.062, 0.046]], [torsoMat, [0.105, 0.100, 0.110]], [hatMat, [0.30, 0.215, 0.055]],
+    [eyeMat, [0.100, 0.100, 0.110]], [faceMat, [0.075, 0.048, 0.044]],
+  ]);
+  const nightU = { value: 0 };
+  const visMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0 });
+  visMat.name = 'visitor_body';
+  visMat.userData.flashChain = true;       // powerups.js may clone it and chain its rim patch after ours
+  const SKIN_NORMAL_IT = THREE.ShaderChunk.skinnormal_vertex.replace(
+    'objectNormal = vec4( skinMatrix * vec4( objectNormal, 0.0 ) ).xyz;',
+    'objectNormal = inverse( transpose( mat3( skinMatrix ) ) ) * objectNormal;');
+  const LIGHTS_BEGIN = THREE.ShaderChunk.lights_fragment_begin.split('&& receiveShadow )').join('&& receiveShadow && vVisRo.y > 0.5 )');
+  visMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uVisNight = nightU;
+    sh.vertexShader = 'attribute vec3 aVisEm;\nattribute vec2 aVisRo;\nvarying vec3 vVisEm;\nvarying vec2 vVisRo;\n' + sh.vertexShader
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvVisEm = aVisEm;\n\tvVisRo = aVisRo;')
+      .replace('#include <skinnormal_vertex>', SKIN_NORMAL_IT);
+    sh.fragmentShader = 'uniform float uVisNight;\nvarying vec3 vVisEm;\nvarying vec2 vVisRo;\n' + sh.fragmentShader
+      .replace('vec3 totalEmissiveRadiance = emissive;', 'vec3 totalEmissiveRadiance = emissive + uVisNight * vVisEm;')
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vVisRo.x;')
+      .replace('#include <lights_fragment_begin>', LIGHTS_BEGIN);
+  };
+  visMat.customProgramCacheKey = () => 'visitor-skin-1';
+
+  const boneOf = new Map();
+  let bodyMesh, silMesh;
   {
-    const hosts = [], body = [];
-    root.traverse((o) => {
-      if (!o.isMesh || o.userData.silhouette) return;
-      body.push(o);
-      if (!o.userData.faceDetail) hosts.push(o);
-    });
-    // every mesh of his own — face details included — draws after the pass
-    for (const o of body) o.renderOrder = BODY_ORDER;
-    for (const o of hosts) {
-      const g = new THREE.Mesh(o.geometry, silMat);
-      g.name = 'visitor_silhouette';
-      g.position.copy(o.position); g.quaternion.copy(o.quaternion); g.scale.copy(o.scale);
-      g.castShadow = false; g.receiveShadow = false; g.frustumCulled = false;
-      g.renderOrder = SIL_ORDER;                  // after every scene opaque, before his body
-      g.userData.silhouette = true; g.userData.noFade = true; g.userData.noOcclude = true; g.userData.noShadow = true;
-      o.parent.add(g);
-      silMeshes.push(g);
+    root.updateMatrixWorld(true);
+    const rootInv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+    const parts = [];
+    root.traverse((o) => { if (o.isMesh) parts.push(o); });
+    // silhouette hosts first, face details last (stable sort keeps authoring order)
+    parts.sort((a, b) => (a.userData.faceDetail ? 1 : 0) - (b.userData.faceDetail ? 1 : 0));
+    const bones = [], inverses = [], baked = [];
+    let nV = 0, nHost = 0;
+    for (const m of parts) {
+      const rel = new THREE.Matrix4().multiplyMatrices(rootInv, m.matrixWorld);
+      const g = m.geometry.clone().applyMatrix4(rel);
+      const bone = new THREE.Bone();
+      bone.name = 'visitor_part';
+      bone.position.copy(m.position); bone.quaternion.copy(m.quaternion); bone.scale.copy(m.scale);
+      if (!m.visible) bone.scale.setScalar(HIDDEN);
+      m.parent.add(bone); m.parent.remove(m);
+      boneOf.set(m, bone);
+      baked.push({ g, bi: bones.length, em: NIGHT_EM.get(m.material) || [0, 0, 0], ro: m.material.roughness, rc: m.receiveShadow ? 1 : 0 });
+      bones.push(bone); inverses.push(rel.clone().invert());
+      const cnt = g.attributes.position.count;
+      nV += cnt; if (!m.userData.faceDetail) nHost += cnt;
+      m.geometry.dispose();
     }
+    const pos = new Float32Array(nV * 3), nor = new Float32Array(nV * 3), col = new Float32Array(nV * 3);
+    const em = new Float32Array(nV * 3), ro = new Float32Array(nV * 2);
+    const si = new Uint8Array(nV * 4), sw = new Uint8Array(nV * 4);
+    let o = 0;
+    for (const b of baked) {
+      const cnt = b.g.attributes.position.count;
+      pos.set(b.g.attributes.position.array, o * 3);
+      nor.set(b.g.attributes.normal.array, o * 3);
+      col.set(b.g.attributes.color.array, o * 3);
+      for (let i = o; i < o + cnt; i++) {
+        em[i * 3] = b.em[0]; em[i * 3 + 1] = b.em[1]; em[i * 3 + 2] = b.em[2];
+        ro[i * 2] = b.ro; ro[i * 2 + 1] = b.rc;
+        si[i * 4] = b.bi; sw[i * 4] = 255;
+      }
+      o += cnt;
+      b.g.dispose();
+    }
+    const aPos = new THREE.BufferAttribute(pos, 3), aSi = new THREE.BufferAttribute(si, 4), aSw = new THREE.BufferAttribute(sw, 4, true);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', aPos);
+    geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setAttribute('aVisEm', new THREE.BufferAttribute(em, 3));
+    geo.setAttribute('aVisRo', new THREE.BufferAttribute(ro, 2));
+    geo.setAttribute('skinIndex', aSi);
+    geo.setAttribute('skinWeight', aSw);
+    geo.computeBoundingSphere();
+    const silGeo = new THREE.BufferGeometry();          // same buffers, host range only
+    silGeo.setAttribute('position', aPos);
+    silGeo.setAttribute('skinIndex', aSi);
+    silGeo.setAttribute('skinWeight', aSw);
+    silGeo.setDrawRange(0, nHost);
+    silGeo.boundingSphere = geo.boundingSphere;
+    const skeleton = new THREE.Skeleton(bones, inverses);
+    const ident = new THREE.Matrix4();
+    const noRay = () => {};                             // his own body is never a ray target (see raycast users: all skip him)
+    // Culling sphere in root space, fixed: every pose (duck, slide, the roll
+    // and flip about the belly, hat and arms thrown up) stays inside 2.6 u of
+    // the waist. A SkinnedMesh would otherwise compute its sphere once, from
+    // whatever pose it was in, and cull on that forever.
+    const reach = new THREE.Sphere(new THREE.Vector3(0, 1.0, 0), 2.6);
+    bodyMesh = new THREE.SkinnedMesh(geo, visMat);
+    bodyMesh.name = 'visitor_body';
+    bodyMesh.bind(skeleton, ident);
+    bodyMesh.castShadow = true; bodyMesh.receiveShadow = true;
+    bodyMesh.boundingSphere = reach;
+    bodyMesh.frustumCulled = true;
+    bodyMesh.renderOrder = BODY_ORDER;                  // every part of him draws after the pass
+    bodyMesh.raycast = noRay;
+    root.add(bodyMesh);
+    silMesh = new THREE.SkinnedMesh(silGeo, silMat);
+    silMesh.name = 'visitor_silhouette';
+    silMesh.bind(skeleton, ident);
+    silMesh.castShadow = false; silMesh.receiveShadow = false;
+    silMesh.boundingSphere = reach; silMesh.frustumCulled = true;
+    silMesh.renderOrder = SIL_ORDER;                    // after every scene opaque, before his body
+    silMesh.userData.silhouette = true; silMesh.userData.noFade = true; silMesh.userData.noOcclude = true; silMesh.userData.noShadow = true;
+    silMesh.raycast = noRay;
+    root.add(silMesh);
   }
+  const silMeshes = [silMesh];
+  const smileB = boneOf.get(smile), ohB = boneOf.get(oh);
 
   // ── animation state ────────────────────────────────────────────────────────
   const st = {
@@ -368,7 +477,10 @@ export function createVisitor() {
 
   const api = {
     group: root, root, nodes: { lean, bob, torso, head, hat, eyes, brows, mouth, legL, legR, armL, armR },
-    materials: { bodyMat, torsoMat, hatMat, eyeMat, faceMat },
+    // one material now (see the bake above); the five authoring materials only
+    // exist to key roughness / night glow into the vertex attributes
+    materials: { body: visMat },
+    mesh: bodyMesh,
     setEmotion(e) { st.emo = (e === 'happy' || e === 'scared') ? e : 'neutral'; },
     getEmotion() { return st.emo; },
     /** Per-foot ground correction in world units (0 = leg at full length),
@@ -386,11 +498,8 @@ export function createVisitor() {
       // Emissive is a floor, not the light: the visitor's own warm PointLight
       // (see player.js) does the lifting, so keep these low — a grey-blue
       // emissive strong enough to be seen washes the red shorts out to putty.
-      hatMat.emissive.setRGB(n * 0.30, n * 0.215, n * 0.055);
-      torsoMat.emissive.setRGB(n * 0.105, n * 0.100, n * 0.110);
-      bodyMat.emissive.setRGB(n * 0.085, n * 0.062, n * 0.046);
-      eyeMat.emissive.setRGB(n * 0.100, n * 0.100, n * 0.110);
-      faceMat.emissive.setRGB(n * 0.075, n * 0.048, n * 0.044);
+      // (Per-part colours: NIGHT_EM, baked into the aVisEm vertex attribute.)
+      nightU.value = n;
     },
 
     /** The through-geometry silhouette pass: its meshes + the shared material,
@@ -523,8 +632,8 @@ export function createVisitor() {
       brows.rotation.z = tremble * 0.6;
       mouth.scale.set(1 + H * 0.35 - S * 0.1, 1 + H * 0.25, 1);
       mouth.position.y = HEAD_C + MOUTH_Y - H * 0.008 + S * 0.006;
-      smile.visible = S < 0.5;
-      oh.visible = S >= 0.5;
+      smileB.scale.setScalar(S < 0.5 ? 1 : HIDDEN);
+      ohB.scale.setScalar(S >= 0.5 ? 1 : HIDDEN);
       head.position.x = tremble; head.position.z = tremble * 0.5;
 
       // ── wave-2 moves ─────────────────────────────────────────────────────

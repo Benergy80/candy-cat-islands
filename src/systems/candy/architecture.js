@@ -57,8 +57,9 @@ import { getLampPool } from '../terrain/lamppool.js';
 //     camera sees (terrain/instcull.js), and the small trim (those three,
 //     spinners, bunting) casts no shadow — buildings and landmarks still do;
 //   · the sign atlas is halved to 1024 × 1280 (textures ≤ 2048, iOS canvas cap);
-//   · the five lamps + the room light become anchors of the shared constant
-//     LAMP POOL (terrain/lamppool.js) instead of six PointLights.
+//   · (both tiers since Contract J) the lamps, the cupcake's crater light and
+//     the room light are anchors of the shared constant LAMP POOL
+//     (terrain/lamppool.js), never PointLights of their own.
 const MOBILE_TILE = 32;
 const NO_CAST_MOBILE = { sprinkles: 1, jellybeans: 1, sugargrains: 1, spinners: 1, bunting: 1 };
 const CULL_MOBILE = { sprinkles: 1, jellybeans: 1, sugargrains: 1 };   // static instances only
@@ -79,16 +80,16 @@ export function create(ctx) {
   // mobile: every builder here culls its merged meshes (desktop: null → never)
   const builderOpts = MOBILE ? { cull: true } : null;
   const culler = MOBILE ? createInstanceCuller(ctx, { cell: 32 }) : null;
-  const lampPool = MOBILE ? getLampPool(ctx, 3) : null;
+  const lampPool = getLampPool(ctx);   // 3 slots on mobile, 9 on desktop (the pool decides)
 
   const mats = createMaterials();
   const atlas = makeSignAtlas(signEntries());   // mobile: already 1024 × 1280 (kit tier)
   if (MOBILE) {
     halveCanvasTexture(atlas.tex, 4);            // no-op once the tier has halved it
-    // transparent DoubleSide draws twice (back faces, then front) — for an
-    // additive decal the order cannot matter, and a thin liquid sheet does not
-    // read the difference on a phone: one pass each (clones inherit it)
-    mats.haloDisc.forceSinglePass = true;
+    // transparent DoubleSide draws twice (back faces, then front) — a thin
+    // liquid sheet does not read the difference on a phone: one pass (clones
+    // inherit it). Desktop keeps two: the fountain's cone sheets change ~1% of
+    // the frame in one pass. (haloDisc is single-pass on both tiers: kit.js.)
     mats.flow.forceSinglePass = true;
   }
   mats.sign = new THREE.MeshStandardMaterial({
@@ -296,15 +297,9 @@ export function create(ctx) {
       });
     },
     light(x, y, z, color, dist, intensity) {
-      if (lampPool) {
-        // mobile: an anchor of the shared constant pool, not a PointLight
-        lights.push({ light: null, anchor: lampPool.add({ x, y, z, color, dist, decay: 2 }), base: intensity });
-        return null;
-      }
-      const l = new THREE.PointLight(color, 0, dist);
-      l.position.set(x, y, z); group.add(l);
-      lights.push({ light: l, base: intensity });
-      return l;
+      // an anchor of the shared constant pool, not a PointLight (both tiers)
+      lights.push({ light: null, anchor: lampPool.add({ x, y, z, color, dist, decay: 2 }), base: intensity });
+      return null;
     },
     // ── walkable deck registration ──
     deckRect(x0, x1, z0, z1, y) { decks.push({ t: 'rect', x0: Math.min(x0, x1), x1: Math.max(x0, x1), z0: Math.min(z0, z1), z1: Math.max(z0, z1), y }); },
@@ -436,14 +431,13 @@ export function create(ctx) {
       m.setColorAt(i, col.set(it.color ?? 0xffffff));
     });
     m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    m.frustumCulled = false;
-    if (MOBILE) {
-      // bounds from the placed instances (+ room for the spin / flutter), culled
-      m.computeBoundingSphere();
-      if (m.boundingSphere) m.boundingSphere.radius += 1.5;
-      m.frustumCulled = true;
-      if (CULL_MOBILE[name]) culler.add(m, { pad: 0.5 });
-    }
+    // bounds from the placed instances (+ room for the spin / flutter), culled
+    // on both tiers (desktop since Contract J: the island-wide pools used to
+    // draw from Cat Island too)
+    m.computeBoundingSphere();
+    if (m.boundingSphere) m.boundingSphere.radius += 1.5;
+    m.frustumCulled = true;
+    if (MOBILE && CULL_MOBILE[name]) culler.add(m, { pad: 0.5 });
     group.add(m); instanced.push(m);
     return m;
   }
@@ -479,10 +473,10 @@ export function create(ctx) {
     doorMesh.name = 'candyArch_doors';
     doorMesh.castShadow = true; doorMesh.receiveShadow = true;
     doorMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    doorMesh.frustumCulled = false;
-    if (MOBILE) {
-      // the leaves' matrices are only written on the first update, so the
-      // bounds come from the hinges: every door within its own leaf + swing
+    // the leaves' matrices are only written on the first update, so the
+    // bounds come from the hinges: every door within its own leaf + swing
+    // (culled on both tiers)
+    {
       const bb = new THREE.Box3();
       for (const d of doorList) bb.expandByPoint(new THREE.Vector3(d.x, d.y, d.z));
       doorMesh.boundingSphere = bb.getBoundingSphere(new THREE.Sphere());
@@ -495,15 +489,10 @@ export function create(ctx) {
     group.add(doorMesh);
   }
 
-  // ── the one interior PointLight (moves to whichever room you are in) ───────
-  // The island budget is 8 real lights and architecture already spends 6, so
-  // this one borrows: while it is on, the architecture lamp FARTHEST from the
-  // player is switched off. Net simultaneous lights: unchanged.
-  // Mobile: the room light is the pool's PRIORITY anchor (always gets a slot
-  // while it is lit), so entering a room never changes the light count.
-  const roomLight = MOBILE ? null : new THREE.PointLight(0xffc98a, 0, 13, 2);
-  if (roomLight) { roomLight.visible = false; group.add(roomLight); }
-  const roomAnchor = lampPool ? lampPool.add({ x: 0, y: -500, z: 0, color: 0xffc98a, dist: 13, decay: 2, priority: true }) : null;
+  // ── the one interior light (moves to whichever room you are in) ────────────
+  // The pool's PRIORITY anchor (always gets a slot while it is lit), so
+  // entering a room never changes the light count.
+  const roomAnchor = lampPool.add({ x: 0, y: -500, z: 0, color: 0xffc98a, dist: 13, decay: 2, priority: true });
 
   // ── budget report ──────────────────────────────────────────────────────────
   {
@@ -768,30 +757,16 @@ export function create(ctx) {
       if (r.inG && r.door && r.door.open > 0.05) r.inG.visible = true;
       if (r.inside) active = r;
     }
-    // the shared room light (see the comment where it is created)
-    if (roomAnchor) {
-      if (active && active.lamp && p) {
-        roomAnchor.x = active.lamp.x; roomAnchor.y = active.lamp.y; roomAnchor.z = active.lamp.z;
-        roomAnchor.color.set(active.lamp.color);
-        roomAnchor.level = damp(roomAnchor.level, 16 + night * 20, 6, dt);
-      } else {
-        roomAnchor.level = damp(roomAnchor.level, 0, 8, dt);
-        if (roomAnchor.level < 0.4) roomAnchor.level = 0;
-      }
-    } else if (active && active.lamp && p) {
-      roomLight.visible = true;
-      roomLight.position.set(active.lamp.x, active.lamp.y, active.lamp.z);
-      roomLight.color.set(active.lamp.color);
-      // 16 + 20, not 26 + 34. At 60 a decay-2 lamp 2 units off the floor of a
-      // 5 × 4 room puts every wall corner past the ACES knee and the room reads
-      // as a white box with furniture silhouetted in it.
-      roomLight.intensity = damp(roomLight.intensity, 16 + night * 20, 6, dt);
-      let far = null, fd = -1;
-      for (const L of lights) { const d = Math.hypot(L.light.position.x - p.x, L.light.position.z - p.z); if (d > fd) { fd = d; far = L; } }
-      if (far) far.light.intensity = 0;
-    } else if (roomLight.visible) {
-      roomLight.intensity = damp(roomLight.intensity, 0, 8, dt);
-      if (roomLight.intensity < 0.4) roomLight.visible = false;
+    // the shared room light (see the comment where it is created). 16 + 20, not
+    // 26 + 34: at 60 a decay-2 lamp 2 units off the floor of a 5 × 4 room puts
+    // every wall corner past the ACES knee and the room reads as a white box.
+    if (active && active.lamp && p) {
+      roomAnchor.x = active.lamp.x; roomAnchor.y = active.lamp.y; roomAnchor.z = active.lamp.z;
+      roomAnchor.color.set(active.lamp.color);
+      roomAnchor.level = damp(roomAnchor.level, 16 + night * 20, 6, dt);
+    } else {
+      roomAnchor.level = damp(roomAnchor.level, 0, 8, dt);
+      if (roomAnchor.level < 0.4) roomAnchor.level = 0;
     }
     // door swings
     if (doorMesh) {
@@ -857,6 +832,7 @@ export function create(ctx) {
   const api = {
     group, meshes, mats, decks, chimneys, landmarks: landmarkList, marks: landmarks, getDeckHeight,
     signAtlas: atlas.tex,
+    lampPool,   // the shared constant light pool (terrain/lamppool.js) — lampPool.stats() for debugging
     lakeSurface: parts.lake?.surface || null,   // terrain builder may hide this
     caveMouth: parts.peak?.cave || null,
     pierHead: parts.pier?.head || null,
@@ -923,10 +899,8 @@ export function create(ctx) {
       mats.windowPink.emissiveIntensity = 0.04 + night * 1.15;
       mats.glowSour.emissiveIntensity = 0.10 + night * 2.2 + Math.sin(t * 1.7) * 0.1 * night;
       mats.sign.emissiveIntensity = night * 0.10;
-      if (lampPool) for (const L of lights) L.anchor.level = L.base * night;
-      else for (const L of lights) L.light.intensity = L.base * night;
+      for (const L of lights) L.anchor.level = L.base * night;
       updateRooms(dt, ctx, night);
-      if (lampPool) lampPool.update(dt);
       mats.flow.map.offset.y = (mats.flow.map.offset.y - dt * 0.85) % 1;
 
       // bunting flutter

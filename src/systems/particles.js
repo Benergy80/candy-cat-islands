@@ -476,6 +476,21 @@ export function create(ctx) {
 
     normal.simulate(dt, el, windX, windZ);
     additive.simulate(dt, el, windX, windZ);
+    liveUpload(normal); liveUpload(additive);
+  }
+  // Contract J: simulate() keeps the live particles packed in [0, count) and
+  // flags all three instance attributes dirty, so three would re-upload them at
+  // FULL capacity every frame (≈156 KB/f for 2400 + 1600 slots, whatever is
+  // alive). One reused update range per attribute ships only the live slots.
+  function liveRange(a, n) {
+    const r = a._liveRange || (a._liveRange = { start: 0, count: 0 });
+    r.count = n * a.itemSize;
+    a.updateRanges.length = 0; a.updateRanges.push(r);
+  }
+  function liveUpload(P) {
+    const n = P.count;
+    if (n <= 0) return;
+    liveRange(P.aPos, n); liveRange(P.aCol, n); liveRange(P.aAttr, n);
   }
   const SPLASH_SEA = { count: 10, color: 0xcaf0ff, ringColor: 0xffffff, ringSize: 2.6, ringLife: 0.8 };
 

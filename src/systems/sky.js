@@ -104,6 +104,40 @@ if (!/ccWash/.test(THREE.ShaderChunk.lights_fragment_end)) {
 `;
 }
 
+// ── POINT LIGHTS THAT CANNOT REACH A FRAGMENT COST NOTHING (global patch) ────
+// three shades EVERY PointLight in the light list for EVERY lit fragment:
+// distance, attenuation and the whole BRDF, even when the light is at
+// intensity 0 (the constant lamp pool by day, terrain/lamppool.js) or the
+// fragment is far outside its cutoff `distance` (which is every fragment but a
+// few metres of ground at night). Both cases contribute EXACTLY zero — three
+// uploads colour × intensity, and getDistanceAttenuation() is exactly 0 at and
+// beyond the cutoff — so skipping them changes no pixel; it only stops paying
+// for them. The test is a uniform (colour) plus one squared distance per light.
+// Contract J: the 11 unlit lights alone cost 4.8–6.0 ms of GPU by day and
+// 29 ms at the sea crossing, the 17 night lights 25.5 of 33 ms.
+if (!/ccPointLit/.test(THREE.ShaderChunk.lights_pars_begin)) {
+  THREE.ShaderChunk.lights_pars_begin += /* glsl */`
+#if NUM_POINT_LIGHTS > 0
+bool ccPointLit( const in PointLight L, const in vec3 p ) {
+  if ( L.color == vec3( 0.0 ) ) return false;
+  if ( L.distance <= 0.0 ) return true;
+  vec3 v = L.position - p;
+  return dot( v, v ) < L.distance * L.distance;
+}
+#endif
+`;
+  const lb = THREE.ShaderChunk.lights_fragment_begin;
+  const head = '\t\tpointLight = pointLights[ i ];\n\t\tgetPointLightInfo( pointLight, geometryPosition, directLight );';
+  const tail = '\t\tRE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );\n\t}\n\t#pragma unroll_loop_end\n#endif\n#if ( NUM_SPOT_LIGHTS > 0 )';
+  if (lb.split(head).length === 2 && lb.split(tail).length === 2) {
+    // (a real, non-unrolled loop was measured too: slower on ANGLE Metal —
+    // 1.19 ms for six dark slots against 0.78 unrolled — so the unroll stays)
+    THREE.ShaderChunk.lights_fragment_begin = lb
+      .replace(head, '\t\tpointLight = pointLights[ i ];\n\t\tif ( ccPointLit( pointLight, geometryPosition ) ) {\n\t\tgetPointLightInfo( pointLight, geometryPosition, directLight );')
+      .replace(tail, tail.replace('reflectedLight );\n\t}', 'reflectedLight );\n\t\t}\n\t}'));
+  } else console.warn('[sky] point-light skip patch: three chunk changed, not applied');
+}
+
 // 05:27, not 06:00. The HUD dial calls 05:00–07:00 "SUNRISE", and at 05:53 the
 // old arc still had the disc a degree BELOW the horizon with a 0.8-intensity
 // key — the label said sunrise and the world rendered flat night. The sun now
@@ -150,9 +184,21 @@ const KEY_DIST = 150;
 const MOBILE_SHADOW_MAP = 1024;
 const MOBILE_CLOUD_KEEP = 0.55;
 const MOBILE_SHADOW_REFRESH = 1 / 40;   // s between key-map redraws (≈ every 2nd frame at 60 fps)
+// Shadow depth range fitted to the visible receivers (see receiverDepth) on
+// BOTH tiers since Contract J: casters deeper than the deepest receiver the
+// camera can see cannot darken anything on screen, and with the island merges
+// frustum-culled three now skips them in the shadow pass (a low sun's 370-unit
+// strip of island was most of the shadow draws — 197 at the sea crossing).
+const DEPTH_FIT = true;
 // screen samples (NDC) for the FAR side of the shadow depth fit: the top edge of
 // the frame, where the camera sees the ground furthest from the box anchor
 const FAR_SAMPLES = [[0, 0.96], [-1, 0.96], [1, 0.96], [-1, 0.4], [1, 0.4]];
+// desktop's fit is CONSERVATIVE (pixel-identical frames are the rule there): a
+// denser ring of samples, each taken as low as the sea floor under it could be
+// (RECEIVER_FLOOR), so a receiver below the visitor's height — the far side of
+// a hill, the shallows — never loses a shadow
+const FAR_SAMPLES_DESK = FAR_SAMPLES.concat([[-0.5, 0.96], [0.5, 0.96], [0, 0.4], [-1, 0], [1, 0], [-1, -0.5], [1, -0.5]]);
+const RECEIVER_FLOOR = -3;
 // Sky-object culling (mobile): the gameplay lens (elevation 0.64, fov 30) frames
 // NO sky at all — its top edge points ~22° below the horizon — yet the clouds,
 // sun, moon and stars are frustumCulled=false (they ride the camera), so they
@@ -282,7 +328,8 @@ export function create(ctx) {
   const ray = new THREE.Vector3(), hit = new THREE.Vector3(), centroid = new THREE.Vector3();
   const fitPts = [0, 0, 0, 0, 0].map(() => new THREE.Vector3());
   // mobile only: the furthest visible ground (top of frame) for the depth fit
-  const farPts = FAR_SAMPLES.map(() => new THREE.Vector3());
+  const FAR_SET = MOBILE ? FAR_SAMPLES : FAR_SAMPLES_DESK;
+  const farPts = FAR_SET.map(() => new THREE.Vector3());
   let farN = 0;
   let shadowAcc = 1, shadowForce = true;
   const lastRefresh = new THREE.Vector3(1e9, 0, 0);
@@ -354,15 +401,17 @@ export function create(ctx) {
     const low = clamp((0.34 - keyElev) / 0.34, 0, 1);
     r *= 1 + low * 0.55;
     anchor.set(centroid.x, groundY, centroid.z);
-    if (MOBILE) {
+    if (MOBILE || DEPTH_FIT) {
       // the rest of the frame's ground, for the depth fit only (the box itself
       // is fitted exactly as on desktop, so framing and texel size match)
       farN = 0;
-      for (let i = 0; i < FAR_SAMPLES.length; i++) {
-        const [sx, sy] = FAR_SAMPLES[i];
+      for (let i = 0; i < FAR_SET.length; i++) {
+        const [sx, sy] = FAR_SET[i];
         ray.set(sx * tanH, sy * tanV, -1).applyQuaternion(cam.quaternion).normalize();
-        const t = ray.y < -0.02 ? (groundY - cam.position.y) / ray.y : GROUND_RAY_MAX;
-        farPts[farN++].copy(cam.position).addScaledVector(ray, clamp(t, 0, GROUND_RAY_MAX));
+        const t = ray.y < -0.02 ? (groundY - cam.position.y) / ray.y : (MOBILE ? GROUND_RAY_MAX : cam.far);
+        // desktop: the whole frame, however far the lens (an overview's top
+        // edge lies well past GROUND_RAY_MAX)
+        farPts[farN++].copy(cam.position).addScaledVector(ray, clamp(t, 0, MOBILE ? GROUND_RAY_MAX : cam.far));
       }
     }
     return clamp(Math.ceil((r + 10) / 6) * 6, SHADOW_MIN, SHADOW_MAX);
@@ -378,7 +427,9 @@ export function create(ctx) {
    * shadow-pass draw calls came from.
    */
   function depthOf(p, dir) {
-    return -(p.x - anchor.x) * dir.x - (p.y - anchor.y) * dir.y - (p.z - anchor.z) * dir.z;
+    // desktop: every sample as low as a receiver there could be (see RECEIVER_FLOOR)
+    const py = MOBILE ? p.y : Math.min(p.y, RECEIVER_FLOOR);
+    return -(p.x - anchor.x) * dir.x - (py - anchor.y) * dir.y - (p.z - anchor.z) * dir.z;
   }
   function receiverDepth(dir) {
     const pl = ctx.systems.player?.position;
@@ -411,6 +462,15 @@ export function create(ctx) {
     if (!MOBILE) {
       light.shadow.normalBias = clamp(texel * (1.30 + 1.05 / elev), 0.030, 0.110);
       light.shadow.bias = -0.00022 - texel * 0.0040;
+      if (DEPTH_FIT) {
+        // the mobile fit below, with the desktop normalBias: the same world-
+        // space depth offset over a shorter range is a proportionally larger
+        // normalised bias
+        const need = Math.ceil((Math.max(0, receiverDepth(tmpA)) + 18) / 8) * 8;
+        const full = far;
+        far = Math.min(full, dist + Math.max(32, need));
+        light.shadow.bias *= (full - 1) / (far - 1);
+      }
     } else {
       // Depth range cut to the visible receivers (+ a margin for terrain relief
       // and the walls that catch shadows), quantised so it does not churn.
@@ -582,12 +642,14 @@ export function create(ctx) {
     setL(sunColor, grade.sunI > grade.moonI ? grade.sunC : grade.moonC);
     setL(sunDiscColor, grade.discC);
 
-    // one shadow map at a time: sun by day, moon by night
+    // one shadow map at a time: sun by day, moon by night — and exactly one
+    // shadow light at ALL times (both tiers; desktop since Contract J): a 0 ↔ 1
+    // flip at dusk recompiles every lit program in the scene. Between the sun
+    // letting go and the moon reaching 0.30 the moon is too dim for its
+    // shadow to read, so casting through that window costs nothing visible.
     const sunCasts = grade.sunI > 0.35;
     sun.castShadow = sunCasts;
-    // mobile: exactly one shadow light at all times — a 0 ↔ 1 flip at dusk
-    // recompiles every lit program in the scene, which a phone feels as a hitch
-    moon.castShadow = MOBILE ? !sunCasts : (!sunCasts && grade.moonI > 0.30);
+    moon.castShadow = !sunCasts;
 
     // ── shadow box fitted to what the camera sees ────────────────────────────
     const pl = ctx.systems.player?.position;
@@ -680,22 +742,45 @@ export function create(ctx) {
     // ── exposure ─────────────────────────────────────────────────────────────
     renderer.toneMappingExposure = grade.exp;
 
-    // ── mobile: drop the sky objects this lens cannot see (see SKY_CULL_MARGIN)
-    if (MOBILE) {
-      const topEl = Math.asin(clamp(frameTopSin(), -1, 1));
-      const below = topEl < -SKY_CULL_MARGIN;
-      clouds.group.visible = !(below && ctx.camera.position.y < CLOUD_FLOOR);
-      if (below) stars.points.visible = false;
-      if (sunDisc.mesh.visible && Math.asin(clamp(sunDir.y, -1, 1)) - SUN_QUAD_R - SKY_CULL_MARGIN > topEl) sunDisc.mesh.visible = false;
-      if (moonDisc.mesh.visible && Math.asin(clamp(moonDir.y, -1, 1)) - MOON_QUAD_R - SKY_CULL_MARGIN > topEl) moonDisc.mesh.visible = false;
-    }
+    // (the sky objects this lens cannot see are dropped per render, below —
+    // applyGrade shows them, the cull only ever hides)
+    clouds.group.visible = true;
 
     // dome/stars/discs ride with the camera so the horizon never runs out
     group.position.copy(ctx.camera.position);
     booted = true;
   }
 
+  // ── drop the sky objects this lens cannot see (see SKY_CULL_MARGIN) ────────
+  // Both tiers (desktop since Contract J: 3 draws a frame at every gameplay
+  // spot). Runs in scene.onBeforeRender with the camera the frame is drawn
+  // with, so the test is exact (the old per-update test read the previous
+  // frame's lens). Only ever HIDES (applyGrade shows them again every update),
+  // so a system that hid a disc itself — the palace and the cave hide the sun
+  // and moon indoors — is never overridden.
+  function skyCull(camera) {
+    if (camera !== ctx.camera) return;
+    const topEl = Math.asin(clamp(frameTopSin(), -1, 1));
+    const below = topEl < -SKY_CULL_MARGIN;
+    clouds.group.visible = !(below && camera.position.y < CLOUD_FLOOR);
+    if (below) stars.points.visible = false;
+    if (sunDisc.mesh.visible && Math.asin(clamp(sunDir.y, -1, 1)) - SUN_QUAD_R - SKY_CULL_MARGIN > topEl) sunDisc.mesh.visible = false;
+    if (moonDisc.mesh.visible && Math.asin(clamp(moonDir.y, -1, 1)) - MOON_QUAD_R - SKY_CULL_MARGIN > topEl) moonDisc.mesh.visible = false;
+  }
+  {
+    const prev = scene.onBeforeRender;
+    scene.onBeforeRender = function (r, sc, camera, target) {
+      if (prev) prev.call(this, r, sc, camera, target);
+      try { if (!target) skyCull(camera); } catch (err) { if (!skyCull.warned) { skyCull.warned = true; console.error('[sky] cull failed', err); } }
+    };
+  }
+
+  // (mesh, [material, twin]) pairs the warm-up also draws with the material
+  // NOT in use at the time, so a system's runtime material swap never compiles
+  // mid-game (terrain's no-point-light sea twin; see drawEverything)
+  const warmSwaps = [];
   const api = {
+    warmSwap(mesh, mats) { warmSwaps.push({ mesh, mats }); },
     sun, moon, fill, hemi, ambient, group, clouds, mist, grade,
     sunDir, moonDir, phase, daylight: 1,
     horizonColor, zenithColor, sunColor, sunDiscColor,
@@ -722,6 +807,69 @@ export function create(ctx) {
     console.warn(`[sky] mobile tier · ${4 + clouds.group.children.length} draw calls max `
       + `(dome, stars, sun, moon, ${clouds.group.children.length} cloud batches, no mist) · `
       + `clouds ${clouds.count} puffs · shadow ${shadowRes}², one caster, redrawn ≤ ${Math.round(1 / MOBILE_SHADOW_REFRESH)} Hz`);
+  }
+
+  // ── warm every program once, in the background (Contract J) ───────────────
+  // The light COUNT never changes any more (one shadow-casting key at all
+  // times, a constant lamp pool — terrain/lamppool.js), so the programs a
+  // night frame needs are exactly the programs it would compile today. The
+  // only ones still missing at dusk are the materials nothing has drawn yet
+  // (halos, spills, night glows, rooms, the palace and the cave): compile the
+  // whole scene once, a second after the first frame, with three's async path
+  // (KHR_parallel_shader_compile — the driver compiles off the main thread),
+  // so the first dusk links nothing. Never in ?shot (the render harness).
+  // A linked program is not the whole bill on ANGLE Metal: the first DRAW of a
+  // material also builds its pipeline state and uploads its buffers and
+  // textures — 40–60 ms frames at 18.32, 18.5, 18.6, 18.8 and 18.87 h, exactly
+  // where the night halos, spills and glows first appear. So once the programs
+  // are ready, desktop draws the whole scene ONCE — every hidden object and
+  // material shown, culling off, both passes — and then the real frame again in
+  // the same task, so only the real frame is ever presented. Lights are never
+  // touched (the light count must not change). One heavy frame behind the
+  // title card instead of a hitch at every first sight of something.
+  function drawEverything() {
+    const t0 = performance.now();
+    const objs = [], mats = [], culls = [];
+    scene.traverse((o) => {
+      if (o.isLight) return;
+      if (o.visible === false) { o.visible = true; objs.push(o); }
+      if (!(o.isMesh || o.isPoints || o.isLine || o.isSprite)) return;
+      if (o.frustumCulled) { o.frustumCulled = false; culls.push(o); }
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of ms) if (m && m.visible === false) { m.visible = true; mats.push(m); }
+    });
+    const swapped = [];
+    for (const W of warmSwaps) {
+      const cur = W.mesh.material, other = W.mats[0] === cur ? W.mats[1] : W.mats[0];
+      if (other && other !== cur) { W.mesh.material = other; swapped.push(W.mesh, cur); }
+    }
+    try { renderer.render(scene, ctx.camera); } finally {
+      for (const o of objs) o.visible = false;
+      for (const o of culls) o.frustumCulled = true;
+      for (const m of mats) m.visible = false;
+      for (let i = 0; i < swapped.length; i += 2) swapped[i].material = swapped[i + 1];
+    }
+    renderer.render(scene, ctx.camera);
+    return Math.round(performance.now() - t0);
+  }
+  if (!ctx.shot) {
+    let frames = 0;
+    const prevHook = scene.onBeforeRender;
+    const warm = function (r, sc, camera, target) {
+      if (prevHook) prevHook.call(this, r, sc, camera, target);
+      if (target || camera !== ctx.camera || ++frames !== 60) return;
+      setTimeout(() => {
+        try {
+          const p0 = renderer.info.programs?.length ?? 0, t0 = performance.now();
+          renderer.compileAsync(scene, ctx.camera).then(() => {
+            api.warmed = { programs: (renderer.info.programs?.length ?? 0) - p0, ms: Math.round(performance.now() - t0) };
+            // desktop: then DRAW everything once (see drawEverything)
+            if (!MOBILE) requestAnimationFrame(() => { try { api.warmed.drawMs = drawEverything(); } catch (err) { console.warn('[sky] warm draw skipped', err.message); } });
+          }).catch(() => {});
+        } catch (err) { console.warn('[sky] program warm-up skipped', err.message); }
+      }, 0);
+    };
+    scene.onBeforeRender = warm;
   }
 
   ctx.events.on('time:set', () => api.refresh());

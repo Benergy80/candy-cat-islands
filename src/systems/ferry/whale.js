@@ -887,9 +887,13 @@ function buildFoam() {
     color: 0xffffff, map: tex, vertexColors: true, transparent: true, opacity: 0.9, roughness: 1,
     emissive: 0xffffff, emissiveIntensity: 0.08,
     depthWrite: false, side: THREE.DoubleSide,
+    // NOT forceSinglePass: this is a normal-blended, curved DoubleSide collar, so
+    // it needs three's back-then-front two-pass draw. One pass lays back faces
+    // over front faces and cuts dark teeth along her waterline.
   }));
   mesh.renderOrder = 4;
-  mesh.frustumCulled = false;
+  mesh.frustumCulled = true;           // Contract J: a static local geometry moved by its transform culls exactly
+  g.computeBoundingSphere();
   mesh.userData.tex = tex;
   return mesh;
 }
@@ -941,10 +945,11 @@ function buildBow() {
   const tex = foamTex();
   const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
     color: 0xffffff, map: tex, vertexColors: true, transparent: true, opacity: 0, roughness: 1,
-    emissive: 0xffffff, emissiveIntensity: 0.3, depthWrite: false, side: THREE.DoubleSide,
+    emissive: 0xffffff, emissiveIntensity: 0.3, depthWrite: false, side: THREE.DoubleSide,  // two-pass on purpose: normal-blended, folded crest (see buildFoam)
   }));
   mesh.renderOrder = 5;
-  mesh.frustumCulled = false;
+  mesh.frustumCulled = true;           // Contract J: a static local geometry moved by its transform culls exactly
+  g.computeBoundingSphere();
   mesh.visible = false;
   mesh.userData.tex = tex;
   mesh.name = 'sugarfin-bowwave';
@@ -990,10 +995,11 @@ function buildWake() {
   const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
     color: 0xfffdf6, map: tex, vertexColors: true, transparent: true, opacity: 0.0, roughness: 1,
     emissive: 0xfff4e2, emissiveIntensity: 0.95,
-    depthWrite: false, side: THREE.DoubleSide,
+    depthWrite: false, side: THREE.DoubleSide,  // two-pass on purpose: normal-blended (see buildFoam)
   }));
   mesh.renderOrder = 3;
-  mesh.frustumCulled = false;
+  mesh.frustumCulled = true;           // Contract J: a static local geometry moved by its transform culls exactly
+  g.computeBoundingSphere();
   mesh.visible = false;
   mesh.userData.tex = tex;
   return mesh;
@@ -1007,7 +1013,7 @@ function buildLampFx() {
   const mesh = new THREE.InstancedMesh(g, new THREE.MeshBasicMaterial({
     map: glowTex(), transparent: true, opacity: 1, depthWrite: false,
     blending: THREE.AdditiveBlending, color: 0xffc178, toneMapped: false,
-    side: THREE.DoubleSide,
+    side: THREE.DoubleSide, forceSinglePass: true,
   }), 4);
   mesh.renderOrder = 6;
   mesh.frustumCulled = false;
@@ -1029,7 +1035,7 @@ function buildRopes() {
     vertexColors: true, roughness: 0.85, flatShading: true, metalness: 0.1,
   }));
   mesh.castShadow = false;
-  mesh.frustumCulled = false;
+  mesh.frustumCulled = true;           // world-space geometry, bounds computed by every set() below
   mesh.visible = false;
   /** a, b: THREE.Vector3 world ends; sag in units. `posts` are world [x,y,z]
    *  bollards built into the same geometry, so a mooring line always ends on

@@ -119,6 +119,76 @@ const TPOSE = {
   sulk:   { sit: 1, tail: -0.60, curl: 0.30, wrap: 1, swish: 0.2, freq: 0, stride: 0, ear: 0.6, eye: 0.5, pitch: 0.28 },
   sleep:  { crouch: 0.60, tail: -0.70, curl: 0.20, wrap: 1.2, swish: 0.14, freq: 0, stride: 0, eye: 0.02, pitch: 0.26 },
 };
+// Pose vectors (Contract J): fixed-shape objects written by named fields, every
+// TPOSE pre-expanded against TREST — the for-in damping boxed a number per key.
+function tposeVec() {
+  return {
+    crouch: 0,
+    sit: 0,
+    rear: 0,
+    tail: -0.9,
+    curl: 0.28,
+    swish: 0.8,
+    freq: 1.35,
+    stride: 0.38,
+    roll: 1,
+    mouth: 0.02,
+    ear: 0,
+    headY: 0,
+    headZ: 0,
+    pitch: 0,
+    eye: 1,
+    wiggle: 0,
+    bound: 0,
+    chest: 0,
+    wrap: 0,
+  };
+}
+function setTPose(o, F) {
+  o.crouch = F.crouch;
+  o.sit = F.sit;
+  o.rear = F.rear;
+  o.tail = F.tail;
+  o.curl = F.curl;
+  o.swish = F.swish;
+  o.freq = F.freq;
+  o.stride = F.stride;
+  o.roll = F.roll;
+  o.mouth = F.mouth;
+  o.ear = F.ear;
+  o.headY = F.headY;
+  o.headZ = F.headZ;
+  o.pitch = F.pitch;
+  o.eye = F.eye;
+  o.wiggle = F.wiggle;
+  o.bound = F.bound;
+  o.chest = F.chest;
+  o.wrap = F.wrap;
+}
+function dampTPose(a, t, f) {
+  a.crouch += (t.crouch - a.crouch) * f;
+  a.sit += (t.sit - a.sit) * f;
+  a.rear += (t.rear - a.rear) * f;
+  a.tail += (t.tail - a.tail) * f;
+  a.curl += (t.curl - a.curl) * f;
+  a.swish += (t.swish - a.swish) * f;
+  a.freq += (t.freq - a.freq) * f;
+  a.stride += (t.stride - a.stride) * f;
+  a.roll += (t.roll - a.roll) * f;
+  a.mouth += (t.mouth - a.mouth) * f;
+  a.ear += (t.ear - a.ear) * f;
+  a.headY += (t.headY - a.headY) * f;
+  a.headZ += (t.headZ - a.headZ) * f;
+  a.pitch += (t.pitch - a.pitch) * f;
+  a.eye += (t.eye - a.eye) * f;
+  a.wiggle += (t.wiggle - a.wiggle) * f;
+  a.bound += (t.bound - a.bound) * f;
+  a.chest += (t.chest - a.chest) * f;
+  a.wrap += (t.wrap - a.wrap) * f;
+}
+const TFULL = {};
+for (const k in TPOSE) { const f = tposeVec(); for (const q in TREST) f[q] = TPOSE[k][q] !== undefined ? TPOSE[k][q] : TREST[q]; TFULL[k] = f; }
+
 const POSE_OF = {
   prowl: 'prowl', stalk: 'stalk', crouch: 'crouch', rush: 'rush', roar: 'roar', carry: 'carry',
   yawn: 'yawn', flinch: 'flinch', hiss: 'hiss', flee: 'flee', stun: 'stun', dizzy: 'stun',
@@ -138,7 +208,7 @@ const wrapPi = (a) => { a = (a + Math.PI) % (Math.PI * 2); if (a < 0) a += Math.
 export function applyTiger(c, k, el, dt, ctx) {
   const R = c.rig, TG = R.tiger;
   if (!TG) return;
-  const tg = c.tg || (c.tg = { a: {}, t: {}, gait: c.ph, swishPh: c.ph * 2, mv: 0, blinkT: c.seed * 4, blink: 0, off: false });
+  const tg = c.tg || (c.tg = { a: tposeVec(), t: tposeVec(), snap: true, gait: c.ph, swishPh: c.ph * 2, mv: 0, blinkT: c.seed * 4, blink: 0, off: false });
   const size = c.spec.size ?? 1;
 
   if (k <= 0.0008) {
@@ -156,10 +226,9 @@ export function applyTiger(c, k, el, dt, ctx) {
   // ── pose targets ───────────────────────────────────────────────────────────
   let key = POSE_OF[c.pose];
   if (!key) key = c.moving ? 'prowl' : 'sit';
-  const P = TPOSE[key] || TPOSE.prowl;
   const t = tg.t, a = tg.a;
-  for (const q in TREST) t[q] = P[q] !== undefined ? P[q] : TREST[q];
-  for (const q in t) a[q] = a[q] === undefined ? t[q] : damp(a[q], t[q], 7.5, dt);
+  setTPose(t, TFULL[key] || TFULL.prowl);
+  if (tg.snap) { setTPose(a, t); tg.snap = false; } else dampTPose(a, t, 1 - Math.exp(-7.5 * dt));
   tg.mv = damp(tg.mv, c.moving ? 1 : 0, 8, dt);
 
   // ── gait: diagonal pairs, heavy and slow ───────────────────────────────────

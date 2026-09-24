@@ -90,6 +90,93 @@ export const POSES = {
            tailLift: -0.2, tailCurl: 0.1, tailSwish: 2.6 },
 };
 
+// ── pose vectors (Contract J frame-rate pass) ────────────────────────────────
+// animate() used to fill `t` from POSES and damp `a` toward it with for-in
+// loops over computed keys: every keyed store boxed a fresh number (~70 KB of
+// garbage a frame across the town). Now both are fixed-shape objects written by
+// named fields, and every pose is pre-expanded against REST once at load.
+// dampPose(a, t, f) with f = 1 − e^(−λ·dt) is exactly util.damp per field.
+function poseVec() {
+  return {
+    rootDY: 0,
+    offZ: 0,
+    pitch: 0,
+    roll: 0,
+    sx: 1,
+    sy: 1,
+    sz: 1,
+    legFwd: 0,
+    legHide: 0,
+    walk: 0,
+    armFwdL: 0,
+    armFwdR: 0,
+    armOutL: 0.06,
+    armOutR: 0.06,
+    headPitch: 0,
+    headYaw: 0,
+    headRoll: 0,
+    earBack: 0,
+    eyeOpen: 1,
+    tailLift: 0,
+    tailCurl: 0.28,
+    tailSwish: 1,
+    flex: 0,
+  };
+}
+function setPose(o, F) {
+  o.rootDY = F.rootDY;
+  o.offZ = F.offZ;
+  o.pitch = F.pitch;
+  o.roll = F.roll;
+  o.sx = F.sx;
+  o.sy = F.sy;
+  o.sz = F.sz;
+  o.legFwd = F.legFwd;
+  o.legHide = F.legHide;
+  o.walk = F.walk;
+  o.armFwdL = F.armFwdL;
+  o.armFwdR = F.armFwdR;
+  o.armOutL = F.armOutL;
+  o.armOutR = F.armOutR;
+  o.headPitch = F.headPitch;
+  o.headYaw = F.headYaw;
+  o.headRoll = F.headRoll;
+  o.earBack = F.earBack;
+  o.eyeOpen = F.eyeOpen;
+  o.tailLift = F.tailLift;
+  o.tailCurl = F.tailCurl;
+  o.tailSwish = F.tailSwish;
+  o.flex = F.flex;
+}
+function dampPose(a, t, f) {
+  a.rootDY += (t.rootDY - a.rootDY) * f;
+  a.offZ += (t.offZ - a.offZ) * f;
+  a.pitch += (t.pitch - a.pitch) * f;
+  a.roll += (t.roll - a.roll) * f;
+  a.sx += (t.sx - a.sx) * f;
+  a.sy += (t.sy - a.sy) * f;
+  a.sz += (t.sz - a.sz) * f;
+  a.legFwd += (t.legFwd - a.legFwd) * f;
+  a.legHide += (t.legHide - a.legHide) * f;
+  a.walk += (t.walk - a.walk) * f;
+  a.armFwdL += (t.armFwdL - a.armFwdL) * f;
+  a.armFwdR += (t.armFwdR - a.armFwdR) * f;
+  a.armOutL += (t.armOutL - a.armOutL) * f;
+  a.armOutR += (t.armOutR - a.armOutR) * f;
+  a.headPitch += (t.headPitch - a.headPitch) * f;
+  a.headYaw += (t.headYaw - a.headYaw) * f;
+  a.headRoll += (t.headRoll - a.headRoll) * f;
+  a.earBack += (t.earBack - a.earBack) * f;
+  a.eyeOpen += (t.eyeOpen - a.eyeOpen) * f;
+  a.tailLift += (t.tailLift - a.tailLift) * f;
+  a.tailCurl += (t.tailCurl - a.tailCurl) * f;
+  a.tailSwish += (t.tailSwish - a.tailSwish) * f;
+  a.flex += (t.flex - a.flex) * f;
+}
+const FULL = {};
+for (const k in POSES) { const f = poseVec(); for (const q in REST) f[q] = POSES[k][q] !== undefined ? POSES[k][q] : REST[q]; FULL[k] = f; }
+const _look = { x: 0, y: 0, z: 0 };
+
 // ── world helpers ────────────────────────────────────────────────────────────
 export function pathById(world, id) { return world.PATHS.find((p) => p.id === id); }
 
@@ -498,10 +585,12 @@ export function updateCat(c, dt, ctx, S) {
 
 // ── animation ────────────────────────────────────────────────────────────────
 function animate(c, dt, ctx, S) {
-  const r = c.rig, a = c.a, t = c.t;
+  const r = c.rig;
+  let a = c.a, t = c.t;
+  if (!t || t.flex === undefined) t = c.t = poseVec();
+  if (!a || a.flex === undefined) { a = c.a = poseVec(); c.aSnap = true; }   // (citizens.js resets c.a = {} to snap)
   const el = S.elapsed;
-  const P = POSES[c.pose] || POSES.stand;
-  for (const k in REST) t[k] = P[k] !== undefined ? P[k] : REST[k];
+  setPose(t, FULL[c.pose] || FULL.stand);
 
   // walking overlay
   const walking = c.moving ? 1 : 0;
@@ -556,7 +645,7 @@ function animate(c, dt, ctx, S) {
   // Clamped gently: a full 50° head turn hides the face from the camera, and the
   // face is the whole point.
   let look = null;
-  if (c.lookKey && S.byKey) { const o = S.byKey(c.lookKey); if (o) look = { x: o.x, y: o.y + 1.15 * (o.spec?.size ?? 1), z: o.z }; }
+  if (c.lookKey && S.byKey) { const o = S.byKey(c.lookKey); if (o) { look = _look; _look.x = o.x; _look.y = o.y + 1.15 * (o.spec?.size ?? 1); _look.z = o.z; } }
   if (!look) look = c.lookAt;
   if (look) {
     const want = wrapPi(Math.atan2(look.x - c.x, look.z - c.z) - c.yaw);
@@ -586,7 +675,7 @@ function animate(c, dt, ctx, S) {
 
   // damp everything (first frame snaps, so nothing starts as NaN)
   const L = 9;
-  for (const k in t) a[k] = a[k] === undefined ? t[k] : damp(a[k], t[k], L, dt);
+  if (c.aSnap !== false) { setPose(a, t); c.aSnap = false; } else dampPose(a, t, 1 - Math.exp(-L * dt));
 
   // ── apply ──
   const groundY = c.y;

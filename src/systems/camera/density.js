@@ -29,6 +29,8 @@
 //            the body is his own (the post he stands against: it blocks every candidate alike), as in occlude().
 //
 // No allocation per call: the list, the hash cells and the caches are built at their own cadence.
+import { hypot2 } from './hypot.js';
+
 export const LOCAL_R = 40;          // u: the local collider list's radius (§4.6)
 export const LOCAL_EVERY = 0.5;     // s: …rebuilt this often
 const CELL = 8;                     // u: density hash cell (§4.5)
@@ -70,7 +72,7 @@ export function createDensity(ctx) {
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
       if (!c) continue;
-      const ext = c.box ? 0.5 * Math.hypot(c.w || 0, c.d || 0) : (c.r || 0);
+      const ext = c.box ? 0.5 * hypot2(c.w || 0, c.d || 0) : (c.r || 0);
       const dx = c.x - x, dz = c.z - z, R = localR + ext;
       if (dx * dx + dz * dz <= R * R) local.push(c);
     }

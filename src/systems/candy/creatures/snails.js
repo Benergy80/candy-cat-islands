@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { rng, hash } from '../../../core/util.js';
 import { CANDY } from '../../../core/palette.js';
-import { Pool, part, mergeParts, shadeAxis, TAU, walkable, turnToward, pathShoulder, uiSay, HIT, WET } from './common.js';
+import { Pool, part, mergeParts, shadeAxis, TAU, walkable, turnToward, pathShoulder, uiSay, HIT, WET, LOD } from './common.js';
 
 // Contract A body (units of the snail's scale): shell + foot fit one circle.
 export const SNAIL_BODY = { r: 0.4 };
@@ -85,10 +85,12 @@ export function create(env) {
 
   return {
     name: 'snails', snails,
-    update(dt, ctx) {
+    update(dtFrame, ctx) {
       const t = ctx.state.elapsed;
       for (let i = 0; i < N; i++) {
         const s = snails[i];
+        const dt = LOD.step(s, dtFrame, s.x, s.y, s.z, 2);   // animation LOD (common.js)
+        if (!dt) continue;
         s.retract = Math.max(0, s.retract - dt * 0.28);
         const hiding = s.retract > 0.02 ? 1 - Math.pow(1 - s.retract, 3) : 0;
         const crawl = (1 - hiding) * 0.26;

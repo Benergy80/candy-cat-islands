@@ -66,7 +66,7 @@ export function create(ctx, escape) {
   // ── materials ──────────────────────────────────────────────────────────────
   const mats = createMaterials();
   mats.brick = new THREE.MeshStandardMaterial({ map: makeBrickTexture(), vertexColors: true, roughness: 0.82, metalness: 0 });
-  mats.glass = new THREE.MeshStandardMaterial({ color: 0xdff6ff, roughness: 0.08, metalness: 0.02, transparent: true, opacity: 0.42, emissive: 0x9fe4ff, emissiveIntensity: 0.05, side: THREE.DoubleSide, depthWrite: false });
+  mats.glass = new THREE.MeshStandardMaterial({ color: 0xdff6ff, roughness: 0.08, metalness: 0.02, transparent: true, opacity: 0.42, emissive: 0x9fe4ff, emissiveIntensity: 0.05, side: THREE.DoubleSide, depthWrite: false, forceSinglePass: true });   // flat panes: one pass (A/B 0 px)
   mats.stainA = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.18, emissive: 0xff4a86, emissiveIntensity: 0.06 });
   mats.stainB = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.18, emissive: 0x54d6ff, emissiveIntensity: 0.06 });
   const atlas = makeSignAtlas(signEntries());
@@ -784,7 +784,16 @@ export function create(ctx, escape) {
     const bm = new THREE.MeshStandardMaterial({ roughness: 0.55, side: THREE.DoubleSide });
     bunting = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), bm, buntList.length);
     bunting.name = 'palace_bunting'; bunting.castShadow = false; bunting.receiveShadow = true;
-    bunting.instanceMatrix.setUsage(THREE.DynamicDrawUsage); bunting.frustumCulled = false;
+    bunting.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    // the matrices are only written by the flutter (update), so the bounds come
+    // from the flag anchors + room for the swing: culled like everything else
+    {
+      const bb = new THREE.Box3(), v = new THREE.Vector3();
+      for (const it of buntList) bb.expandByPoint(v.set(it.x, it.y, it.z));
+      bunting.boundingSphere = bb.getBoundingSphere(new THREE.Sphere());
+      bunting.boundingSphere.radius += 2;
+      bunting.frustumCulled = true;
+    }
     const col = new THREE.Color();
     buntList.forEach((it, i) => bunting.setColorAt(i, col.set(it.color)));
     group.add(bunting);
@@ -910,7 +919,13 @@ export function create(ctx, escape) {
     for (const key in matSet) {
       const m = matSet[key]; if (!m || !m.isMaterial) continue;
       const glass = key === 'glass';
-      m.transparent = nk < 0.985 || glass;
+      const tr = nk < 0.985 || glass;
+      // three bakes `transparent` into the program (#define OPAQUE forces alpha
+      // to 1): a flip without needsUpdate left the lid and the cellar slab
+      // OPAQUE over the room whenever they had been drawn before you walked in
+      // (which, once the palace is frustum-culled, depended on where the lens
+      // had been at load). Recompile on the flip only.
+      if (m.transparent !== tr) { m.transparent = tr; m.needsUpdate = true; }
       m.opacity = glass ? 0.42 * nk : nk;
       m.depthWrite = nk > 0.6 && !glass;
     }
@@ -1094,7 +1109,10 @@ function makePart(pieces, material) {
   const merged = mergeGeometries(geos, false);
   for (const g of geos) g.dispose();
   const m = new THREE.Mesh(merged, material);
-  m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false;
+  // exact bounds (the part only ever moves as a whole, with its group): culled
+  // on both tiers, main pass and shadow pass
+  merged.computeBoundingSphere();
+  m.castShadow = true; m.receiveShadow = true; m.frustumCulled = true;
   return m;
 }
 

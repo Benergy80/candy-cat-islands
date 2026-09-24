@@ -196,7 +196,14 @@
 //   userData.fade (still capped at fadeHardMax on the per-frame path).
 //   Cost: the survivors of the broad phase are 30-50k-triangle merged meshes,
 //   so each sweep spends occBudget ray-triangle tests, nearest the sight line
-//   first, and resumes where it stopped — 2-6 ms per sweep, 1-3% of frame time.
+//   first, and resumes where it stopped. Those tests are COUNTED as before (the
+//   budget decides which candidates a sweep reads, so what it finds is unchanged),
+//   but they are ANSWERED by camera/bvh.js: a static tree per merged geometry,
+//   bit-identical hits to three's Mesh.raycast in tens of microseconds a ray
+//   instead of ~4.6 ms for one ray through the 50k-triangle Heights (Contract J:
+//   sweep frames 8-14 ms → ≤ 1 ms on the M1 Pro, CAMERA_SPEC A13). The trees are
+//   built while the world loads (world:ready) and, for meshes that come later, in
+//   update()'s spare time; a mesh without one is raycast by three meanwhile.
 //
 // Public API (other systems + tools/render.mjs depend on these):
 //   params {azimuth, elevation, distance, fov, minDist, maxDist,
@@ -250,7 +257,9 @@
 //   introspection: fading · fadedList · culled · culledList · culledSizes · occDist · occLift ·
 //                  dollyFloor · indoors · ladderHeld (the window carries the frame: no dolly/tilt) ·
 //                  patchDolly (the spring arm's dolly for a patched mass at the lens, Infinity = off) ·
-//                  occBlocked · occMs · blockerCount · sweepCount · current · target
+//                  occBlocked · occMs · sweepsDone (timed sweeps so far: a frame that raised it
+//                  swept, A13) · blockerCount · sweepCount · accel (camera/bvh.js: stats(), ready(o))
+//                  · current · target
 //                  controlAzimuth (the movement basis) · tilt (tiltFor(baseDistance))
 //                  · baseDistance · goalDistance · lead {x, z} (the aim's lead, §4.1)
 //                  occYaw (the mode-2 whisker yaw) · densityK · terrainLift · pinned
@@ -273,6 +282,8 @@ import * as THREE from 'three';
 import { damp, clamp, lerp, smoothstep } from '../core/util.js';
 import { createCutout } from './camera/cutout.js';
 import { createDensity, LOCAL_EVERY } from './camera/density.js';
+import { createRayAccel } from './camera/bvh.js';
+import { hypot2, hypot3 } from './camera/hypot.js';
 
 const STEP = Math.PI / 4;
 // The window reads the sweep's three AXIAL rays only (hat, chest, knees: bits 0-2). The two offset rays sit
@@ -297,6 +308,10 @@ const PATCH_SLACK = 1.0;
 const BUNDLE_PAD = 0.8;
 // the lens is this much nearer than the sweep's stop (u): the window's reading is confirmed from the real lens
 const WIN_CONFIRM_BACK = 0.5;
+// ms a non-sweep frame may spend building the sweep's triangle trees (camera/bvh.js; A13 non-sweep p95 ≤ 1.5 ms)
+const BUILD_MS = 0.6;
+// …and world:ready may spend this long building them all before the first frame (loading, not play)
+const PREBUILD_MS = 600;
 const ease = (t) => t * t * (3 - 2 * t);
 const MODE_TOAST = { 1: 'Camera: iso — you turn it (Q/E)', 2: 'Camera: follow — turns with you', 3: 'Camera: top — lay of the land' };
 const OVERHEAD_EL = 1.10;     // mode 3 pitch
@@ -536,6 +551,10 @@ export function create(ctx) {
   let cutPlinth = false;     // a PATCHED plinth right at the lens: the window grows (§5.2 rule 6)
   let winCarry = false;      // the window carries the frame this frame: the ladder holds still (§5.2)
   let sweepT = 0, occMs = 0;
+  // the sweep's triangle accelerator (camera/bvh.js, Contract J / A13): a static tree per merged geometry, the
+  // same hits as three's Mesh.raycast bit for bit; trees are queued by refreshCandidates() and built in update()'s
+  // spare time, and a mesh without one yet is raycast by three exactly as before (cost, never the answer)
+  const accel = createRayAccel({ minTris: 256 });
   // the see-through window's drive (§5.1): cutK eases toward 1 while cutNeed, holds cutHold s,
   // then closes; cutEff is what the shader and the QA see (× (1 − holdAng), 0 off screen / free)
   let cutKraw = 0, cutEff = 0, cutHoldT = 0, cutGrowK = 1, cutOnScr = true;
@@ -612,9 +631,10 @@ export function create(ctx) {
   // mode 1's Q/E hint (§4.4): the key to pulse ('Q' / 'E' / null), how long it shows, the cooldown, the timer
   let hintKey = null, hintT = 0, hintCool = 0, hintBlkT = 0, hintSeq = 0;
   // camMs (§6.4): update()'s own wall-clock cost, a ring of the last CAM_MS_N calls, and which of them ran the
-  // capsule sweep (sweptNow, set by update()). QA only: nothing in the camera reads it, so no frame depends on it.
+  // capsule sweep (sweptNow, set by update()). QA, and the tree builder's spare-time gate (camera/bvh.js: it never
+  // builds on a sweep frame); what a frame SEES never depends on it.
   const camMsBuf = new Float32Array(CAM_MS_N), camMsSw = new Uint8Array(CAM_MS_N);
-  let camMsI = 0, camMsN = 0, sweptNow = false;
+  let camMsI = 0, camMsN = 0, sweptNow = false, sweepsDone = 0;
   cam.fov = p.fov; cam.updateProjectionMatrix();
 
   const wrap = (a) => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; };
@@ -733,7 +753,7 @@ export function create(ctx) {
         const sx = pts[i + 1][0] - ax, sz = pts[i + 1][1] - az, L2 = sx * sx + sz * sz;
         if (L2 < 1e-6) continue;
         const t = clamp(((x - ax) * sx + (z - az) * sz) / L2, 0, 1);
-        const d = Math.hypot(ax + sx * t - x, az + sz * t - z);
+        const d = hypot2(ax + sx * t - x, az + sz * t - z);
         if (d > lim || d >= best) continue;
         const L = Math.sqrt(L2), cx = sx / L, cz = sz / L, c = ux * cx + uz * cz;
         if (Math.abs(c) <= 0.6) continue;
@@ -1034,6 +1054,8 @@ export function create(ctx) {
 
   /** Rotate the tether by d radians, eased over azDur (Q/E in mode 2). */
   function turnTether(d) { turnTotal = turnTotal * (1 - turnDone) + d; turnDone = 0; turnT = 0; }
+  /** Q / E: a manual orbit cancels the whiskers (§4.4): their offset folds into the tether, then the orbit acts. */
+  function turnStep(d, tOn) { if (tOn) { whiskerBake(); turnTether(d); manualT = 0; alignK = 0; recOn = false; } else startSnap(d); }
   function resetTether() { turnTotal = 0; turnDone = 1; turnT = 1; orbitNow = 0; fwdT = 0; alignK = 0; recOn = false; }
   /** The tether is handing the yaw back to p.azimuth (2→1/3, landing, ownership):
    *  keep the bearing the lens has, including any whisker offset. */
@@ -1553,6 +1575,8 @@ export function create(ctx) {
     get occBlocked() { return occBlocked; },
     /** Milliseconds the last capsule sweep cost (it runs at params.occSweep). */
     get occMs() { return occMs; },
+    /** How many timed sweeps update() has run (QA: a frame whose update() raised it was a sweep frame, A13). */
+    get sweepsDone() { return sweepsDone; },
     /** The see-through window's strength this frame, 0..1 (§5.1; 0 off screen, free, cut 0, in a noTilt hold). */
     get cutK() { return cutEff; },
     /** The clear-side whisker yaw (rad, §4.4) on top of the tether: mode 2 proper only, 0 everywhere else. */
@@ -1582,6 +1606,8 @@ export function create(ctx) {
       const shells = shellBy ? [shellBy.name || shellBy.type] : [];
       return { needSweep: cutNeedA, colRun, colSweeps, sweepClear: cutSweepClear, colTrigger: colTrigger(), allUnpatched: cutAllPlain, rays: cutRays, plinth: cutPlinth, carry: winCarry, inst: [instC, instJ], shells, grow: cutGrowK, hold: cutHoldT, raw: cutKraw, by, plainBy };
     },
+    /** The sweep's triangle accelerator (camera/bvh.js): stats(), ready(o), build(o) — QA / tools. */
+    get accel() { return accel; },
     /** The cutout module: isPatched(o), uniforms, stats (CAMERA_SPEC §5.1, §7). */
     get cutout() { return cut; },
     /** Is this mesh cut by the see-through window? (§7: never a NEVER_FADE / noCut / noFade mesh.) */
@@ -1930,11 +1956,9 @@ export function create(ctx) {
       const busyE = !!ctx.systems.interaction?.nearest?.();
       // V (§3): tap = recentre, hold = look. While the look is on it owns the mouse, Q/E, the wheel and WASD.
       const looking = lookInput(dt, inp, pl, busyE);
-      // a manual orbit cancels the whiskers (§4.4): their offset folds into the tether, then the orbit acts
-      const turn = (d) => { if (tOn) { whiskerBake(); turnTether(d); manualT = 0; alignK = 0; recOn = false; } else startSnap(d); };
       if (!looking) {
-        if (inp.pressed.has('KeyQ')) turn(+STEP);
-        if (inp.pressed.has('KeyE') && !busyE) turn(-STEP);
+        if (inp.pressed.has('KeyQ')) turnStep(+STEP, tOn);
+        if (inp.pressed.has('KeyE') && !busyE) turnStep(-STEP, tOn);
         if (inp.wheel) { p.distance = clamp(p.distance + inp.wheel * 0.035, p.minDist, p.maxDist); }
         // Drag orbits while ANY button is held: left sets pointer.down, right/middle
         // set pointer.orbit (input contract v3, CAMERA_SPEC §6.2); touch writes either.
@@ -2222,7 +2246,7 @@ export function create(ctx) {
       if (candT >= p.fadeRefresh) { candT = 0; refreshCandidates(); }
       sweepT += dt;
       if (sweepT >= p.occSweep) {
-        sweepT = 0; sweptNow = true;
+        sweepT = 0; sweptNow = true; sweepsDone++;
         // Measure from the UNDOLLIED stop: if the sweep looked from where the
         // dolly already put the lens, the blocker would read as gone and the
         // lens would spring back out, one frame on, one frame off.
@@ -2238,6 +2262,8 @@ export function create(ctx) {
         if (colRun) colSweeps++;
       }
       fadeBlockers(dt, cam.position, tmp);
+      // the accelerator's queue gets the frame's spare time: none on a sweep frame, BUILD_MS otherwise
+      if (accel.pending && !sweptNow) accel.work(BUILD_MS);
 
       // ── the see-through window's strength (§5.1) ────────────────────────
       // Open (λ cutRise) while a patched mass blocks a body ray (the sweep) or a wall / trunk
@@ -2421,6 +2447,16 @@ export function create(ctx) {
     try { cut.patchAll(); } catch (e) { console.log('[camera/cut] patch pass failed, the window stays shut:', e && e.message); }
     refreshCandidates();
   });
+  // …and the sweep's triangle trees are built while the world is still loading (≤ PREBUILD_MS; ~0.3 s for the
+  // ~0.8M triangles of both islands on the M1 Pro), whatever is left in update()'s spare time. Queued straight from
+  // the scene (not through refreshCandidates(): the candidate lists keep their own schedule, cut or not)
+  ctx.events.on('world:ready', () => {
+    ctx.scene.traverse((o) => {
+      if (!o.isMesh || o.isInstancedMesh || !o.geometry) return;
+      if (sweepable(o) || shellable(o)) accel.want(o);
+    });
+    accel.work(ctx.shot ? Infinity : PREBUILD_MS);   // (renders and camvis: all of them, whatever the machine)
+  });
 
   /**
    * Candidate blockers: every non-instanced, PROP-SIZED mesh in the scene.
@@ -2576,6 +2612,7 @@ export function create(ctx) {
           const bb = g.boundingBox;
           const maxDim = Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) * sc;
           const ix = g.index, pos = g.attributes && g.attributes.position;
+          accel.want(o);
           sweepers.push({
             o, bb, r: bs.radius * sc, maxDim, d: 0,
             tris: ((ix ? ix.count : (pos ? pos.count : 0)) / 3) | 0,
@@ -2586,7 +2623,7 @@ export function create(ctx) {
       } else if (shellable(o)) {
         if (!g.boundingBox) { try { g.computeBoundingBox(); } catch { return; } }
         const bb = g.boundingBox;
-        if (bb && Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) * worldScale(o) > p.occFadeMaxDim) shells.push({ o, bb });
+        if (bb && Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) * worldScale(o) > p.occFadeMaxDim) { shells.push({ o, bb }); accel.want(o); }
       }
 
       // the cheap per-frame path stays prop-sized only
@@ -2599,7 +2636,7 @@ export function create(ctx) {
 
   const worldScale = (o) => {
     const e = o.matrixWorld.elements;
-    return Math.max(Math.hypot(e[0], e[1], e[2]), Math.hypot(e[4], e[5], e[6]), Math.hypot(e[8], e[9], e[10]));
+    return Math.max(hypot3(e[0], e[1], e[2]), hypot3(e[4], e[5], e[6]), hypot3(e[8], e[9], e[10]));
   };
   /** Architecture systems hide their own roofs when you step inside; never touch one. */
   function isRoof(o) {
@@ -2645,7 +2682,6 @@ export function create(ctx) {
   // the camera put together.
   const rc = new THREE.Raycaster();
   const qaRay = new THREE.Raycaster();     // bodyVisibility() only — unbudgeted, on demand
-  rc.firstHitOnly = true;                  // honoured by three-mesh-bvh if it ever lands
   const rayA = new THREE.Vector3(), rayD = new THREE.Vector3();
   const rightV = new THREE.Vector3(), headV = new THREE.Vector3();
   const tmpBox = new THREE.Box3();
@@ -2662,6 +2698,7 @@ export function create(ctx) {
   const instM = new THREE.Matrix4(), instV = new THREE.Vector3(), sightV = new THREE.Vector3();
   const lensF = new THREE.Vector3();       // the REAL lens's view direction (to the chest), for the window's reading
   const lastSweepFrom = new THREE.Vector3(NaN, 0, 0);   // where update()'s last sweep cast from (occDebug({fromStop}))
+  const byOffset = (a, b) => a.d - b.d;    // the broad phase's order (nearest the sight line first), made once
   // THE DOLLY'S UNIT. The lens dollies along stop → AIM (occDist is a distance from the aim point), and the aim
   // runs up to ~8 u ahead of the visitor (the lead, §4.1): a blocker's dolly distance is its distance from the aim
   // along that axis, not from his body — measured from the body, a walk toward the lens left the "dollied" lens
@@ -2675,7 +2712,7 @@ export function create(ctx) {
   function nearestHit(o, far) {
     rayHits.length = 0;
     rc.far = far;
-    try { o.raycast(rc, rayHits); } catch { return null; }
+    try { accel.raycast(o, rc, rayHits); } catch { return null; }
     let best = null;
     for (let i = 0; i < rayHits.length; i++) if (!best || rayHits[i].distance < best.distance) best = rayHits[i];
     return best;
@@ -2720,7 +2757,7 @@ export function create(ctx) {
     instProbe.matrixWorld.multiplyMatrices(o.matrixWorld, instM);
     rc.set(rayA, rayDirs[k]); rc.near = 0.05; rc.far = rayLens[k] - 0.2;
     rayHits.length = 0;
-    try { instProbe.raycast(rc, rayHits); } catch { return true; }
+    try { accel.raycast(instProbe, rc, rayHits); } catch { return true; }
     let best = null;
     for (let i = 0; i < rayHits.length; i++) {
       const x = rayHits[i];
@@ -2800,6 +2837,8 @@ export function create(ctx) {
    */
   // (pre-built callbacks: the sweep runs inside update(), and for…of over a Map allocates an iterator)
   let tallyC = 0, tallyU = 0;
+  const unfadeTested = (o) => { if (testedNow.has(o) && !fadeNow.has(o)) sweepFade.delete(o); };
+  const fadeAdd = (o) => { sweepFade.add(o); };
   const orCut = (v) => { tallyC |= v; }, orPlain = (v) => { tallyU |= v; };
   const dropFarCut = (v, o) => { if (!nearNow.has(o)) cutHits.delete(o); };
   const dropFarPlain = (v, o) => { if (!nearNow.has(o)) plainHits.delete(o); };
@@ -2896,7 +2935,7 @@ export function create(ctx) {
       nearNow.add(o);
     }
     // nearest the sight line first: those are the ones that actually hide him
-    near.sort((a, b) => a.d - b.d);
+    near.sort(byOffset);
     for (let k = 0; k < rayEnds.length; k++) {
       rayDirs[k].subVectors(rayEnds[k], rayA);
       rayLens[k] = rayDirs[k].length();
@@ -2932,6 +2971,7 @@ export function create(ctx) {
       if (n === near.length - 1) sweepCursor = 0;
       const o = s.o;
       if (cullNow.has(o) || !o.visible) continue;
+      if (accel.pending && !accel.ready(o)) accel.urgent(o);   // raycast by three this time; its tree comes next
       testedNow.add(o);
       if (log) log.push({ n: o.name || o.type, tested: 1, tris: s.tris, rays: nRays, off: +Math.sqrt(s.d).toFixed(1), d: 9999 });
       let cm = 0, um = 0;                      // body rays this mesh blocks: as a cut-able mass / not
@@ -3117,7 +3157,7 @@ export function create(ctx) {
           instSpent++;
           o.getMatrixAt(j, instM);
           const e = instM.elements;
-          const isc = Math.max(Math.hypot(e[0], e[1], e[2]), Math.hypot(e[4], e[5], e[6]), Math.hypot(e[8], e[9], e[10]));
+          const isc = Math.max(hypot3(e[0], e[1], e[2]), hypot3(e[4], e[5], e[6]), hypot3(e[8], e[9], e[10]));
           const r = gbs.radius * isc * wsc * p.occInstK;
           if (r < p.occInstMin) continue;
           instV.copy(gbs.center).applyMatrix4(instM).applyMatrix4(o.matrixWorld);
@@ -3153,8 +3193,7 @@ export function create(ctx) {
     liftCap = plinthNear ? Math.max(p.occLiftMax, p.occLiftPlinth) : p.occLiftMax;
 
     // a mesh only stops ghosting once a sweep has actually looked at it again
-    for (const o of sweepFade) if (testedNow.has(o) && !fadeNow.has(o)) sweepFade.delete(o);
-    for (const o of fadeNow) sweepFade.add(o);
+    sweepFade.forEach(unfadeTested); fadeNow.forEach(fadeAdd);
 
     let blocked = 0;
     for (let k = 0; k < blockedRay.length; k++) if (blockedRay[k]) blocked++;
@@ -3205,18 +3244,18 @@ export function create(ctx) {
   }
 
   /** visible=false while the lens is inside a mesh; restore when it leaves. */
+  // (forEach with pre-built callbacks: it runs every sweep, and a spread / for…of allocates)
+  const uncull = (v, o) => { if (cullNow.has(o)) return; o.visible = true; culled.delete(o); };
+  const cullOne = (o) => {
+    if (culled.has(o)) return;
+    if (o.visible === false) return;           // somebody else (a roof) already hid it
+    const s = faded.get(o);                     // a culled mesh must not keep a ghost material
+    if (s) { if (o.material === s.mat) o.material = s.orig; faded.delete(o); }
+    o.visible = false; culled.set(o, true);
+  };
   function applyCull() {
-    for (const o of [...culled.keys()]) {
-      if (cullNow.has(o)) continue;
-      o.visible = true; culled.delete(o);
-    }
-    for (const o of cullNow) {
-      if (culled.has(o)) continue;
-      if (o.visible === false) continue;         // somebody else (a roof) already hid it
-      const s = faded.get(o);                     // a culled mesh must not keep a ghost material
-      if (s) { if (o.material === s.mat) o.material = s.orig; faded.delete(o); }
-      o.visible = false; culled.set(o, true);
-    }
+    culled.forEach(uncull);
+    cullNow.forEach(cullOne);
   }
   function clearCull() {
     for (const o of culled.keys()) o.visible = true;
@@ -3263,7 +3302,7 @@ export function create(ctx) {
       const bs = o.geometry.boundingSphere;
       if (!bs) continue;
       const e = o.matrixWorld.elements;
-      const sc = Math.max(Math.hypot(e[0], e[1], e[2]), Math.hypot(e[4], e[5], e[6]), Math.hypot(e[8], e[9], e[10]));
+      const sc = Math.max(hypot3(e[0], e[1], e[2]), hypot3(e[4], e[5], e[6]), hypot3(e[8], e[9], e[10]));
       const r = bs.radius * sc;
       if (r < 0.06) continue;                      // specks are not worth a clone
       // prop-sized only: a roof, a deck, a district or a hillside is never faded
@@ -3278,31 +3317,36 @@ export function create(ctx) {
     }
     // …plus whatever the last capsule sweep asked for (the merged districts and
     // the big props the sphere test can never see)
-    for (const o of sweepFade) {
-      if (!o.parent) { sweepFade.delete(o); continue; }      // left the scene
-      if (o.visible && !culled.has(o)) hit.add(o);
-    }
+    sweepFade.forEach(sweepHit);
 
-    const up = p.fadeTime > 0 ? dt / p.fadeTime : 1;
-    const down = p.fadeBack > 0 ? dt / p.fadeBack : 1;
-    for (const o of hit) {
-      if (culled.has(o)) continue;
-      let s = faded.get(o);
-      if (!s) { s = { k: 0, orig: o.material, mat: null }; faded.set(o, s); }
-      if (o.material !== s.orig && o.material !== s.mat) { s.orig = o.material; s.mat = null; }
-      if (!s.mat) s.mat = ghostFor(o, s.orig);
-      if (!s.mat) { faded.delete(o); continue; }
-      s.k = Math.min(1, s.k + up);
-      setOpacity(s.mat, 1 - (1 - p.fadeOpacity) * s.k);
-      o.material = s.mat;
-    }
-    for (const [o, s] of faded) {
-      if (hit.has(o) && !culled.has(o)) continue;
-      s.k = Math.max(0, s.k - down);
-      if (s.k < 0.02) { if (o.material === s.mat) o.material = s.orig; faded.delete(o); continue; }
-      if (s.mat) { setOpacity(s.mat, 1 - (1 - p.fadeOpacity) * s.k); o.material = s.mat; }
-    }
+    fadeUp = p.fadeTime > 0 ? dt / p.fadeTime : 1;
+    fadeDown = p.fadeBack > 0 ? dt / p.fadeBack : 1;
+    hit.forEach(fadeIn);
+    faded.forEach(fadeOut);
   }
+  // fadeBlockers()'s three passes (pre-built callbacks: it runs every frame, and for…of over a Set / Map allocates)
+  let fadeUp = 0, fadeDown = 0;
+  const sweepHit = (o) => {
+    if (!o.parent) { sweepFade.delete(o); return; }        // left the scene
+    if (o.visible && !culled.has(o)) hit.add(o);
+  };
+  const fadeIn = (o) => {
+    if (culled.has(o)) return;
+    let s = faded.get(o);
+    if (!s) { s = { k: 0, orig: o.material, mat: null }; faded.set(o, s); }
+    if (o.material !== s.orig && o.material !== s.mat) { s.orig = o.material; s.mat = null; }
+    if (!s.mat) s.mat = ghostFor(o, s.orig);
+    if (!s.mat) { faded.delete(o); return; }
+    s.k = Math.min(1, s.k + fadeUp);
+    setOpacity(s.mat, 1 - (1 - p.fadeOpacity) * s.k);
+    o.material = s.mat;
+  };
+  const fadeOut = (s, o) => {
+    if (hit.has(o) && !culled.has(o)) return;
+    s.k = Math.max(0, s.k - fadeDown);
+    if (s.k < 0.02) { if (o.material === s.mat) o.material = s.orig; faded.delete(o); return; }
+    if (s.mat) { setOpacity(s.mat, 1 - (1 - p.fadeOpacity) * s.k); o.material = s.mat; }
+  };
   /** Restore every faded blocker (used when the follow camera hands over). */
   function clearFades() {
     for (const [o, s] of faded) { if (o.material === s.mat) o.material = s.orig; }

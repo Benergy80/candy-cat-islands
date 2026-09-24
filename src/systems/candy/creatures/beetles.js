@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import { rng, hash } from '../../../core/util.js';
 import { CANDY } from '../../../core/palette.js';
-import { Pool, part, mergeParts, shadeAxis, applyTagShade, TAU, walkable, turnToward, pathShoulder, uiToast, uiSay, HIT, WET } from './common.js';
+import { Pool, part, mergeParts, shadeAxis, applyTagShade, TAU, walkable, turnToward, pathShoulder, uiToast, uiSay, HIT, WET, LOD } from './common.js';
 
 // Contract A body (units of the beetle's scale): shell, head, eyes and the
 // splayed legs all sit inside one circle at the pivot.
@@ -151,14 +151,17 @@ export function create(env) {
   const api = {
     pool, bugs, name: 'beetles',
     bounds: { x: -155, z: -32, r: 105 },
-    update(dt, ctx) {
+    update(dtFrame, ctx) {
       const t = ctx.state.elapsed;
       const p = ctx.systems.player?.position;
       const night = 1 - (ctx.state.daylight ?? 1);
-      squeakCd -= dt;
+      squeakCd -= dtFrame;
       let squeaked = false;
       for (let i = 0; i < bugs.length; i++) {
         const b = bugs[i];
+        // animation LOD (common.js): far / unseen beetles step at a lower rate
+        const dt = LOD.step(b, dtFrame, b.x, b.y, b.z, 2 + b.scale);
+        if (!dt) continue;
         // ── notice the player ───────────────────────────────────────────────
         let fleeing = false;
         if (p) {

@@ -922,7 +922,9 @@ export function create(ctx) {
   fxGeo.setAttribute('color', new THREE.BufferAttribute(fxCol, 4).setUsage(THREE.DynamicDrawUsage));
   fxGeo.setIndex(fxIdx);
   fxGeo.setDrawRange(trailIdxCount, Infinity);
-  const fxMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: true });
+  // forceSinglePass: three r170 would draw this DoubleSide transparent twice a
+  // frame (back, then front faces); the trails and rings read the same in one.
+  const fxMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: true, forceSinglePass: true });
   fxMat.onBeforeCompile = (sh) => { sh.vertexShader = fogVert(sh.vertexShader); };
   fxMat.customProgramCacheKey = () => 'planes_fx_v2';
   const fx = new THREE.Mesh(fxGeo, fxMat);
@@ -986,7 +988,7 @@ export function create(ctx) {
   blobGeo.setAttribute('aCell', aCell); blobGeo.setAttribute('aAlpha', aAlpha);
   const blobMat = new THREE.MeshBasicMaterial({
     map: makeBlobTexture(), color: 0x140a20, transparent: true, depthWrite: false, side: THREE.DoubleSide,
-    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, forceSinglePass: true,   // flat decal: one pass
   });
   blobMat.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader

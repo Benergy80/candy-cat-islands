@@ -60,7 +60,7 @@
 // noInstOcclude so no animal can ever shove the game camera around.
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
-import { flapClock, ShadowField, ColliderGrid, OBSTACLES, Ground, bodyCircles } from './creatures/common.js';
+import { flapClock, ShadowField, ColliderGrid, OBSTACLES, Ground, bodyCircles, LOD } from './creatures/common.js';
 import * as beetles from './creatures/beetles.js';
 import * as snails from './creatures/snails.js';
 import * as butterflies from './creatures/butterflies.js';
@@ -231,6 +231,7 @@ export function create(ctx) {
       if (!show || ctx.state.paused) return;
 
       flapClock.value = ctx.state.elapsed;
+      LOD.begin(ctx);                   // the walkers' animation LOD (common.js)
       obstacles.sync();
       ground.bind();
       ground.bindDynamic(ctx);          // the visitor + Sour Patch Kids: nobody walks through them

@@ -85,16 +85,21 @@ function makeWaffleTexture() {
 // ── sign atlas ───────────────────────────────────────────────────────────────
 const CELL = { W: 128, H: 128, COLS: 16, ROWS: 20 };
 
-/** entries: [{ id, cw, ch, draw(g, w, h) }] → { tex, uv:{id:{u0,v0,u1,v1}} } */
+/** entries: [{ id, cw, ch, draw(g, w, h) }] → { tex, uv:{id:{u0,v0,u1,v1}} }
+ *
+ * The page is packed on the 128 px cell grid (16 columns × up to 20 rows) and
+ * then CROPPED to the rows it actually uses (Contract J): the palace's and the
+ * cave's handful of signs used to cost a full 2048 × 2560 page each (~28 MB
+ * with mips) for four rows of content. Every cell keeps its 128 px size, so
+ * the texel density — and therefore the mip level every sign samples — is
+ * exactly what it was; only the unused magenta tail is gone. */
 export function makeSignAtlas(entries) {
-  const W = CELL.W * CELL.COLS, H = CELL.H * CELL.ROWS;
-  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-  const g = cv.getContext('2d');
-  g.fillStyle = '#ff00ff'; g.fillRect(0, 0, W, H); // magenta = unallocated (should never show)
+  const W = CELL.W * CELL.COLS;
   const used = Array.from({ length: CELL.ROWS }, () => new Array(CELL.COLS).fill(false));
-  const uv = {};
+  const placed = [];
   // pack tallest-first so first-fit does not fragment
   const sorted = [...entries].sort((a, b) => (b.ch || 1) - (a.ch || 1) || (b.cw || 1) - (a.cw || 1));
+  let rows = 1;
   for (const e of sorted) {
     const cw = e.cw || 1, ch = e.ch || 1; let spot = null;
     outer: for (let r = 0; r <= CELL.ROWS - ch; r++) for (let c = 0; c <= CELL.COLS - cw; c++) {
@@ -104,13 +109,21 @@ export function makeSignAtlas(entries) {
     }
     if (!spot) { console.warn('[candy arch] sign atlas full, dropped', e.id); continue; }
     for (let i = 0; i < ch; i++) for (let j = 0; j < cw; j++) used[spot.r + i][spot.c + j] = true;
-    const x = spot.c * CELL.W, y = spot.r * CELL.H, w = cw * CELL.W, h = ch * CELL.H;
+    placed.push({ e, x: spot.c * CELL.W, y: spot.r * CELL.H, w: cw * CELL.W, h: ch * CELL.H });
+    rows = Math.max(rows, spot.r + ch);
+  }
+  const H = rows * CELL.H;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#ff00ff'; g.fillRect(0, 0, W, H); // magenta = unallocated (should never show)
+  const uv = {};
+  for (const { e, x, y, w, h } of placed) {
     g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip(); g.translate(x, y);
     try { e.draw(g, w, h); } catch (err) { console.warn('[candy arch] sign draw failed', e.id, err); }
     g.restore();
-    // PADDING: 4 px, not 0.5. Every sign in Candyland shares one 2048 × 2560
-    // atlas and the quads are mipmapped; at mip level 2 a half-pixel inset is
-    // already sampling the NEIGHBOURING cell, which is exactly the "SUGAR PIER
+    // PADDING: 4 px, not 0.5. Every sign in Candyland shares one atlas and the
+    // quads are mipmapped; at mip level 2 a half-pixel inset is already
+    // sampling the NEIGHBOURING cell, which is exactly the "SUGAR PIER
     // letterforms corrupt at native res" from round 3 — the corruption was the
     // sign packed next to it bleeding through the strokes. Four texels of quiet
     // margin survives mip 3, which is as small as any of these boards ever gets.
@@ -118,7 +131,9 @@ export function makeSignAtlas(entries) {
     uv[e.id] = { u0: (x + pad) / W, v0: 1 - (y + h - pad) / H, u1: (x + w - pad) / W, v1: 1 - (y + pad) / H };
   }
   const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 16;
+  // anisotropy 4, not 16: A/B-diffed at the sign-heavy views (arrival, village,
+  // palace, cupcake, Main Street) — ≤ 0.008% of pixels move, none visibly
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
   // mobile tier: every atlas (Candyland's, the palace's, the cave's) ≤ 2048
   if (TIER.mobile) halveCanvasTexture(tex, 4);
   return { tex, uv };
@@ -174,15 +189,19 @@ export function plate(g, w, h, o = {}) {
 // and cave build with it. candy/architecture.js (created before escape) calls
 // setKitTier(ctx.state.mobile) first thing, and on the MOBILE tier the kit's
 // defaults follow Contract I for every caller:
-//   · createBuilder() merges are frustum-culled unless opts.cull === false
-//     (desktop default is unchanged: never culled). A merged mesh is authored
-//     in place, so its bounds are exact — culling it cannot pop anything;
+//   · createBuilder() merges are frustum-culled unless opts.cull === false.
+//     Since the frame-rate pass (Contract J) that is the DESKTOP default too:
+//     a merged mesh is authored in place, so its bounds are exact — culling it
+//     cannot pop anything — and three then also culls it against the key
+//     light's shadow frustum, so Cat Island stops drawing Candyland (57 main +
+//     40 shadow calls) and the palace/cave merges (escape builds with this kit)
+//     stop drawing from across the strait;
 //   · makeSignAtlas() hands back the atlas already halved (2048 × 2560 →
 //     1024 × 1280, anisotropy ≤ 4 — textures ≤ 2048), and halveCanvasTexture()
 //     is idempotent, so a caller that halves again changes nothing.
 // createBuilder's optional 4th argument:
 //   opts.cull   true/false: merged meshes keep their bounds and ARE (or are
-//               not) frustum-culled; omitted → the tier default above
+//               not) frustum-culled; omitted → culled (both tiers)
 //   opts.split  (x, z) → district id: buckets become "material|district", so
 //               one island-wide merge becomes a handful the camera can cull
 //               (no longer used by Candyland — see architecture.js's header)
@@ -243,7 +262,7 @@ export function createBuilder(mats, signUV, keyMap = null, opts = null) {
   // "material|district", so one island-wide merge becomes a handful of
   // district merges the camera can cull.
   const split = opts && typeof opts.split === 'function' ? opts.split : null;
-  const cull = opts && opts.cull !== undefined && opts.cull !== null ? !!opts.cull : TIER.mobile;
+  const cull = opts && opts.cull !== undefined && opts.cull !== null ? !!opts.cull : true;
   const forward = opts && opts.forward ? opts.forward : null;
 
   function place(key, geo, o) {
@@ -478,6 +497,11 @@ export function createMaterials() {
         color: 0x000000, emissive: 0xffb861, emissiveMap: fall, emissiveIntensity: 0,
         roughness: 1, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
         depthWrite: false, side: THREE.DoubleSide,
+        // one pass, both tiers (Contract J): three draws a transparent DoubleSide
+        // object twice (back faces, then front) and re-evaluates its program
+        // twice a frame; for an additive decal the order cannot matter —
+        // A/B-diffed: 0 px at the night views. Clones inherit it.
+        forceSinglePass: true,
       });
     })(),
     flow: new THREE.MeshStandardMaterial({ map: flowTex, vertexColors: true, roughness: 0.28, transparent: true, opacity: 0.88, side: THREE.DoubleSide, depthWrite: false }),

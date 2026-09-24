@@ -33,6 +33,7 @@ import { createMarkers } from './inventory/markers.js';
 import { authorPickups } from './inventory/places.js';
 
 const BOB = 0.13, SPIN = 0.9;
+const NO_TILT = [0, 0, 0];      // (shared: `|| [0, 0, 0]` built a fresh array per pickup per frame)
 const POOL_RANGE = 104;          // pickups further than this from the camera's FOCUS stop drawing
 const AMMO_RANGE = 62;           // ammo is small: its pools only draw near the camera's focus
 const SPARKLE_RANGE = 34;
@@ -77,7 +78,11 @@ export function create(ctx) {
     const V = VISUALS[key];
     if (!V) return null;
     const { geo, tris } = buildVisual(key, { halo: true });
-    p = { key, V, geo, tris, cap: 0, mesh: null, count: 0, colorDirty: true };
+    if (!geo.boundingSphere) geo.computeBoundingSphere();
+    // conservative reach of one instance around its origin, at scale 1
+    const geoR = geo.boundingSphere.center.length() + geo.boundingSphere.radius;
+    p = { key, V, geo, tris, cap: 0, mesh: null, count: 0, colorDirty: true,
+      geoR, bounds: new THREE.Sphere(), x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0, sMax: 0 };
     pools.set(key, p);
     poolTris += tris;
     return p;
@@ -89,7 +94,11 @@ export function create(ctx) {
     const m = new THREE.InstancedMesh(p.geo, p.V.gloss ? mats.gloss : mats.matte, cap);
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     m.castShadow = false; m.receiveShadow = false;   // they float and sparkle: a cast shadow reads as a bug
-    m.frustumCulled = false;
+    // Culled against the frame's own bounds (Contract J): update() fits
+    // p.bounds round the instances it packed this frame, so a pool whose
+    // pickups are all behind the lens costs no draw call (up to 13 of 18 were).
+    m.frustumCulled = true;
+    m.boundingSphere = p.bounds;
     m.count = 0;
     if (p.V.tint) { const c = new THREE.Color(1, 1, 1); for (let i = 0; i < cap; i++) m.setColorAt(i, c); }
     group.add(m);
@@ -435,7 +444,10 @@ export function create(ctx) {
       ctx.systems.ui?.toast(d ? `${d.name} in hand` : 'Hands free', 1.8, { icon: 'spark' });
     }
 
-    for (const p of pools.values()) { p.count = 0; p.near = false; }
+    for (const p of pools.values()) {
+      p.count = 0; p.near = false;
+      p.x0 = p.y0 = p.z0 = Infinity; p.x1 = p.y1 = p.z1 = -Infinity; p.sMax = 0;
+    }
     markers.begin();
     // markers breathe with the clock: bright enough to fight noon frosting,
     // proper beacons after dark.
@@ -461,13 +473,17 @@ export function create(ctx) {
       pool_.near = true;
       const i = pool_.count++;
       if (i >= pool_.cap) continue;                 // grown next frame
-      const tilt = p.V.tilt || [0, 0, 0];
+      const tilt = p.V.tilt || NO_TILT;
       _e.set(tilt[0], t * SPIN + p.phase, tilt[2]);
       _q.setFromEuler(_e);
       _p.set(p.x, p.baseY + Math.sin(t * 1.7 + p.phase) * BOB, p.z);
       _s.setScalar(p.scale);
       _m.compose(_p, _q, _s);
       pool_.mesh?.setMatrixAt(i, _m);
+      if (_p.x < pool_.x0) pool_.x0 = _p.x; if (_p.x > pool_.x1) pool_.x1 = _p.x;
+      if (_p.y < pool_.y0) pool_.y0 = _p.y; if (_p.y > pool_.y1) pool_.y1 = _p.y;
+      if (_p.z < pool_.z0) pool_.z0 = _p.z; if (_p.z > pool_.z1) pool_.z1 = _p.z;
+      if (p.scale > pool_.sMax) pool_.sMax = p.scale;
       if (p.V.tint && pool_.mesh) { _col.set(p.tint || 0xffffff); pool_.mesh.setColorAt(i, _col); }
 
       // ── the marker: a pulsing pool of light and the shaft standing in it ────
@@ -508,6 +524,9 @@ export function create(ctx) {
       if (!p.mesh) continue;
       p.mesh.visible = true;
       p.mesh.count = Math.min(p.count, p.cap);
+      const hx = (p.x1 - p.x0) * 0.5, hy = (p.y1 - p.y0) * 0.5, hz = (p.z1 - p.z0) * 0.5;
+      p.bounds.center.set(p.x0 + hx, p.y0 + hy, p.z0 + hz);
+      p.bounds.radius = Math.sqrt(hx * hx + hy * hy + hz * hz) + p.geoR * p.sMax;
       p.mesh.instanceMatrix.needsUpdate = true;
       if (p.V.tint && p.mesh.instanceColor) p.mesh.instanceColor.needsUpdate = true;
     }
