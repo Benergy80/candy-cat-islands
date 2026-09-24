@@ -38,6 +38,16 @@
 // Night rule: two hits inside 10 seconds and that kid is DONE — it gives up,
 // walks home, and stays in for the rest of the night.
 //
+// WATER (Ben, 2026-09-23): waterMelt(k, x, z, surfaceY, kind, why) — a kid whose
+// feet went into the sea, the Chocolate Lake or the syrup river (sourpatch.js
+// decides; sourpatch/water.js holds the rule) SLUMPS AND MELTS over 1.6 s:
+// arms up, then flattening, leaning over, shrinking and settling into the
+// water while it steams and bubbles in its own colour. The pool it leaves is
+// sourpatch/puddles.js. It is then 'gone' — the 'gone' clock only runs while
+// it is NOT night — and re-forms at its own daytime spot (respawnSpot) after
+// WATER_RESPAWN_SEC of day, or at the next dusk, whichever comes first.
+// Emits 'sourpatch:melt' { id, i, name, x, z, color, kind, why }.
+//
 // The reaction owns the kid while it runs: brain(k) returns true and sourpatch
 // skips the day/night brain for that kid. Nothing is allocated per frame.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,6 +55,8 @@ import { clamp, damp } from '../../../core/util.js';
 
 export const RESPAWN_SEC = 25;      // sugar puddle → front door
 export const SHRINK_SEC = 9;        // water balloon: fun-size for this long
+export const WATER_MELT_SEC = 1.6;  // walked into water: slump → pool of liquid
+export const WATER_RESPAWN_SEC = 90;  // …back after this much DAYTIME (or at the next dusk)
 const SHRINK_TO = 0.55;             // …at this scale
 const GRAV = 26;                    // the punt arc's gravity (fly mode)
 const GIVEUP_WINDOW = 10;           // hit twice inside this and it goes home
@@ -107,6 +119,8 @@ export function createHits(ctx, D) {
     cannon: 0, stagger: 0, panic: 0, stuck: 0, bounce: 0, spin: 0, shrink: 0, star: 0 };
   const byWeapon = Object.create(null);
   let total = 0, dissolvedTotal = 0, gaveUpTotal = 0, stomps = 0;
+  let waterMelts = 0, waterRespawns = 0;
+  const waterWhy = Object.create(null);
   let elapsed = 0;
 
   const P = () => ctx.systems.particles;
@@ -244,6 +258,64 @@ export function createHits(ctx, D) {
     o.speed = 4.6; o.up = 1.0; o.life = 0.6; o.lifeVar = 0.3; o.size = 0.7; o.sizeEnd = 0.04;
     o.gravity = -3; o.drag = 1.8; o.spread = 0.3; o.spin = 2; o.alpha = 1; o.fadeOut = 0.5;
     P()?.burst(o);
+  }
+
+  /** Melting in water: steam off the top, bubbles in its own colour at the
+   *  water line, and the odd ring spreading out from it. (Colour lists are
+   *  built once per kid; nothing here allocates while it fizzes.) */
+  const STEAM = [0xffffff, 0xf2fbff];
+  const _wr = { ringColor: 0xffffff, ringSize: 1, ringLife: 0.9 };
+  const wetCols = (k) => k._wetCols || (k._wetCols = [k.color, 0xffffff, k.color]);
+  const splashCols = (k) => k._splashCols || (k._splashCols = [0xffffff, 0xd9f2ff, k.color]);
+  function waterFizz(k, h, prog) {
+    const o = bag();
+    o.x = k.x + (rand() - 0.5) * 0.3; o.y = k.y + (0.9 - 0.5 * prog) * k.scale; o.z = k.z + (rand() - 0.5) * 0.3;
+    o.shape = 'puff'; o.count = 2; o.color = STEAM;
+    o.speed = 0.4; o.up = 1.6; o.life = 1.0; o.lifeVar = 0.3; o.size = 0.34; o.sizeEnd = 0.95;
+    o.gravity = 1.2; o.drag = 1.2; o.spread = 0.3; o.alpha = 0.5; o.fadeOut = 0.6;
+    P()?.burst(o);
+    const b = bag();
+    const a = rand() * 6.28, r = 0.25 + rand() * 0.45;
+    b.x = k.x + Math.cos(a) * r; b.y = (Number.isFinite(h.wy) ? h.wy : k.y) + 0.05; b.z = k.z + Math.sin(a) * r;
+    b.shape = 'soft'; b.count = 2; b.color = wetCols(k);
+    b.speed = 0.5; b.up = 1.3; b.life = 0.5; b.lifeVar = 0.3; b.size = 0.15; b.sizeEnd = 0.22;
+    b.gravity = 0.8; b.drag = 2; b.spread = 0.08; b.alpha = 0.9; b.fadeIn = 0.08; b.fadeOut = 0.35;
+    P()?.burst(b);
+    if (rand() < 0.3) {
+      _wr.ringColor = k.color; _wr.ringSize = 1.6 + prog * 1.4; _wr.ringLife = 0.9;
+      P()?.ripple?.(k.x, (Number.isFinite(h.wy) ? h.wy : k.y) + 0.03, k.z, _wr);
+    }
+  }
+
+  /**
+   * Its feet went into the water. Returns true if it started melting (false:
+   * already a puddle). `why`: 'walk' | 'lunge' | 'flee' | 'panic' | 'fly' | … —
+   * how it got there, for the verifier (a hunter must never melt from 'walk').
+   */
+  function waterMelt(k, wx, wz, surf, kind, why) {
+    if (!k || melting(k)) return false;
+    const h = enter(k, 'dissolve', WATER_MELT_SEC, { cause: 'water', fx: wx, fz: wz, wy: surf, kind: kind || 'water', why: why || 'walk' });
+    h.fizzT = 0; h.puddled = false;
+    k.gotHat = false; k.shrinkT = 0;
+    D.say(k, line(V.SWIM || V.MELT, k), true);
+    k.mouthOpen = 1; k.mouthWide = 1; k.squash = -0.2; k.hop = 0;
+    // the splash it made going in
+    const o = bag();
+    o.x = wx; o.y = (Number.isFinite(surf) ? surf : k.y) + 0.15; o.z = wz; o.count = 16;
+    o.color = splashCols(k); o.speed = 3.0; o.up = 1.6; o.life = 0.6; o.lifeVar = 0.3;
+    o.size = 0.16; o.gravity = -10; o.spread = 0.35; o.alpha = 0.9;
+    P()?.burst(o);
+    _wr.ringColor = 0xffffff; _wr.ringSize = 2.4; _wr.ringLife = 0.9;
+    P()?.ripple?.(wx, (Number.isFinite(surf) ? surf : k.y) + 0.03, wz, _wr);
+    waterMelts++;
+    const w = h.why; waterWhy[w] = (waterWhy[w] || 0) + 1;
+    ctx.events.emit('sourpatch:melt', { id: k.i, i: k.i, name: k.name, x: wx, z: wz, color: k.color, kind: h.kind, why: h.why });
+    // the neighbours back off the edge
+    for (const o2 of kids) {
+      if (o2 === k || o2.hurt || o2.vis < 0.5 || D.dist2d(o2.x, o2.z, k.x, k.z) > 5) continue;
+      if (rand() < 0.5) { o2.squash = -0.18; o2.hopT = 0; }
+    }
+    return true;
   }
 
   // ── entering a reaction ────────────────────────────────────────────────────
@@ -556,8 +628,35 @@ export function createHits(ctx, D) {
     switch (h.mode) {
       // ── fizz, shrink, sink, puddle ──────────────────────────────────────
       case 'dissolve': {
-        const wet = h.cause === 'spray';
         const prog = clamp(h.t / h.dur, 0, 1);
+        if (h.cause === 'water') {
+          // IN THE WATER: arms up for a beat, then it slumps — flattens, leans
+          // over, shrinks and settles into the water — steaming and bubbling in
+          // its own colour while the pool (puddles.js) spreads out from it
+          k.moving = 0; k.gaitAmp = 0; k.hurtHead = true;
+          k.armMode = prog < 0.4 ? 'up' : 'free';
+          k.vis = Math.max(0.02, 1 - prog * (0.35 + 0.63 * prog));
+          k.squash = -0.28 * Math.min(1, prog * 1.8); k.squashV = 0;
+          k.lean = 0.12 + 0.5 * prog;
+          k.air = -0.22 * prog;
+          k.crouch = Math.max(k.crouch || 0, 0.5 * prog);
+          k.sway = Math.sin(h.t * 19) * 0.3 * (1 - prog);
+          k.headRoll = Math.sin(h.t * 15 + 1.1) * 0.34 * (1 - prog * 0.6);
+          k.mouthOpen = 0.95 * (1 - prog * 0.5); k.mouthWide = 1;
+          k.lookX = Math.sin(h.t * 14) * 0.8; k.lookY = 0.5; k.blink = 0;
+          h.fizzT -= dt;
+          if (h.fizzT <= 0) { h.fizzT = 0.11; waterFizz(k, h, prog); }
+          if (prog >= 1) {
+            // a pool of liquid now; the kid itself waits (invisible) at its own spot
+            k.vis = 0; k.air = 0; k.squash = 0; k.lean = 0; k.sway = 0;
+            const s = D.respawnSpot ? D.respawnSpot(k) : D.homeSpot(k);
+            k.x = s.x; k.z = s.z; k.groundY = D.groundY(k.x, k.z); k.y = k.groundY;
+            h.mode = 'gone'; h.t = 0; h.dur = WATER_RESPAWN_SEC; h.rx = s.x; h.rz = s.z;
+            h.meltPhase = D.phase();
+          }
+          return true;
+        }
+        const wet = h.cause === 'spray';
         k.moving = 0; k.gaitAmp = 0; k.armMode = 'up'; k.hurtHead = true;
         k.vis = Math.max(0.02, 1 - prog);                   // shrinks away, evenly
         k.air = -0.34 * prog * prog;                        // and sinks in
@@ -581,9 +680,20 @@ export function createHits(ctx, D) {
       // ── twenty-five seconds of being a puddle ───────────────────────────
       case 'gone': {
         k.vis = 0; k.moving = 0; k.gaitAmp = 0; k.air = 0; k.hurtHead = true;
-        const home = D.homeSpot(k);
-        k.x = home.x; k.z = home.z;
-        if (h.t >= h.dur) {
+        let back = h.t >= h.dur;
+        if (h.cause === 'water') {
+          // melted in water: gone for the rest of the night; back after
+          // WATER_RESPAWN_SEC of daytime, or at the next dusk
+          const ph = D.phase();
+          if (ph === 'hunting') h.t -= dt;
+          k.x = h.rx; k.z = h.rz;
+          back = ph !== 'hunting' && (h.t >= h.dur || (ph === 'watching' && h.meltPhase !== 'watching'));
+          if (back) waterRespawns++;
+        } else {
+          const home = D.homeSpot(k);
+          k.x = home.x; k.z = home.z;
+        }
+        if (back) {
           h.mode = 'reform'; h.t = 0; h.dur = 0.9;
           k.yaw = k.desYaw = Math.atan2(p.x - k.x, p.z - k.z);
           k.squash = -0.24; k.hopT = 0;
@@ -602,7 +712,7 @@ export function createHits(ctx, D) {
         k.moving = 0; k.gaitAmp = 0; k.armMode = 'up'; k.hurtHead = true;
         k.headRoll = Math.sin(h.t * 9) * 0.2 * (1 - h.t / h.dur);
         k.mouthWide = 0.8;
-        if (!h.said && h.t > 0.25) { h.said = true; D.say(k, line(V.REFORM, k)); }
+        if (!h.said && h.t > 0.25) { h.said = true; D.say(k, line(h.cause === 'water' && V.REFORM_WET ? V.REFORM_WET : V.REFORM, k)); }
         if (h.t >= h.dur) { k.vis = 1; clear(k); }
         return true;
       }
@@ -793,8 +903,10 @@ export function createHits(ctx, D) {
   }
 
   return {
-    hit, stomp, bounce, brain, classify, clear,
+    hit, stomp, bounce, brain, classify, clear, waterMelt,
     melting,
+    /** true while it is melting / a pool / reforming because of WATER */
+    inWater: (k) => !!k.hurt && k.hurt.cause === 'water',
     resolve,
     /** true while the kid is out of the game (puddle / sulking at home) */
     absent: (k) => !!k.hurt && (k.hurt.mode === 'gone' || k.hurt.mode === 'sulk'),
@@ -810,6 +922,7 @@ export function createHits(ctx, D) {
     counters: () => ({
       hits: total, byReaction: { ...counts }, byWeapon: { ...byWeapon },
       dissolved: dissolvedTotal, gaveUp: gaveUpTotal, stomps,
+      water: { melts: waterMelts, respawns: waterRespawns, why: { ...waterWhy } },
     }),
   };
 }

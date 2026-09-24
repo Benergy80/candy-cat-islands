@@ -212,6 +212,12 @@ const CAM_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3',
 const LOOK_ON = 0.05;                 // camera.looking above this = looking (segment lit, caption, marker)
 const YOU_EDGE = 40;                  // px: the off-screen chevron sits this far inside the frame edge…
 const YOU_EDGE_B = 66;                // …and this far above the bottom one (its tag hangs under the disc)
+// The HUD boxes the chevron and the look caption keep clear of (ui.js's, read-only: their rects, never their
+// styles): the dialogue box and the interaction prompt. The critics found the chevron drawn INSIDE the dialogue
+// box (cam_look_offscreen) and the prompt parked on the caption (cam_look_night m2). HUD_GAP px of air.
+const HUD_AVOID = ['.cci-say-panel', '.cci-prompt-in'];
+const HUD_GAP = 8;
+const YOU_BOX = [30, 26, 30, 46];     // the chevron's extent around its centre: left, up, right, down (disc + tag)
 const TEACH_TEXT = 'Lost him? Hold V to look around · 3 = top view';
 const TEACH_KEY = 'cci-cam-teach';
 let teachDone = false;                // once per session (and sessionStorage, across reloads of the tab)
@@ -304,6 +310,22 @@ export function createCamChip(ctx, panel) {
   you.style.display = 'none'; mark.style.display = 'none'; chev.style.display = 'none';
   ctx.uiRoot?.appendChild(you);
   let youShown = false, youOn = null, youOp = -1;
+  // the HUD boxes to keep clear of (looked up lazily: ui.js may build after us), their rects read once a frame
+  // while the look is on (getBoundingClientRect: a hidden panel is display:none, so it reads 0 × 0 and is skipped)
+  const avoidEls = [];
+  const avoidR = HUD_AVOID.map(() => ({ on: false, l: 0, t: 0, r: 0, b: 0 }));
+  function readAvoid() {
+    for (let i = 0; i < HUD_AVOID.length; i++) {
+      if (!avoidEls[i] || !avoidEls[i].isConnected) avoidEls[i] = document.querySelector(HUD_AVOID[i]);
+      const e = avoidEls[i], a = avoidR[i];
+      a.on = false;
+      if (!e) continue;
+      const rc = e.getBoundingClientRect();
+      if (rc.width < 1 || rc.height < 1) continue;
+      a.on = true; a.l = rc.left - HUD_GAP; a.t = rc.top - HUD_GAP; a.r = rc.right + HUD_GAP; a.b = rc.bottom + HUD_GAP;
+    }
+  }
+  let chipDY = 0;                                // the chip's lift off a prompt parked on it (px, eased)
 
   let blockT = 0, densT = 0;          // the teach toast's two timers
 
@@ -332,7 +354,24 @@ export function createCamChip(ctx, panel) {
     const cx = W / 2, cy = H / 2, dx = ps.x - cx, dy = ps.y - cy;
     const hw = Math.max(1, cx - YOU_EDGE), hh = Math.max(1, dy > 0 ? cy - YOU_EDGE_B : cy - YOU_EDGE);
     const t = Math.min(dx ? hw / Math.abs(dx) : Infinity, dy ? hh / Math.abs(dy) : Infinity);
-    const x = Number.isFinite(t) ? cx + dx * t : cx, y = Number.isFinite(t) ? cy + dy * t : cy;
+    let x = Number.isFinite(t) ? cx + dx * t : cx, y = Number.isFinite(t) ? cy + dy * t : cy;
+    // keep the chevron (disc + tag) off the dialogue box and the prompt: the smallest move up, left or right that
+    // clears every box and stays inside the frame; the arrow keeps pointing at him from where it was aimed
+    for (let pass = 0; pass < 2; pass++) {
+      let hit = null;
+      for (let i = 0; i < avoidR.length; i++) {
+        const a = avoidR[i];
+        if (a.on && x + YOU_BOX[2] > a.l && x - YOU_BOX[0] < a.r && y + YOU_BOX[3] > a.t && y - YOU_BOX[1] < a.b) { hit = a; break; }
+      }
+      if (!hit) break;
+      const up = hit.t - YOU_BOX[3], left = hit.l - YOU_BOX[2], right = hit.r + YOU_BOX[0], m = YOU_EDGE * 0.5;
+      let bx = x, by = y, bd = Infinity;
+      if (up - YOU_BOX[1] >= m && Math.abs(y - up) < bd) { bx = x; by = up; bd = Math.abs(y - up); }
+      if (left - YOU_BOX[0] >= m && Math.abs(x - left) < bd) { bx = left; by = y; bd = Math.abs(x - left); }
+      if (right + YOU_BOX[2] <= W - m && Math.abs(x - right) < bd) { bx = right; by = y; bd = Math.abs(x - right); }
+      if (bd === Infinity) break;
+      x = bx; y = by;
+    }
     chev.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px)`;
     arrow.style.transform = `rotate(${(Math.atan2(dx, -dy) * 180 / Math.PI).toFixed(1)}deg)`;
   }
@@ -393,6 +432,23 @@ export function createCamChip(ctx, panel) {
         cap.style.opacity = Math.min(1, capK * 1.6).toFixed(3);
         cap.style.transform = `translateY(${((1 - capK) * 6).toFixed(2)}px)`;
       }
+      // the HUD boxes (dialogue, prompt) as they stand this frame, while the chip or the look's marker is up; the
+      // chip (with its caption) rises clear of one that parks on it — the prompt follows his feet, so with him in
+      // the bottom-left corner it sat on the caption and the mode keys (the critics' cam_look_night m2)
+      let chipGoal = 0;
+      if (anim.visible || lk > LOOK_ON) {
+        readAvoid();
+        if (anim.visible) {
+          const rc = el.getBoundingClientRect();
+          let l = rc.left, r = rc.right, t = rc.top - chipDY, b = rc.bottom - chipDY;   // where it stands without the lift
+          if (capShown) { const rq = cap.getBoundingClientRect(); l = Math.min(l, rq.left); r = Math.max(r, rq.right); t = Math.min(t, rq.top - chipDY); }
+          if (hintShown) { const rq = hintEl.getBoundingClientRect(); l = Math.min(l, rq.left); r = Math.max(r, rq.right); t = Math.min(t, rq.top - chipDY); }
+          for (let i = 0; i < avoidR.length; i++) { const a = avoidR[i]; if (a.on && r > a.l && l < a.r && b > a.t && t < a.b) chipGoal = Math.min(chipGoal, a.t - b); }
+        }
+      }
+      const dyWas = chipDY;
+      chipDY = Math.abs(chipGoal - chipDY) < 0.5 ? chipGoal : chipDY + (chipGoal - chipDY) * Math.min(1, dt * 12);
+      if (chipDY !== dyWas) anim.o.base = chipDY ? `translateY(${chipDY.toFixed(1)}px)` : '';
       // the Q/E hint (§4.4): a new camera.hint shows the keycap row for its seconds, pulsing; a look takes the slot
       const h = cam?.hint;
       if (h && Number(h.seq) !== hintSeq) {

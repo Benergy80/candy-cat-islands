@@ -5,6 +5,7 @@
 //   WASD move · Shift run · Space jump, Space again in the air = double jump
 //   with a forward flip · C hold = duck, C while running = slide, C in the air
 //   = STOMP (slam + shockwave) · R = dodge roll (0.6 s, ~5 u, i-frames).
+//   V look-around (hold) / tap V recentre / right-drag orbit belong to the camera;
 //   E/Enter interact, left-click / X use item, F cycle item, 1/2/3 camera:
 //   those belong to other systems and are not read here.
 //

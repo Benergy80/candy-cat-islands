@@ -5,11 +5,14 @@
 // get a small shader patch: a screen-space ELLIPSE centred on the visitor's
 // chest in which fragments that sit IN FRONT of him (view depth under his
 // chest depth − 1 u, world y over his feet + 0.35) are discarded through a 4×4
-// ordered dither. The core (e < 0.55) is fully open, the feather band (0.55 ..
-// 1.0) thins out and is rim-darkened so the hole reads as a window, not a
-// rendering fault. A second term, the NEAR-LENS band, dithers anything patched
-// within a few units of the lens (it replaces the old "ghost the district
-// within 6 u of the lens" rule). Discarded fragments write no depth, so where
+// ordered dither. The core is fully open; only a thin feather band at the rim
+// (uCutR.w of the radius, ≈ cutFeatherPx px: a 30 px ring of Bayer dots read as
+// a rendering fault, not a window) thins out and is rim-darkened so the hole
+// reads as a window. A second term, the NEAR-LENS CLIP, discards anything
+// patched nearer the lens than NEAR_CORE of the band depth outright, with a thin
+// dithered lip out to the band depth (it replaces the old "ghost the district
+// within 6 u of the lens" rule; a band dithered all the way was screen-door soup
+// over whatever roof stood at the lens). Discarded fragments write no depth, so where
 // the window is open the real body shows and the amber GreaterDepth silhouette
 // (player/visitor.js) draws nothing there.
 //
@@ -58,6 +61,10 @@ const TERRAIN = /^terrain/i;
 const KEY = '|cut1';
 /** The ordered dither's thresholds are (v + 0.5) / 16: a value above the top one discards every pixel. */
 export const BAYER_MAX = 15.5 / 16;
+/** The near-lens clip: fully discarded nearer than NEAR_CORE × the band depth (uCutP.w), a dithered lip beyond. */
+export const NEAR_CORE = 0.88;
+/** The window's feather band as a share of its radius (uCutR.w) is kept inside these. */
+export const FEATHER_MIN = 0.05, FEATHER_MAX = 0.3;
 
 // GLSL. No backticks anywhere in here (these are template-free strings).
 const VERT_HEAD = [
@@ -85,9 +92,12 @@ const FRAG_BODY = [
   '\t\tvec2 cutQ = ( gl_FragCoord.xy - uCutC.xy ) / uCutR.xy;',
   '\t\tfloat cutE = dot( cutQ, cutQ );',
   '\t\tfloat cutIn = step( vCutV, uCutP.x ) * step( uCutP.y, vCutY );',
-  '\t\tfloat cutM = uCutR.z * cutIn * ( 1.0 - smoothstep( 0.55, 1.0, cutE ) );',
-  '\t\tcutRim = uCutR.z * cutIn * smoothstep( 0.55, 1.0, cutE ) * ( 1.0 - step( 1.0, cutE ) );',
-  '\t\tfloat cutNr = uCutP.z * ( 1.0 - smoothstep( 0.35 * uCutP.w, uCutP.w, vCutV ) );',
+  // the feather: only the outer uCutR.w of the radius (a thin lip, not a ring of dots)
+  '\t\tfloat cutF = smoothstep( 1.0 - uCutR.w, 1.0, sqrt( cutE ) );',
+  '\t\tfloat cutM = uCutR.z * cutIn * ( 1.0 - cutF );',
+  '\t\tcutRim = uCutR.z * cutIn * cutF * ( 1.0 - step( 1.0, cutE ) );',
+  // the near-lens clip: gone outright nearer than NEAR_CORE of the band, a dithered lip out to its edge
+  '\t\tfloat cutNr = uCutP.z * ( 1.0 - smoothstep( ' + NEAR_CORE.toFixed(2) + ' * uCutP.w, uCutP.w, vCutV ) );',
   '\t\tif ( max( cutM, cutNr ) > cutBayer4( gl_FragCoord.xy ) ) discard;',
   '\t}',
 ].join('\n');
@@ -111,7 +121,7 @@ export function createCutout(ctx, opts = {}) {
   const uniforms = {
     uCutWY: { value: new THREE.Vector4(0, 1, 0, 0) },
     uCutC: { value: new THREE.Vector4(0, 0, 0, 0) },
-    uCutR: { value: new THREE.Vector4(64, 64, 0, 0) },      // rx, ry, k, –
+    uCutR: { value: new THREE.Vector4(64, 64, 0, 0.26) },   // rx, ry, k, feather (share of the radius)
     uCutP: { value: new THREE.Vector4(0, -1e9, 0, 6) },     // depth, feetY, nearK, near
   };
   const patchedMats = new WeakSet();     // materials carrying the hook (originals, patched copies, ghost clones of them)
@@ -341,8 +351,10 @@ export function createCutout(ctx, opts = {}) {
   /**
    * Write the frame's window. `P` = the visitor's feet; k = the window strength (0..1, already
    * scaled by holdAng); nearK = the near-lens band's strength; grow = the ellipse's growth factor;
-   * o = { ry, rx, rMin, rMax } (px at pixel ratio 1; scaled by the renderer's pixel ratio).
-   * Returns false when the visitor's chest is off screen (the window is then forced shut).
+   * o = { ry, rx, rMin, rMax, featherPx, nearDepthK, nearMin, nearMax } (px at pixel ratio 1; scaled by
+   * the renderer's pixel ratio). The feather band is featherPx wide (as a share of ry, kept within
+   * FEATHER_MIN..FEATHER_MAX); the near-lens band is nearDepthK × the lens → chest distance deep, clamped
+   * to nearMin..nearMax. Returns false when the visitor's chest is off screen (the window is then forced shut).
    */
   function write(cam, P, k, nearK, grow, o) {
     const e = cam.matrixWorld.elements;
@@ -354,10 +366,11 @@ export function createCutout(ctx, opts = {}) {
     const on = c.on || feetOn;
     const hpx = Math.abs(hatY - feetY);
     const ry = Math.min(Math.max(o.ry * hpx, o.rMin * pr), o.rMax * pr) * grow;
+    const fw = Math.min(Math.max((o.featherPx ?? 9) * pr / Math.max(1, ry), FEATHER_MIN), FEATHER_MAX);
     uniforms.uCutC.value.set(c.x, c.y, 0, 0);
-    uniforms.uCutR.value.set(Math.max(1, o.rx * ry), Math.max(1, ry), on ? k : 0, 0);
+    uniforms.uCutR.value.set(Math.max(1, o.rx * ry), Math.max(1, ry), on ? k : 0, fw);
     const dist = Math.hypot(P.x - e[12], P.y + 1.05 - e[13], P.z - e[14]);
-    uniforms.uCutP.value.set(c.depth - 1.0, P.y + 0.35, nearK, Math.min(Math.max(0.2 * dist, o.nearMin), o.nearMax));
+    uniforms.uCutP.value.set(c.depth - 1.0, P.y + 0.35, nearK, Math.min(Math.max((o.nearDepthK ?? 0.2) * dist, o.nearMin), o.nearMax));
     return on;
   }
   /** Everything off (free camera, ?cut=0): patched programs then render exactly as unpatched ones. */
@@ -367,22 +380,25 @@ export function createCutout(ctx, opts = {}) {
   /**
    * §5.4: how the window treats this hit with the uniforms as last written.
    *   'clear'   patched, in front of the chest (depth < uCutP.x), over the feet line, inside the fully
-   *             open core (e < 0.55) with k ≥ 0.5 — or deep enough in the near-lens band that every
-   *             dither cell discards it
-   *   'feather' the same, but in the feather band 0.55 ≤ e < 0.8 (reported apart, never as clear)
+   *             open core (normalised radius under 1 − uCutR.w, and never past the spec's e < 0.55 …
+   *             the shader opens more than that, this stays the conservative reading) with k ≥ 0.5 — or
+   *             deep enough in the near-lens band that every dither cell discards it
+   *   'feather' the same, but in the feather band (reported apart, never as clear): up to the spec's
+   *             e < 0.8, or the inner half of the shader's own band where that reaches further
    *   'block'   anything else
    */
   function classify(h, cam) {
     if (!isPatchedHit(h)) return 'block';
     const P = uniforms.uCutP.value, R = uniforms.uCutR.value, C = uniforms.uCutC.value;
     const s = toPx(cam, h.point.x, h.point.y, h.point.z);
-    const nr = P.z * (1 - smooth(0.35 * P.w, P.w, s.depth));
+    const nr = P.z * (1 - smooth(NEAR_CORE * P.w, P.w, s.depth));
     if (nr > BAYER_MAX) return 'clear';
     if (!(R.z >= 0.5)) return 'block';
     if (!(s.depth <= P.x && h.point.y >= P.y)) return 'block';
     const qx = (s.x - C.x) / R.x, qy = (s.y - C.y) / R.y, e2 = qx * qx + qy * qy;
-    if (e2 < 0.55) return 'clear';
-    if (e2 < 0.8) return 'feather';
+    const fw = R.w > 0 ? R.w : FEATHER_MAX, core = 1 - fw, half = 1 - fw * 0.5;
+    if (e2 < Math.min(0.55, core * core)) return 'clear';
+    if (e2 < Math.max(0.8, half * half) && e2 < 1) return 'feather';
     return 'block';
   }
 

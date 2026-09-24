@@ -328,7 +328,7 @@ export function create(ctx) {
       ${kb('X')}<em>use held item — or <b>left-click</b></em>
       ${kb('F')}<em>next item</em>
       ${kb('E', 'Enter')}<em>talk · open doors</em>
-      ${kb('Q', 'E')}<em>turn view — E turns only when <b>nothing is in reach</b></em>
+      ${kb('Q', 'E')}<em>turn view · <b>right-drag</b> orbit · wheel zoom</em>
       ${kb('Right-drag', 'Wheel')}<em>orbit · zoom</em>
       ${kb('1', '2', '3')}<em>camera: iso · follow (swings behind you) · top</em>
       ${kb('M')}<em>map: near · world · <b>explored</b> · off — or tap it</em>

@@ -386,12 +386,12 @@ export function create(ctx) {
         finish() {
           rec.fade = [];
           for (const mesh of wall.finish()) {
-            mesh.userData.noFade = true;            // the camera's blocker-fade must not also grab these
+            mesh.userData.noGhost = true;           // never ghosted by the camera; its see-through window may cut it (CAMERA_SPEC §5.1)
             // the additive window-spill decal has its own night-driven opacity —
             // it must not be dragged into the ghost fade
             if (!/haloDisc/.test(mesh.name)) rec.fade.push(mesh.material);
           }
-          for (const mesh of roof.finish()) mesh.userData.noFade = true;
+          for (const mesh of roof.finish()) mesh.userData.noGhost = true;   // same: cuttable, never ghosted
           inner.finish();
           inner.group.visible = false;
           return rec;

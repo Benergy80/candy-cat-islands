@@ -45,6 +45,9 @@
 //                       that starts with the visitor still inside the last row's interior walks out first, so its
 //                       owner frames it on entry: row.leftInterior)
 //   --shots <dir>       render each row at --w × --h (default 1600 × 1000) to <dir>/<view>_m<mode>.png
+//                       (toasts already up when the row began — an earlier row's, e.g. a 22:00 row's TIGER TIME —
+//                       and a location banner still carrying the text it had then (SUNDOWN) are hidden in the PNG
+//                       only; the harness's own setMode never toasts, see quietMode())
 //   --p-src merged|viewsjson   how P names resolve: "merged" (default) = exactly what render.mjs --view uses
 //                       (tools/views.json, then tools/views/*.json in readdir order, later files win);
 //                       "viewsjson" = tools/views.json's own entry when it has one
@@ -348,12 +351,21 @@ function pageLib() {
     if (v.dist !== undefined) p.distance = v.dist; if (v.fov !== undefined) p.fov = v.fov;
     return Object.keys(p).length ? p : null;
   }
+  /** The harness's own camera.setMode (the row's mode, §1): no mode toast. ui.toast shows one toast at a time and
+   *  drops a repeat inside a minute, so a row's setMode toast queued behind the last row's and sat in the NEXT
+   *  row's frame naming the wrong mode (the critics' "mode toast contradicts the lit chip", cam_cut_cupcake m2,
+   *  cam_help_card m1). The mode toasts themselves are checked by a14 (@toasts). */
+  function quietMode(c, m) {
+    const ui = ctx.systems.ui, toast0 = ui?.toast;
+    if (toast0) ui.toast = () => null;
+    try { c.setMode(m); } finally { if (toast0) ui.toast = toast0; }
+  }
   /** §1 order. opts.noStep stops before walk/step (scripts step themselves); opts.forceMode rewrites a
    *  view's own camera.setMode call to m; missing call targets are recorded, never thrown or logged. */
   function setup(v, m, opts = {}) {
     const c = cam(), P = pl();
     g.setTime(v.time ?? 12);
-    c.setMode(m);
+    quietMode(c, m);
     c.setParams({ azimuth: Math.PI / 4, elevation: 0.64, distance: 31, fov: 30 });
     P.facing = wrap((v.az ?? Math.PI / 4) + Math.PI);
     if (v.pos) g.teleport(v.pos[0], v.pos[1]);
@@ -476,6 +488,8 @@ function pageLib() {
       cutWhy: (() => { const s = get('cutState'); return s ? { sweep: !!s.needSweep, col: !!s.colTrigger, colRun: s.colRun, rays: s.rays, sweepClear: !!s.sweepClear, allUnpatched: !!s.allUnpatched } : null; })(),
       facing: r(wrap(pl().facing)), pinned: get('pinned'),
       occDist: r(c.occDist, 4), goalDistance: num('goalDistance', 4), occLift: r(c.occLift, 4),
+      // the spring arm's dolly (camera polish: a PATCHED mass at the lens is dollied past, not portholed); null = off
+      patchDolly: (() => { const v = get('patchDolly'); return Number.isFinite(v) ? r(v, 3) : null; })(),
       terrainLift: num('terrainLift', 4), tilt: num('tilt', 4), densityK: num('densityK', 4), cutK: num('cutK', 4), occYaw: num('occYaw', 4),
       culledList: c.culledList, fading: c.fading, occBlocked: r(c.occBlocked, 3),
       current: { azimuth: r(cur.azimuth, 4), elevation: r(cur.elevation, 4), distance: r(cur.distance, 4) },
@@ -489,6 +503,15 @@ function pageLib() {
       free: c.isFree(),
     };
   }
+  /** --shots hygiene (DOM only; rows never read it): the toasts up as a row's own setup begins belong to earlier rows
+   *  (a 22:00 row's TIGER TIME sat in the next day rows' frames), and so does the location banner while it still
+   *  carries the text it had then (SUNDOWN; the meadow a §9 row walked out of an interior through). shoot() hides
+   *  exactly those in the PNG and puts them back. Marked after the walk out of an interior, before setup(). */
+  function staleMark() {
+    window.__cvStale = Array.from(document.querySelectorAll('.cci-toast'));
+    const ban = document.querySelector('.cci-banner');
+    window.__cvBan = ban && ban.style.display !== 'none' ? ban.textContent : null;
+  }
   function probe(name, v, m, src, opts = {}) {
     const t0 = performance.now();
     // §9 rows (opts.leave): a row that starts where the last one left the visitor INSIDE (the cave, the palace, a cat
@@ -498,6 +521,7 @@ function pageLib() {
     // row after it were framed at the harness's reset (0.64 / 31, π/4), not by their owner.
     let left = false;
     if (opts.leave && (cam().indoors || ctx.state.placeOverride)) { leaveInteriors(); left = true; }
+    staleMark();
     const calls = setup(v, m, { ...opts, watch: true });
     const during = watchStop();
     const out = row(name, m, v, src, calls);
@@ -2017,6 +2041,8 @@ if (typeof args.retable === 'string') {
   out = JSON.parse(fs.readFileSync(jf, 'utf8'));
   delete out.summary.a12diff;
   out.meta.retabled = { date: new Date().toISOString(), args: { a12: A12_TAG, a13: A13_TAG, a13Frame: A13_FRAME } };
+  // A11 is recomputed from the run's own rows too (its reading gained the spring-arm flag in the camera polish)
+  if (out.rows?.some((x) => x.mode === 1)) out.summary.A11 = a11Summary();
   out.summary.table = accTable();
   fs.writeFileSync(jf, JSON.stringify(out, null, 1));
   let md = fs.readFileSync(mf, 'utf8');
@@ -2143,8 +2169,23 @@ try {
       if (!SHOTS) return;
       const ri = await page.evaluate(() => window.__cv.renderNow(2));
       const file = path.join(SHOTS, `${name}_m${m}.png`);
-      await page.screenshot({ path: file, type: 'png', timeout: 240000 });
+      // stale toasts (up before this row began, see probeRow) are hidden for the PNG and put back after it
+      const stale = await page.evaluate(() => {
+        let n = 0;
+        const ban = document.querySelector('.cci-banner');
+        if (ban && window.__cvBan != null && ban.style.display !== 'none' && ban.textContent === window.__cvBan) (window.__cvStale = window.__cvStale || []).push(ban);
+        for (const e of window.__cvStale || []) if (e.isConnected && e.style.visibility !== 'hidden') { e.dataset.cvVis = e.style.visibility; e.style.visibility = 'hidden'; n++; }
+        return n;
+      });
+      try { await page.screenshot({ path: file, type: 'png', timeout: 240000 }); }
+      finally {
+        await page.evaluate(() => {
+          for (const e of window.__cvStale || []) if (e.dataset && 'cvVis' in e.dataset) { e.style.visibility = e.dataset.cvVis; delete e.dataset.cvVis; }
+          window.__cvStale = null;
+        });
+      }
       out.timing.rows[`${name}_m${m}`].renderMs = ri.ms.map(r3);
+      if (stale) out.timing.rows[`${name}_m${m}`].staleToastsHidden = stale;
       return file;
     };
 
@@ -2443,7 +2484,7 @@ function accTable() {
   // A11
   const a11 = out.summary.A11;
   T.push(a11 ? { id: 'A11', pass: a11.pass, measured: a11.why || `${a11.references} reference comparisons (post5 @ ${a11.post5}, baseline @ ${a11.baseline}) · ${(a11.refs || []).filter((e) => e.pass).length} match${a11.fails.length ? ' · **FAIL** ' + a11.fails.join('; ') : ''}`,
-    note: a11.passExceptInherited !== undefined ? `leaving out the mismatches inherited from steps 1-5 (this row equals post5): ${a11.passExceptInherited ? 'PASS' : 'FAIL'}` : '' } : { id: 'A11', pass: null, measured: 'no mode-1 rows' });
+    note: a11.passExceptInherited !== undefined ? `leaving out the mismatches inherited from steps 1-5 (this row equals post5): ${a11.passExceptInherited ? 'PASS' : 'FAIL'}${a11.springArm?.length ? ` · proposed, also leaving out the rows the camera polish's spring arm dollies past a patched mass at the lens (${a11.springArm.join(', ')}): ${a11.passExceptInheritedArm ? 'PASS' : 'FAIL'}` : ''}` : '' } : { id: 'A11', pass: null, measured: 'no mode-1 rows' });
   // A12: snap() twice (s7 (f)) + this run against the --a12 rerun
   {
     const det = S.s7?.determinism?.checks || [];
@@ -2594,6 +2635,9 @@ function a3Summary() {
  * A baseline comparison that fails while this row equals its post5 row (within the same tolerances) and post5
  * itself was already that far from the baseline is marked `inherited`: steps 1-5 moved it, the step being
  * judged did not. `pass` is A11 as written; `passExceptInherited` leaves the inherited ones out.
+ * A failing row whose lens the camera polish's spring arm dollied (row.patchDolly set: a PATCHED mass at the lens,
+ * where post5 held the window open on it — occ_whisker_night's gazebo roof) is flagged `springArm`; it still fails
+ * as written and `passExceptInheritedArm` is the proposed reading that leaves those out too.
  */
 function a11Summary() {
   const m1 = out.rows.filter((x) => x.mode === 1 && typeof x.vis === 'number');
@@ -2632,12 +2676,16 @@ function a11Summary() {
         const post5vsBase = Math.hypot(r5.lens.pos[0] - ref.lens.pos[0], r5.lens.pos[1] - ref.lens.pos[1], r5.lens.pos[2] - ref.lens.pos[2]);
         if (same5 && post5vsBase > 0.05) { e.inherited = true; e.post5VsBaseline = +post5vsBase.toFixed(4); }
       }
+      // the camera polish's spring arm (camera.patchDolly: a PATCHED mass at the lens is dollied past, where step 5
+      // opened the window on it) moves the lens by design; such a row is flagged, never passed
+      if (!e.pass && typeof x.patchDolly === 'number') { e.springArm = x.patchDolly; e.occDist = x.occDist; }
       refs.push(e);
-      if (!e.pass) fails.push(`${x.view} vs ${src}: Δpos ${e.dPos} Δaz ${e.dAz} Δel ${e.dEl} Δfov ${e.dFov}${e.inherited ? ` (inherited: post5 is ${e.post5VsBaseline} u from the baseline too, this row equals post5)` : ''}`);
+      if (!e.pass) fails.push(`${x.view} vs ${src}: Δpos ${e.dPos} Δaz ${e.dAz} Δel ${e.dEl} Δfov ${e.dFov}${e.inherited ? ` (inherited: post5 is ${e.post5VsBaseline} u from the baseline too, this row equals post5)` : ''}${e.springArm !== undefined ? ` (the spring arm: dollied to ${e.occDist} u past a patched mass at the lens, patchDolly ${e.springArm}; post5 held its window open on it instead)` : ''}`);
     }
   }
   const own = refs.filter((e) => !e.pass && !e.inherited);
-  return { pass: refs.length > 0 && !fails.length, passExceptInherited: refs.length > 0 && !own.length, references: refs.length, refs, fails, skipped, notComparable, post5: post5.meta?.commit ?? null, baseline: base?.meta?.commit ?? null };
+  const ownNoArm = own.filter((e) => e.springArm === undefined);
+  return { pass: refs.length > 0 && !fails.length, passExceptInherited: refs.length > 0 && !own.length, passExceptInheritedArm: refs.length > 0 && !ownNoArm.length, springArm: own.filter((e) => e.springArm !== undefined).map((e) => e.view), references: refs.length, refs, fails, skipped, notComparable, post5: post5.meta?.commit ?? null, baseline: base?.meta?.commit ?? null };
 }
 
 // ── write ─────────────────────────────────────────────────────────────────────

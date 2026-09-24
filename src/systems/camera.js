@@ -100,8 +100,15 @@
 // below is the fix, and the lens only moves for what the window cannot open.
 //
 //   PATCHED — a hit on a mesh the window may cut (big masses, instanced clouds):
-//              counted as blocked, opens the window, and is never faded,
-//              dollied past or tilted over.
+//              counted as blocked, opens the window, and is never faded or
+//              tilted over. THE SPRING ARM (polish after the camera A/B): a
+//              patched mass standing at the LENS — a surface on ≥ 2 body rays
+//              with room for the lens in front of it, max(occDollyMin,
+//              patchDollyFloor 0.55 × the mode's goal), 5.5 indoors — is dollied
+//              past (patchDolly), not portholed: a window in a roof, a hill or a
+//              wall that still fills 30-80% of the frame lost 11 of the 14 pairs
+//              the critics gave the old camera. What stands nearer him than that
+//              floor stays the window's.
 //   0. CULL  — a mesh whose WORLD BOUNDING BOX contains the lens goes
 //              visible = false for as long as that lasts. Gated to meshes under
 //              occCullMax (18 u) across, because "the lens is inside my box" is
@@ -129,7 +136,8 @@
 //              stop (λ3.5) and the tilt unwinds — except a dolly the sweep holds
 //              in front of an UNPATCHED blocker, which the window cannot open
 //              (a noCut wall behind a patched lollipop keeps its dolly while the
-//              window opens on the lollipop). The per-frame collider pass
+//              window opens on the lollipop), and the spring arm's (a patched
+//              mass at the lens is dollied past, open window or not). The per-frame collider pass
 //              (occlude(): a guess — colliders carry no mesh and mostly no
 //              height) tilts ≤ colLiftMax (0.06) and dollies only alongside a
 //              dolly / tilt the sweep is already running; mostly it opens the
@@ -160,7 +168,10 @@
 //              running (a blocker the dolly already stands in front of does not
 //              count), a dithered, feathered, rim-darkened ellipse around him
 //              discards whatever stands IN FRONT of him, so his real body shows
-//              through. A near-lens band dithers patched geometry right at the lens.
+//              through; its feather is a thin dithered lip (cutFeatherPx), not a ring of
+//              dots. The NEAR-LENS CLIP discards patched geometry nearer the lens than
+//              0.88 × clamp(nearDepthK 0.36 × lens distance, nearMin 2, nearMax 10) outright,
+//              with a thin dithered lip beyond (a pavilion roof beside the lens, a rafter at it).
 //              Free cameras and ?cut=0 / params.cut = 0 turn both off.
 //   AND THE BACKSTOP: none of this can be relied on, so the VISITOR IS DRAWN
 //   TWICE — see player/visitor.js. The second pass is a flat AMBER silhouette
@@ -194,7 +205,7 @@
 //           lookAhead (deprecated alias of leadAway),
 //           fadeOpacity, fadeProbe, fadeRefresh, fadeMaxRadius, fadeHardMax,
 //           fadeTime, fadeBack, occRadius, occHead, occSweep, occNearLens,
-//           occFadeMaxDim, occFadeLastDim, occCullMax, occDollyFloor, occDollyMin,
+//           occFadeMaxDim, occFadeLastDim, occCullMax, occDollyFloor, occDollyMin, patchDollyFloor,
 //           occLiftStep, occLiftMax, occLiftRate, occBudget, colLiftMax,
 //           occInstMin, occInstK, occInstBudget, occInstStep, occInstFloor,
 //           occPlinthNear, occLiftPlinth, zoneElev, zoneRise, zoneLambda,
@@ -204,7 +215,7 @@
 //           m2ElevOff, m2DistK, m2Fov, m2Pitch, m2PitchCap, m2SkyMin,
 //           pathAlign, pathDelay, pathRate,
 //           basisRate, flyDist, flyElev, flyFov, fovRate,
-//           cut, cutRy, cutRx, cutGrow, cutHold, cutRise, cutFall, nearMin, nearMax,
+//           cut, cutRy, cutRx, cutGrow, cutHold, cutRise, cutFall, cutFeatherPx, nearDepthK, nearMin, nearMax,
 //           lookHold, lookTapPx, lookYawK, lookElK, lookPan, lookPanRun, lookLeash,
 //           lookLeashIn, lookTaper, lookElevLook, lookFovLook, lookFovVeh, lookIn,
 //           lookOut, lookReturnRate, lookEndT, lookZoomMin, lookZoomMax, recentreRate,
@@ -238,6 +249,7 @@
 //           (citizens.js's scruff carry relies on it)
 //   introspection: fading · fadedList · culled · culledList · culledSizes · occDist · occLift ·
 //                  dollyFloor · indoors · ladderHeld (the window carries the frame: no dolly/tilt) ·
+//                  patchDolly (the spring arm's dolly for a patched mass at the lens, Infinity = off) ·
 //                  occBlocked · occMs · blockerCount · sweepCount · current · target
 //                  controlAzimuth (the movement basis) · tilt (tiltFor(baseDistance))
 //                  · baseDistance · goalDistance · lead {x, z} (the aim's lead, §4.1)
@@ -276,6 +288,15 @@ const INST_CONFIRM_BUDGET = 12000;
 const CUT_RMIN = 64, CUT_RMAX = 320;
 // the dolly's floor inside a building (CAMERA_SPEC §5.2; outdoors it is max(occDollyMin, occDollyFloor × goal))
 const INDOOR_FLOOR = 5.5;
+// the spring arm for patched masses at the lens holds its dolly this many sweeps after its last reading
+const PATCH_HOLD = 3;
+// …and a mass already holding it keeps it with this much less room (u): hysteresis on the floor test
+const PATCH_SLACK = 1.0;
+// the sweep's five rays fan out from the stop to within this of the head → knees segment pair (the offset rays
+// sit 0.66 u beside the body): the AABB broad phase pads each mesh's world box by it
+const BUNDLE_PAD = 0.8;
+// the lens is this much nearer than the sweep's stop (u): the window's reading is confirmed from the real lens
+const WIN_CONFIRM_BACK = 0.5;
 const ease = (t) => t * t * (3 - 2 * t);
 const MODE_TOAST = { 1: 'Camera: iso — you turn it (Q/E)', 2: 'Camera: follow — turns with you', 3: 'Camera: top — lay of the land' };
 const OVERHEAD_EL = 1.10;     // mode 3 pitch
@@ -362,6 +383,9 @@ export function create(ctx) {
     occCullMax: 18,           // only a mesh this small may be culled for holding the lens
     occDollyFloor: 0.62,      // dolly never closer than this fraction of the mode's distance goal…
     occDollyMin: 14,          // …nor than this, outdoors (indoors the floor is INDOOR_FLOOR, 5.5) — §5.2
+    // the spring arm for a PATCHED mass at the lens (see patchDolly): its own floor share, a little under the
+    // unpatched dolly's (mode 1: 17 u, not 19.2 — a gazebo roof 18 u off him is at the lens there); ≥ occDollyMin
+    patchDollyFloor: 0.55,
     occLiftStep: 0.07,        // the tilt escalates this much per blocked sweep
     occBudget: 40000,         // ray-triangle tests per sweep (merged meshes are huge)
     colLiftMax: 0.06,         // the COLLIDER tilt is a guess at heights: keep it at 3.4°
@@ -421,10 +445,14 @@ export function create(ctx) {
     // Ellipse: ry = clamp(cutRy × the body's projected height, 64, 320 px)·grow, rx = cutRx·ry; grow eases
     // to cutGrow while ≥ 2 body rays are blocked by patched masses. It opens at λ cutRise when a body ray
     // is blocked by a patched mass (or a wall/trunk collider sits in the sight line two frames running),
-    // stays open cutHold s after the last need, then closes at λ cutFall. The near-lens dither band runs
-    // clamp(0.2 × lens distance, nearMin, nearMax) deep.
+    // stays open cutHold s after the last need, then closes at λ cutFall. Its feather is a thin dithered lip,
+    // cutFeatherPx px wide (a 30 px ring of Bayer dots read as a fault, not a window). The near-lens clip runs
+    // clamp(nearDepthK × lens distance, nearMin, nearMax) deep: patched geometry nearer than 0.88 of that is
+    // discarded outright, a dithered lip beyond (the spec's 0.2 / 2..6 dither band, dithered all the way, left a
+    // roof at 6-9 u from the lens as screen-door soup over half the frame — A15's "no near-lens object > 15%").
     cut: ctx.params?.get?.('cut') === '0' ? 0 : 1,
-    cutRy: 1.25, cutRx: 0.8, cutGrow: 1.4, cutHold: 0.6, cutRise: 12, cutFall: 3, nearMin: 2, nearMax: 6,
+    cutRy: 1.25, cutRx: 0.8, cutGrow: 1.4, cutHold: 0.6, cutRise: 12, cutFall: 3, cutFeatherPx: 9,
+    nearDepthK: 0.36, nearMin: 2, nearMax: 10,
     // V LOOK-AROUND (CAMERA_SPEC §3, §6.1). Held lookHold s — or lookTapPx of mouse motion, or a
     // movement key — it is a look; shorter and stiller it is a tap (recentre). Mouse: yaw −= dx·lookYawK,
     // el += dy·lookElK. WASD pans the look point lookPan u/s (lookPanRun with Shift), accel λ8, on a
@@ -517,7 +545,7 @@ export function create(ctx) {
   let colRun = 0;               // (b) consecutive frames occlude() found a wall/trunk collider in the sight line
   let colSweeps = 0;            // …and how many sweeps have run since it began
   let cutSweepClear = true;     // the last sweep saw no blocker at all on any body ray
-  const cutO = { ry: 1.25, rx: 0.8, rMin: CUT_RMIN, rMax: CUT_RMAX, nearMin: 2, nearMax: 6 };
+  const cutO = { ry: 1.25, rx: 0.8, rMin: CUT_RMIN, rMax: CUT_RMAX, featherPx: 9, nearDepthK: 0.36, nearMin: 2, nearMax: 10 };
   let cine = null;
   let lookK = 0;                // hold-L look-up, eased 0..1
   // ── V LOOK (§3) ── vWas / downWas: V and the left button last frame (edges); vPend: V is down, not yet a
@@ -534,7 +562,7 @@ export function create(ctx) {
   const lookEnd0 = { k: 0, yaw: 0, el: 0, zoom: 0, x: 0, z: 0 };
   let recOn = false;            // tap V in mode 2: the tether swings behind the facing (§3)
   // the ladder's latches, held still while looking (the look lens is not the framing the ladder serves)
-  const ladKeep = { sweepLift: 0, sweepDolly: Infinity, lastDolly: Infinity, clearRun: 0, liftMaxRun: 0, giveUp: false, liftCap: 0, shellBy: null, shellDolly: Infinity };
+  const ladKeep = { sweepLift: 0, sweepDolly: Infinity, lastDolly: Infinity, clearRun: 0, liftMaxRun: 0, giveUp: false, liftCap: 0, shellBy: null, shellDolly: Infinity, patchDolly: Infinity, patchHold: 0 };
   const ladAnchor = new THREE.Vector3(), ladGiveUpAt = new THREE.Vector3();
   // …and the lens distance while held: occDist rides the look's own distance (its zoom and its λ lookOut
   // return, 1:1) times ladHoldR, the share a dolly still held back as the look began, released at the dolly's
@@ -1261,11 +1289,13 @@ export function create(ctx) {
   function ladderSave() {
     ladKeep.sweepLift = sweepLift; ladKeep.sweepDolly = sweepDolly; ladKeep.lastDolly = lastDolly; ladKeep.clearRun = clearRun;
     ladKeep.liftMaxRun = liftMaxRun; ladKeep.giveUp = giveUp; ladKeep.liftCap = liftCap; ladKeep.shellBy = shellBy; ladKeep.shellDolly = shellDolly;
+    ladKeep.patchDolly = patchDolly; ladKeep.patchHold = patchHold; nearPatchKeep.clear(); nearPatch.forEach(keepPatchCb);
     ladAnchor.copy(liftAnchor); ladGiveUpAt.copy(giveUpAt);
   }
   function ladderRestore() {
     sweepLift = ladKeep.sweepLift; sweepDolly = ladKeep.sweepDolly; lastDolly = ladKeep.lastDolly; clearRun = ladKeep.clearRun;
     liftMaxRun = ladKeep.liftMaxRun; giveUp = ladKeep.giveUp; liftCap = ladKeep.liftCap; shellBy = ladKeep.shellBy; shellDolly = ladKeep.shellDolly;
+    patchDolly = ladKeep.patchDolly; patchHold = ladKeep.patchHold; nearPatch.clear(); nearPatchKeep.forEach(backPatchCb); nearPatchKeep.clear();
     liftAnchor.copy(ladAnchor); giveUpAt.copy(ladGiveUpAt);
   }
   /** playerScreen: his feet projected with the final matrix (call after cam.updateMatrixWorld). */
@@ -1374,6 +1404,7 @@ export function create(ctx) {
       desiredTarget(target);
       clearFades(); clearCull();
       cutHits.clear(); plainHits.clear(); shellBy = null; shellDolly = Infinity; colRun = 0; colSweeps = 0;
+      nearPatch.clear(); patchDolly = Infinity; patchHold = 0;
       instC = 0; instJ = 0; instAccCut = 0; instAccPlain = 0; instPrevCut = 0; instPrevPlain = 0;
       cutTally(0, 0);                              // no reading from before the cut leaks into its first pass
       sweepLift = 0; sweepDolly = Infinity; lastDolly = Infinity; occLift = 0; occDist = d0;
@@ -1395,15 +1426,18 @@ export function create(ctx) {
         winCarry = p.cut !== 0 && !cutSweepClear && (cutNeedA || colTrigger());
         const colOk = colAssist();
         occLift = winCarry ? 0 : clamp(Math.max(oc.lift, sweepLift), 0, liftMaxNow(elB));
-        occDist = Math.max(6, winCarry ? Math.min(d0, sweepDolly, shellDolly) : Math.min(d0, colOk ? oc.dist : d0, sweepDolly, shellDolly));
+        occDist = Math.max(6, winCarry ? Math.min(d0, sweepDolly, shellDolly, patchDolly) : Math.min(d0, colOk ? oc.dist : d0, sweepDolly, shellDolly, patchDolly));
         place(cur.azimuth, el0 + occLift, Math.min(d0, occDist), target);
         if (free || i === passes) break;
         lensAt(cur.azimuth, el0 + occLift, d0, target, idealPos);
         lastSweepFrom.copy(idealPos); sweepAim.copy(target);
         // first pass looks at everything (a screenshot gets no second chance);
-        // the rest only have to confirm the tilt, so they take a wide budget
+        // the rest only have to confirm the tilt, so they take a wide budget — except the last one when the lens
+        // now stands dollied: it looks at everything again, so the window reads what the DOLLIED lens has in front
+        // of him (a budgeted pass left the stop's first reading standing, a window open on nothing, for ~0.5 s)
         sweepCursor = 0;
-        sweepOcclusion(idealPos, cam.position, i === 0 ? Infinity : p.occBudget * 3);
+        const all = i === 0 || (i === passes - 1 && Math.min(d0, occDist) < d0 - WIN_CONFIRM_BACK);
+        sweepOcclusion(idealPos, cam.position, all ? Infinity : p.occBudget * 3);
         applyCull();
         if (colRun) colSweeps++;
       }
@@ -1445,6 +1479,10 @@ export function create(ctx) {
       // four frames before the next sweep and leave a closing window over an unblocked visitor (A15)
       cutKraw = 0; cutEff = 0; cutHoldT = 0; cutGrowK = 1;
       if (v) { colRun = 0; colSweeps = 0; }
+      // the spring arm's reading likewise (a free camera frames something else); setFree(null) right after a snap()
+      // keeps what that snap settled — reset here, the lens would ease out of its dolly and back in over the next
+      // four sweeps (occ_whisker_night: 17 → 23.5 → 17 u, the window opening on the gazebo roof on the way)
+      if (v) { patchDolly = Infinity; patchHold = 0; nearPatch.clear(); }
       if (v) cut.off();
       if (v) { const t = new THREE.Vector3(...v.target); if (v.fov) { cam.fov = v.fov; cam.updateProjectionMatrix(); } place(v.azimuth ?? p.azimuth, v.elevation ?? p.elevation, v.distance ?? p.distance, t); }
       // back to the follow camera: keep the mode, and do not read the landmark
@@ -1565,6 +1603,8 @@ export function create(ctx) {
     get dollyFloor() { return dollyFloor(); },
     /** The window carries the frame (open or opening): the ladder's dolly and tilt hold still (§5.2). */
     get ladderHeld() { return winCarry; },
+    /** The spring arm's dolly (u from the aim, Infinity when off): a PATCHED mass at the lens with room in front of it. */
+    get patchDolly() { return patchDolly; },
     /** update()'s cost (§6.4, A13): wall-clock ms over the last CAM_MS_N calls, the sweep frames (6 Hz) apart.
      *  QA only (allocates): { n, mean, p95, max, sweepP95, nonSweepP95, sweeps }. */
     get camMs() {
@@ -1585,7 +1625,7 @@ export function create(ctx) {
       const out = [];
       const keep = { sweepLift, sweepDolly, clearRun, liftMaxRun, giveUp, sweepCursor, occBlocked, occMs };
       const keepCut = { cutNeedA, cutSweepClear, cutRays, cutAllPlain, cutPlinth, lastInstCut, lastInstPlain, hits: new Map(cutHits), plain: new Map(plainHits) };
-      const keepInst = { instC, instJ, instAccCut, instAccPlain, instPrevCut, instPrevPlain, shellBy, shellDolly };
+      const keepInst = { instC, instJ, instAccCut, instAccPlain, instPrevCut, instPrevPlain, shellBy, shellDolly, patchDolly, patchHold, near: new Map(nearPatch) };
       const from = o.fromStop && Number.isFinite(lastSweepFrom.x) ? lastSweepFrom : cam.position;
       // one clean round over every instance (the reading is this pass's alone)
       instC = 0; instJ = 0; instAccCut = 0; instAccPlain = 0; instPrevCut = 0; instPrevPlain = 0;
@@ -1597,11 +1637,14 @@ export function create(ctx) {
         from: [from.x, from.y, from.z].map((x) => +x.toFixed(2)), lensBack: +from.distanceTo(cam.position).toFixed(2),
         window: { need: cutNeedA, rays: cutRays, clear: cutSweepClear, allUnpatched: cutAllPlain, plinth: cutPlinth },
         shell: shellBy ? shellBy.name || shellBy.type : null, shellDolly: Number.isFinite(shellDolly) ? +shellDolly.toFixed(2) : null,
+        patchDolly: Number.isFinite(patchDolly) ? +patchDolly.toFixed(2) : null,
+        nearPatch: [...nearPatch].map(([o, v]) => [o.name || o.type, +v.toFixed(2)]),
         hits: out.sort((a, b) => a.d - b.d),
       };
       ({ sweepLift, sweepDolly, clearRun, liftMaxRun, giveUp, sweepCursor, occBlocked, occMs } = keep);
       ({ cutNeedA, cutSweepClear, cutRays, cutAllPlain, cutPlinth, lastInstCut, lastInstPlain } = keepCut);
-      ({ instC, instJ, instAccCut, instAccPlain, instPrevCut, instPrevPlain, shellBy, shellDolly } = keepInst);
+      ({ instC, instJ, instAccCut, instAccPlain, instPrevCut, instPrevPlain, shellBy, shellDolly, patchDolly, patchHold } = keepInst);
+      nearPatch.clear(); keepInst.near.forEach((v, k) => nearPatch.set(k, v));
       cutHits.clear(); keepCut.hits.forEach((v, k) => cutHits.set(k, v));
       plainHits.clear(); keepCut.plain.forEach((v, k) => plainHits.set(k, v));
       return r;
@@ -2108,7 +2151,7 @@ export function create(ctx) {
         if (!ladHeld) { ladHoldR = dist0 > 1e-6 ? Math.min(1, occDist / dist0) : 1; if (!lookOn) ladRelR = ladHoldR; }
         if (lookOn) ladHoldR = damp(ladHoldR, 1, 3.5, dt);
         else {
-          const dg = winCarry ? Math.min(dist0, sweepDolly, shellDolly) : Math.min(colOk ? want.dist : dist0, sweepDolly, shellDolly);
+          const dg = winCarry ? Math.min(dist0, sweepDolly, shellDolly, patchDolly) : Math.min(colOk ? want.dist : dist0, sweepDolly, shellDolly, patchDolly);
           const gR = dist0 > 1e-6 ? clamp(dg / dist0, 0, 1) : 1;
           ladBackG = ladBackG === ladBackG ? damp(ladBackG, gR, gR < ladBackG ? 16 : 3.5, dt) : gR;
           const w = ladRelK > 1e-4 ? clamp(vLookK / ladRelK, 0, 1) : 0;
@@ -2117,8 +2160,9 @@ export function create(ctx) {
         occDist = dist * ladHoldR;
       } else {
         // while the window carries the frame the collider pass's guess lets go, but a dolly the sweep holds for an
-        // UNPATCHED blocker (sweepDolly / shellDolly: patched hits never dolly) stays — the window cannot open that one
-        const dollyGoal = winCarry ? Math.min(dist, sweepDolly, shellDolly) : Math.min(colOk ? want.dist : dist, sweepDolly, shellDolly);
+        // UNPATCHED blocker (sweepDolly / shellDolly) stays — the window cannot open that one — and so does the spring
+        // arm's (patchDolly: a patched mass at the LENS, which the window would only porthole)
+        const dollyGoal = winCarry ? Math.min(dist, sweepDolly, shellDolly, patchDolly) : Math.min(colOk ? want.dist : dist, sweepDolly, shellDolly, patchDolly);
         occDist = dollyGoal < occDist ? damp(occDist, dollyGoal, 16, dt) : damp(occDist, dollyGoal, 3.5, dt);
       }
       ladHeld = ladHold;
@@ -2354,6 +2398,20 @@ export function create(ctx) {
   let shellBy = null;
   let shellDolly = Infinity;    // the shells' own dolly (§5.2 rule 2 on their real triangles), this sweep
   const shellHit = new THREE.Vector3();
+  // THE SPRING ARM FOR PATCHED MASSES AT THE LENS (polish after the camera A/B; A15 "no near-lens object covering
+  // > 15% of a frame"). A cut-able mass in the LENS half of the sight line — a surface with room for the lens in
+  // front of it (its dolly distance ≥ the floor) on ≥ 2 body rays — is not the window's to carry: the window
+  // cuts a porthole in a roof / hill / wall that still fills 30-80% of the frame (all three critics, 11 of the 14
+  // lost pairs). The lens dollies to just in front of the nearest-him such surface (patchDolly), never under the
+  // floor; whatever stands nearer him than the floor stays the window's. Sticky per mesh like cutHits (the
+  // triangle budget reaches some candidates only every few sweeps), dropped with the broad phase, held
+  // PATCH_HOLD sweeps after its last reading so a mesh the budget skips does not nod the lens.
+  let patchDolly = Infinity, patchHold = 0;
+  const nearPatch = new Map(), nearPatchKeep = new Map();
+  let pdMin = Infinity;
+  const pdMinCb = (v) => { if (v < pdMin) pdMin = v; };
+  const dropFarPatch = (v, o) => { if (!nearNow.has(o)) nearPatch.delete(o); };
+  const keepPatchCb = (v, o) => { nearPatchKeep.set(o, v); }, backPatchCb = (v, o) => { nearPatch.set(o, v); };
   const nearNow = new Set();
   // main.js emits world:ready once every system has built its meshes and before the first render,
   // so every program compiles once, cut or not; later meshes are decided by refreshCandidates()
@@ -2598,6 +2656,7 @@ export function create(ctx) {
   const idealPos = new THREE.Vector3();
   const near = [];
   const rayDirs = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  const lensRay = new THREE.Vector3();     // the window's confirming ray from the real lens (a dollied lens, see the sweep)
   const rayLens = [0, 0, 0, 0, 0];
   const testedNow = new Set(), fadeNow = new Set();
   const instM = new THREE.Matrix4(), instV = new THREE.Vector3(), sightV = new THREE.Vector3();
@@ -2725,7 +2784,7 @@ export function create(ctx) {
   function writeCut(k) {
     const P = ctx.systems.player?.position;
     if (free || p.cut === 0 || !P) { cut.off(); cutEff = 0; if (free) cutKraw = 0; return; }
-    cutO.ry = p.cutRy; cutO.rx = p.cutRx; cutO.nearMin = p.nearMin; cutO.nearMax = p.nearMax;
+    cutO.ry = p.cutRy; cutO.rx = p.cutRx; cutO.featherPx = p.cutFeatherPx; cutO.nearDepthK = p.nearDepthK; cutO.nearMin = p.nearMin; cutO.nearMax = p.nearMax;
     const on = cut.write(cam, P, k, 1, cutGrowK, cutO);
     if (!on) cutKraw = 0;                       // he is off screen: the window shuts, and re-opens from 0
     cutOnScr = on;
@@ -2772,7 +2831,7 @@ export function create(ctx) {
     const pl = ctx.systems.player?.position;
     cullNow.clear();
     sweepDolly = Infinity;
-    if (!pl || (!sweepers.length && !insts.length)) { sweepFade.clear(); occBlocked = 0; sweepLift = 0; lastDolly = Infinity; cutHits.clear(); plainHits.clear(); cutTally(0, 0); return 0; }
+    if (!pl || (!sweepers.length && !insts.length)) { sweepFade.clear(); occBlocked = 0; sweepLift = 0; lastDolly = Infinity; cutHits.clear(); plainHits.clear(); nearPatch.clear(); patchDolly = Infinity; patchHold = 0; cutTally(0, 0); return 0; }
 
     // the dolly offset: how much nearer the real lens is than the rays' origin
     const lensBack = fromPos.distanceTo(lensPos);
@@ -2818,12 +2877,20 @@ export function create(ctx) {
       const sc = worldScale(o);
       const r = bs.radius * sc + pad0;
       const sd = segDist2(rayA, headV, bc);
-      if (sd > r * r) continue;
+      // (a mesh the rays cannot reach any more blocks nothing: a ghost the sweep asked for lets go here, where
+      // before it waited to be tested again — never, once he had walked away from it)
+      if (sd > r * r) { sweepFade.delete(o); continue; }
       // rule 0 — the lens is inside a room-sized mesh: cull it outright
       if (s.cullable) {
         tmpBox.copy(s.bb).applyMatrix4(o.matrixWorld).expandByScalar(0.35);
         if (tmpBox.containsPoint(lensPos)) { cullNow.add(o); continue; }
       }
+      // the bundle can only meet a mesh inside its world bounding box (Mesh.raycast rejects on it too): a merged
+      // district's sphere is ~100 u across and passes the test above from half the island, its box padded by the
+      // bundle's spread does not — so the triangle budget goes to meshes the rays can actually hit (a mass at the
+      // lens used to wait 4-5 sweeps behind district spheres for its turn)
+      tmpBox.copy(s.bb).applyMatrix4(o.matrixWorld).expandByScalar(BUNDLE_PAD);
+      if (!segBox(rayA, headV, tmpBox) && !segBox(rayA, rayEnds[2], tmpBox)) { sweepFade.delete(o); continue; }
       s.d = sd;
       near.push(s);
       nearNow.add(o);
@@ -2848,6 +2915,7 @@ export function create(ctx) {
     // and the ladder only moves the lens for what the window cannot open; p.cut 0 = the old ladder
     const cutOn = p.cut !== 0;
     const floor = dollyFloor();
+    const pFloor = dollyFloor(p.patchDollyFloor);    // the spring arm's (patched masses at the lens)
     testedNow.clear(); fadeNow.clear();
     let spent = 0;
     if (sweepCursor >= near.length) sweepCursor = 0;
@@ -2868,12 +2936,14 @@ export function create(ctx) {
       if (log) log.push({ n: o.name || o.type, tested: 1, tris: s.tris, rays: nRays, off: +Math.sqrt(s.d).toFixed(1), d: 9999 });
       let cm = 0, um = 0;                      // body rays this mesh blocks: as a cut-able mass / not
       let pm = 0;                              // PLINTH_BIT: a patched plinth right at the lens (grows the window)
+      let pdN = 0, pdBest = Infinity;          // the spring arm: rays with a patched surface the lens can stand in front of
+      let conf = 0;                            // window rays to confirm from the real lens (the lens is dollied)
       // the window reads DRAWN blockers only: an interior shell inside a hidden group (candy
       // architecture hides a building's inner group until you enter) is raycast by the ladder
       // below but draws nothing, so it must not open the window
       const drawn = shownTree(o);
       // …and neither does the ladder: an undrawn mesh hides nothing (§5.2, the ladder as a sensor)
-      if (!drawn) { cutHits.delete(o); plainHits.delete(o); continue; }
+      if (!drawn) { cutHits.delete(o); plainHits.delete(o); nearPatch.delete(o); continue; }
       for (let k = 0; k < nRays; k++) {
         const L = rayLens[k];
         if (L < 1e-3) continue;
@@ -2883,7 +2953,13 @@ export function create(ctx) {
         // the window's reading: the nearest hit in front of the REAL lens (a mass the old dolly has already
         // put the lens in front of is not in the picture; the ladder below still reads `h`, untouched)
         const hc = drawn ? frontHit(h, lensPos) : null;
-        if (hc && k < WIN_RAYS && realBlocker(hc, rayEnds[k])) { if (cut.isPatchedHit(hc)) cm |= 1 << k; else um |= 1 << k; }
+        if (hc && k < WIN_RAYS && realBlocker(hc, rayEnds[k])) {
+          // a dollied lens (the spring arm makes that common) does not look along the stop's ray: a surface that
+          // ray grazes just in front of the lens can miss the lens's own line to him, and the window would open
+          // on nothing (A15). Such a reading is confirmed from the real lens below, after this ray's other uses
+          if (lensBack > WIN_CONFIRM_BACK) conf |= 1 << k;
+          else if (cut.isPatchedHit(hc)) cm |= 1 << k; else um |= 1 << k;
+        }
         if (log && h) {
           log.push({
             n: o.name || o.type, ray: k, d: +h.distance.toFixed(1), dPlayer: +(L - h.distance).toFixed(1), dAim: +aimT(h.point).toFixed(1),
@@ -2898,7 +2974,24 @@ export function create(ctx) {
         const plinth = h.distance - lensBack <= p.occPlinthNear && (PLINTH.test(o.name || '') || s.maxDim > p.occFadeLastDim);
         // §5.2 classification — a hit on a PATCHED mesh: blocked (raw), the window's to open (cutNeed, via the
         // window's reading above), never faded, dollied or tilted; a patched plinth only grows the window (rule 6)
-        if (cutOn && cut.isPatchedHit(h)) { blockedRay[k] = true; if (plinth) pm = PLINTH_BIT; continue; }
+        if (cutOn && cut.isPatchedHit(h)) {
+          blockedRay[k] = true; if (plinth) pm = PLINTH_BIT;
+          // the spring arm: every surface of this mesh on the ray (nearestHit() left them in rayHits) that leaves
+          // the lens room in front of it; the one nearest him decides (the lens must clear all of them)
+          // (hysteresis: a mass already holding the arm keeps it with PATCH_SLACK u less room — a surface right at
+          // the floor flickered in and out of room with the idle breathing, and the lens pumped 17 ↔ 21 u; the lens
+          // then stands at the floor, a hair behind that surface, where the near-lens clip has already taken it)
+          const fl = nearPatch.has(o) ? pFloor - PATCH_SLACK : pFloor;
+          let pd = Infinity;
+          for (let j = 0; j < rayHits.length; j++) {
+            const x = rayHits[j];
+            if (!realBlocker(x, rayEnds[k]) || !cut.isPatchedHit(x)) continue;
+            const dA = aimT(x.point) - 0.7;
+            if (dA >= fl && dA < pd) pd = dA;
+          }
+          if (pd < Infinity) { pdN++; if (pd < pdBest) pdBest = pd; }
+          continue;
+        }
         // rule 1 — fade: an unpatched prop-sized mesh. (The old "district within occNearLens of the lens" ghost,
         // 1b, runs only in the p.cut 0 fallback: with the window on, the near-lens dither does that job.)
         if ((!s.big || (!cutOn && h.distance - lensBack <= p.occNearLens)) && !noFade(o)) { fadeNow.add(o); continue; }
@@ -2919,11 +3012,30 @@ export function create(ctx) {
         needTilt = true;
         if (dPlayer >= 4) lastResort = Math.min(lastResort, dAim - 0.7);
       }
+      // the window's reading from the REAL lens, for the rays the stop's reading put in front of it (dollied lens)
+      for (let k = 0; conf && k < WIN_RAYS; k++) {
+        if (!(conf & (1 << k))) continue;
+        conf &= ~(1 << k);
+        lensRay.subVectors(rayEnds[k], lensPos);
+        const Lr = lensRay.length();
+        if (Lr < 1e-3) continue;
+        lensRay.divideScalar(Lr);
+        rc.set(lensPos, lensRay); rc.near = cam.near;
+        spent += Math.max(1, s.tris);
+        const hr = nearestHit(o, Lr - 0.2);
+        if (hr && realBlocker(hr, rayEnds[k])) { if (cut.isPatchedHit(hr)) cm |= 1 << k; else um |= 1 << k; }
+      }
       if (cm || pm) cutHits.set(o, cm | pm); else cutHits.delete(o);
       if (um) plainHits.set(o, um); else plainHits.delete(o);
+      if (pdN >= 2) nearPatch.set(o, pdBest); else nearPatch.delete(o);
     }
     // a mesh the broad phase no longer puts near the sight line (or that is culled / hidden) blocks nothing
-    cutHits.forEach(dropFarCut); plainHits.forEach(dropFarPlain);
+    cutHits.forEach(dropFarCut); plainHits.forEach(dropFarPlain); nearPatch.forEach(dropFarPatch);
+    // the spring arm's dolly: the deepest any patched mass at the lens asks for, never under the floor
+    pdMin = Infinity; nearPatch.forEach(pdMinCb);
+    if (cutOn && pdMin < Infinity) { patchDolly = Math.max(pFloor, pdMin); patchHold = PATCH_HOLD; }
+    else if (patchHold > 0) patchHold--;
+    else patchDolly = Infinity;
     // SHELLS (shellable(): big noFade masses the sweep never fades, culls or cuts). Rule 2 on their REAL
     // triangles, and nothing else: the chest ray from the stop, at every drawn shell whose world box (+0.5 u) the
     // sight line crosses (≤ 16 shells exist, 0-2 near any sight line). Of every shell surface it meets, the one

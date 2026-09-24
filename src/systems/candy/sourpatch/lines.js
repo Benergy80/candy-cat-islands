@@ -256,3 +256,57 @@ export const STAR = [
   'we\'re sorry about the hat! WE\'RE SORRY ABOUT THE HAT!',
   'the tourist is GLOWING! mom! MOM!',
 ];
+
+// ── 2026-09-23: dawn, water, and the ten-at-a-time rule ─────────────────────
+// the sun comes up on a hunter: it yawns, stretches and is a child again
+export const DAWN = [
+  'oh! is it morning? i had the WEIRDEST dream.',
+  'good morning! why am i standing here?',
+  'mmmh— *yaaawn*. who wants to play tag?',
+  'morning! we missed you! not in a hungry way!',
+  'sorry about... whatever that was. can\'t remember. you look tasty— TASTEFUL. tasteful.',
+  'is that the sun? i LOVE the sun. the sun is my best friend.',
+];
+// you are standing in the water and they cannot follow
+export const SHORE = [
+  'hsssssss.',
+  'come OUT. the water\'s for SOUP.',
+  'that\'s cheating. water is CHEATING.',
+  'you\'ll catch cold in there. come here. we\'re warm.',
+  'hsss. we can wait. we\'re very good at the edge.',
+  'you have to come out eventually. you have LEGS. legs get TIRED.',
+];
+// one of them decides it can swim
+export const LUNGE = [
+  'i can SWIM. i can totally sw—',
+  'how deep can it BE—',
+  'MINE! mine mine mi—',
+  'watch this! watch this!! wa—',
+];
+// …it cannot
+export const SWIM = [
+  'it\'s WET! it\'s so WE—',
+  'i\'m going RUNNY—',
+  'tell my house i was brave. and sticky.',
+  'blub.',
+  'oh no. oh no no. i\'m SOUP—',
+];
+export const REFORM_WET = [
+  'i was a PUDDLE. do you know how many fish i met?',
+  'back. still damp. still hungry.',
+  'note to self: water is not a floor.',
+];
+// the ones who have to wait their turn, at the edge of the light
+export const WATCH = [
+  'we\'re next.',
+  'save some for us.',
+  'only ten at a time. it\'s polite.',
+  'we\'re just watching. watching is free.',
+  'take your time. we have all night. literally.',
+];
+// a watcher gets its turn
+export const STEPIN = [
+  'my turn.',
+  'budge up. i\'m in.',
+  'tag. tag me in.',
+];

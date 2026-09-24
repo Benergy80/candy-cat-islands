@@ -1,0 +1,5265 @@
+{
+ "meta": {
+  "tag": "baseline",
+  "commit": "d4c096d",
+  "date": "2026-09-22T23:40:11.859Z",
+  "protocol": 2,
+  "modes": [
+   1,
+   2,
+   3
+  ],
+  "filter": null,
+  "scripts": [
+   "a4",
+   "a5",
+   "a6",
+   "a7",
+   "a8",
+   "a9",
+   "a10",
+   "s7",
+   "seed"
+  ],
+  "s9": false,
+  "pSrc": "merged",
+  "shots": null,
+  "frame": true,
+  "w": 1600,
+  "h": 1000,
+  "pin": "b7ad15a",
+  "pinned": {
+   "src/core/input.js": "pinned (working tree differs)",
+   "src/systems/camera.js": "pinned (working tree differs)",
+   "src/systems/ui/hotbar.js": "pinned (same as working tree)"
+  }
+ },
+ "impl": {
+  "look": false,
+  "recentre": false,
+  "orbit": false,
+  "moveLock": false,
+  "isPatched": false,
+  "rawVisible": false
+ },
+ "rows": [
+  {
+   "view": "candy_arrival",
+   "mode": 1,
+   "src": "views.json",
+   "time": 9.5,
+   "viewParams": {
+    "azimuth": -1.435,
+    "distance": 44
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": 1.70659,
+   "pinned": null,
+   "occDist": 44.413,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": -1.435,
+    "elevation": 0.64,
+    "distance": 44
+   },
+   "params": {
+    "azimuth": -1.435,
+    "elevation": 0.64,
+    "distance": 44,
+    "fov": 30
+   },
+   "player": [
+    -50,
+    4.962,
+    26
+   ],
+   "lens": {
+    "pos": [
+     -81.768,
+     36.843,
+     30.341
+    ],
+    "fov": 30,
+    "az": -1.435,
+    "el": 0.7642,
+    "toTarget": 44.412,
+    "eff": 44.412,
+    "centre": 44.412,
+    "ground": 5.022,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 0,
+    "sig": "811c9dc5"
+   }
+  },
+  {
+   "view": "cat_arrival",
+   "mode": 1,
+   "src": "views/cat_architecture.json",
+   "time": 10,
+   "viewParams": {
+    "azimuth": 0.95,
+    "elevation": 0.52,
+    "distance": 52
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.19159,
+   "pinned": null,
+   "occDist": 33.6383,
+   "goalDistance": null,
+   "occLift": 0.2724,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.95,
+    "elevation": 0.52,
+    "distance": 52
+   },
+   "params": {
+    "azimuth": 0.95,
+    "elevation": 0.52,
+    "distance": 52,
+    "fov": 30
+   },
+   "player": [
+    46,
+    4.095,
+    22
+   ],
+   "lens": {
+    "pos": [
+     65.082,
+     29.353,
+     35.646
+    ],
+    "fov": 30,
+    "az": 0.95,
+    "el": 0.799,
+    "toTarget": 33.638,
+    "eff": 33.638,
+    "centre": 33.883,
+    "ground": 5.085,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 1,
+    "sig": "d01dda6b"
+   }
+  },
+  {
+   "view": "cat_plaza",
+   "mode": 1,
+   "src": "views/cat_architecture.json",
+   "time": 11,
+   "viewParams": {
+    "azimuth": 0.78,
+    "elevation": 0.56,
+    "distance": 48
+   },
+   "vis": 0.8,
+   "raw": 0.8,
+   "feather": 0,
+   "total": 5,
+   "blocked": [
+    "knees:cat_plaza_matte@48.5"
+   ],
+   "cutClear": [],
+   "facing": -2.36159,
+   "pinned": null,
+   "occDist": 48.2433,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.78,
+    "elevation": 0.5,
+    "distance": 48
+   },
+   "params": {
+    "azimuth": 0.78,
+    "elevation": 0.56,
+    "distance": 48,
+    "fov": 30
+   },
+   "player": [
+    80,
+    4.773,
+    23.464
+   ],
+   "lens": {
+    "pos": [
+     107.462,
+     35.245,
+     51.225
+    ],
+    "fov": 30,
+    "az": 0.78,
+    "el": 0.6275,
+    "toTarget": 48.239,
+    "eff": 48.832,
+    "centre": 49.822,
+    "ground": 3.19,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 2,
+    "sig": "0ca37290"
+   }
+  },
+  {
+   "view": "cat_park",
+   "mode": 1,
+   "src": "views.json",
+   "time": 13,
+   "viewParams": null,
+   "vis": 0.8,
+   "raw": 0.8,
+   "feather": 0,
+   "total": 5,
+   "blocked": [
+    "knees:cat_nature_outcrop[inst]@30.6"
+   ],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 31.0159,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    137.2,
+    5.007,
+    -66.614
+   ],
+   "lens": {
+    "pos": [
+     153.011,
+     27.644,
+     -50.804
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.7655,
+    "toTarget": 31.01,
+    "eff": 31.01,
+    "centre": 31.01,
+    "ground": 6.169,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 3,
+    "sig": "b0039cf8"
+   }
+  },
+  {
+   "view": "cat_gym",
+   "mode": 1,
+   "src": "views/cat_architecture.json",
+   "time": 16,
+   "viewParams": {
+    "azimuth": 0.78,
+    "elevation": 0.5,
+    "distance": 58
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.36159,
+   "pinned": null,
+   "occDist": 57.8565,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.78,
+    "elevation": 0.5,
+    "distance": 58
+   },
+   "params": {
+    "azimuth": 0.78,
+    "elevation": 0.5,
+    "distance": 58,
+    "fov": 30
+   },
+   "player": [
+    197.347,
+    6.259,
+    -18.538
+   ],
+   "lens": {
+    "pos": [
+     232.852,
+     35.267,
+     15.984
+    ],
+    "fov": 30,
+    "az": 0.78,
+    "el": 0.5024,
+    "toTarget": 57.851,
+    "eff": 56.819,
+    "centre": 57.941,
+    "ground": 5.798,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 4,
+    "sig": "7c1d521c"
+   }
+  },
+  {
+   "view": "candy_lake",
+   "mode": 1,
+   "src": "views.json",
+   "time": 15,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 30.6637,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -193.2,
+    1.68,
+    40
+   ],
+   "lens": {
+    "pos": [
+     -177.441,
+     23.886,
+     55.759
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.757,
+    "toTarget": 30.66,
+    "eff": 30.66,
+    "centre": 31.962,
+    "ground": 3.283,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 5,
+    "sig": "6af1daaf"
+   }
+  },
+  {
+   "view": "sky_dawn_harbor",
+   "mode": 1,
+   "src": "views/sky.json",
+   "time": 5.9,
+   "viewParams": {
+    "azimuth": -1.92,
+    "elevation": 0.13,
+    "distance": 46,
+    "fov": 52
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": 1.22159,
+   "pinned": null,
+   "occDist": 45.589,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": -1.92,
+    "elevation": 0.26,
+    "distance": 46
+   },
+   "params": {
+    "azimuth": -1.92,
+    "elevation": 0.13,
+    "distance": 46,
+    "fov": 52
+   },
+   "player": [
+    100,
+    3.17,
+    58
+   ],
+   "lens": {
+    "pos": [
+     58.536,
+     16.768,
+     42.902
+    ],
+    "fov": 52,
+    "az": -1.92,
+    "el": 0.2538,
+    "toTarget": 45.588,
+    "eff": 45.849,
+    "centre": 49.332,
+    "ground": 4.772,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 6,
+    "sig": "5a82908f"
+   }
+  },
+  {
+   "view": "candy_village",
+   "mode": 1,
+   "src": "views.json",
+   "time": 11,
+   "viewParams": null,
+   "vis": 0.6,
+   "raw": 0.6,
+   "feather": 0,
+   "total": 5,
+   "blocked": [
+    "hips:candyArch_matte@25.6",
+    "knees:candyArch_matte@25.5"
+   ],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 30.6012,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.5,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -140,
+    4.584,
+    40
+   ],
+   "lens": {
+    "pos": [
+     -122.296,
+     24.329,
+     57.704
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.6126,
+    "toTarget": 30.601,
+    "eff": 31.187,
+    "centre": 32.358,
+    "ground": 5.207,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 7,
+    "sig": "15b45cc7"
+   }
+  },
+  {
+   "view": "cat_main_street",
+   "mode": 1,
+   "src": "views/cat_architecture.json",
+   "time": 12,
+   "viewParams": {
+    "azimuth": -0.92,
+    "elevation": 0.46,
+    "distance": 56
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": 2.22159,
+   "pinned": null,
+   "occDist": 55.679,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": -0.92,
+    "elevation": 0.46,
+    "distance": 56
+   },
+   "params": {
+    "azimuth": -0.92,
+    "elevation": 0.46,
+    "distance": 56,
+    "fov": 30
+   },
+   "player": [
+    112,
+    5.112,
+    2
+   ],
+   "lens": {
+    "pos": [
+     74.799,
+     37.492,
+     30.327
+    ],
+    "fov": 30,
+    "az": -0.92,
+    "el": 0.5739,
+    "toTarget": 55.679,
+    "eff": 56.228,
+    "centre": 57.364,
+    "ground": 5.225,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 8,
+    "sig": "4ae237dc"
+   }
+  },
+  {
+   "view": "cat_residential",
+   "mode": 1,
+   "src": "views/cat_architecture.json",
+   "time": 15,
+   "viewParams": {
+    "azimuth": 0.78,
+    "elevation": 0.68,
+    "distance": 86
+   },
+   "vis": 0.4,
+   "raw": 0.4,
+   "feather": 0,
+   "total": 5,
+   "blocked": [
+    "chest:cat_heights_matte@67.5",
+    "hips:cat_heights_matte@67.7",
+    "knees:cat_heights_matte@67.8"
+   ],
+   "cutClear": [],
+   "facing": -2.36159,
+   "pinned": null,
+   "occDist": 85.804,
+   "goalDistance": null,
+   "occLift": 0.1207,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.78,
+    "elevation": 0.5,
+    "distance": 86
+   },
+   "params": {
+    "azimuth": 0.78,
+    "elevation": 0.68,
+    "distance": 86,
+    "fov": 30
+   },
+   "player": [
+    182,
+    5.34,
+    48
+   ],
+   "lens": {
+    "pos": [
+     231.202,
+     57.167,
+     97.736
+    ],
+    "fov": 30,
+    "az": 0.78,
+    "el": 0.6175,
+    "toTarget": 85.804,
+    "eff": 86.387,
+    "centre": 87.323,
+    "ground": -3.767,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 9,
+    "sig": "c98596e5"
+   }
+  },
+  {
+   "view": "candy_forest",
+   "mode": 1,
+   "src": "views.json",
+   "time": 14,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 31.0382,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -200,
+    6.949,
+    -20
+   ],
+   "lens": {
+    "pos": [
+     -182.424,
+     26.689,
+     -2.424
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.6421,
+    "toTarget": 31.038,
+    "eff": 31.038,
+    "centre": 31.038,
+    "ground": 5.727,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 10,
+    "sig": "f4fd1b47"
+   }
+  },
+  {
+   "view": "candy_meadow",
+   "mode": 1,
+   "src": "views.json",
+   "time": 12,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 19.22,
+   "goalDistance": null,
+   "occLift": 0.1247,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 1,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -110,
+    3.891,
+    -45
+   ],
+   "lens": {
+    "pos": [
+     -100.254,
+     18.436,
+     -35.254
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.7711,
+    "toTarget": 19.22,
+    "eff": 19.22,
+    "centre": 19.22,
+    "ground": 3.595,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 11,
+    "sig": "6af97a6d"
+   }
+  },
+  {
+   "view": "candy_river",
+   "mode": 1,
+   "src": "views.json",
+   "time": 13,
+   "viewParams": null,
+   "vis": 0.8,
+   "raw": 0.8,
+   "feather": 0,
+   "total": 5,
+   "blocked": [
+    "knees:terrain_river@31.4"
+   ],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 31.3971,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.5126,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -120,
+    3.933,
+    30
+   ],
+   "lens": {
+    "pos": [
+     -100.733,
+     21.592,
+     49.267
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.5199,
+    "toTarget": 31.397,
+    "eff": 31.859,
+    "centre": 33.038,
+    "ground": 5.366,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 12,
+    "sig": "da72aa9b"
+   }
+  },
+  {
+   "view": "occ_silhouette",
+   "mode": 1,
+   "src": "views/player.json",
+   "time": 12,
+   "viewParams": null,
+   "vis": 0,
+   "raw": 0,
+   "feather": 0,
+   "total": 5,
+   "blocked": [
+    "hat:candyArch_great_cupcake_in_matte@7.4",
+    "head:candyArch_great_cupcake_in_matte@7.5",
+    "chest:candyArch_great_cupcake_in_matte@7.6",
+    "hips:candyArch_great_cupcake_in_matte@7.5",
+    "knees:candyArch_great_cupcake_in_matte@7.5"
+   ],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 19.4946,
+   "goalDistance": null,
+   "occLift": 0.1384,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -94,
+    6.33,
+    -24
+   ],
+   "lens": {
+    "pos": [
+     -84.237,
+     21.243,
+     -14.237
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.7838,
+    "toTarget": 19.495,
+    "eff": 19.495,
+    "centre": 21.765,
+    "ground": 5.007,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 13,
+    "sig": "30960f12"
+   }
+  },
+  {
+   "view": "occ_whisker_night",
+   "mode": 1,
+   "src": "views/player.json",
+   "time": 22,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 31.3431,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.5,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    182,
+    5.34,
+    48
+   ],
+   "lens": {
+    "pos": [
+     200.011,
+     25.749,
+     66.011
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.6219,
+    "toTarget": 31.34,
+    "eff": 31.933,
+    "centre": 32.848,
+    "ground": 4.547,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 14,
+    "sig": "b21db013"
+   }
+  },
+  {
+   "view": "candy_arrival",
+   "mode": 2,
+   "src": "views.json",
+   "time": 9.5,
+   "viewParams": {
+    "azimuth": -1.435,
+    "distance": 44
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": 1.70659,
+   "pinned": null,
+   "occDist": 44.2091,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": -1.435,
+    "elevation": 0.64,
+    "distance": 44
+   },
+   "params": {
+    "azimuth": -1.435,
+    "elevation": 0.64,
+    "distance": 44,
+    "fov": 30
+   },
+   "player": [
+    -50,
+    4.962,
+    26
+   ],
+   "lens": {
+    "pos": [
+     -81.811,
+     36.496,
+     30.347
+    ],
+    "fov": 30,
+    "az": -1.435,
+    "el": 0.7578,
+    "toTarget": 44.204,
+    "eff": 44.204,
+    "centre": 44.204,
+    "ground": 5.021,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 15,
+    "sig": "c5c9fd0c"
+   }
+  },
+  {
+   "view": "cat_arrival",
+   "mode": 2,
+   "src": "views/cat_architecture.json",
+   "time": 10,
+   "viewParams": {
+    "azimuth": 0.95,
+    "elevation": 0.52,
+    "distance": 52
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.19159,
+   "pinned": null,
+   "occDist": 52.0563,
+   "goalDistance": null,
+   "occLift": 0.2373,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.95,
+    "elevation": 0.52,
+    "distance": 52
+   },
+   "params": {
+    "azimuth": 0.95,
+    "elevation": 0.52,
+    "distance": 52,
+    "fov": 30
+   },
+   "player": [
+    46,
+    4.095,
+    22
+   ],
+   "lens": {
+    "pos": [
+     76.92,
+     40.802,
+     44.111
+    ],
+    "fov": 30,
+    "az": 0.95,
+    "el": 0.752,
+    "toTarget": 52.051,
+    "eff": 52.051,
+    "centre": 52.309,
+    "ground": 5.192,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 16,
+    "sig": "0c8745e7"
+   }
+  },
+  {
+   "view": "cat_plaza",
+   "mode": 2,
+   "src": "views/cat_architecture.json",
+   "time": 11,
+   "viewParams": {
+    "azimuth": 0.78,
+    "elevation": 0.56,
+    "distance": 48
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.36159,
+   "pinned": null,
+   "occDist": 47.8952,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.78,
+    "elevation": 0.5,
+    "distance": 48
+   },
+   "params": {
+    "azimuth": 0.78,
+    "elevation": 0.56,
+    "distance": 48,
+    "fov": 30
+   },
+   "player": [
+    80,
+    4.773,
+    23.464
+   ],
+   "lens": {
+    "pos": [
+     107.551,
+     34.468,
+     51.314
+    ],
+    "fov": 30,
+    "az": 0.78,
+    "el": 0.6128,
+    "toTarget": 47.89,
+    "eff": 48.472,
+    "centre": 49.506,
+    "ground": 3.178,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 17,
+    "sig": "1a085c05"
+   }
+  },
+  {
+   "view": "cat_park",
+   "mode": 2,
+   "src": "views.json",
+   "time": 13,
+   "viewParams": null,
+   "vis": 0.8,
+   "raw": 0.8,
+   "feather": 0,
+   "total": 5,
+   "blocked": [
+    "knees:cat_nature_outcrop[inst]@30.3"
+   ],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 30.6895,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    137.2,
+    5.007,
+    -66.614
+   ],
+   "lens": {
+    "pos": [
+     153.028,
+     27.146,
+     -50.786
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.7532,
+    "toTarget": 30.686,
+    "eff": 30.686,
+    "centre": 30.686,
+    "ground": 6.169,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 18,
+    "sig": "55121796"
+   }
+  },
+  {
+   "view": "cat_gym",
+   "mode": 2,
+   "src": "views/cat_architecture.json",
+   "time": 16,
+   "viewParams": {
+    "azimuth": 0.78,
+    "elevation": 0.5,
+    "distance": 58
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.36159,
+   "pinned": null,
+   "occDist": 57.6058,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.78,
+    "elevation": 0.5,
+    "distance": 58
+   },
+   "params": {
+    "azimuth": 0.78,
+    "elevation": 0.5,
+    "distance": 58,
+    "fov": 30
+   },
+   "player": [
+    197.347,
+    6.259,
+    -18.538
+   ],
+   "lens": {
+    "pos": [
+     232.832,
+     34.802,
+     15.964
+    ],
+    "fov": 30,
+    "az": 0.78,
+    "el": 0.4956,
+    "toTarget": 57.604,
+    "eff": 56.568,
+    "centre": 57.695,
+    "ground": 5.799,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 19,
+    "sig": "946168eb"
+   }
+  },
+  {
+   "view": "candy_lake",
+   "mode": 2,
+   "src": "views.json",
+   "time": 15,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 30.5869,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -193.2,
+    1.68,
+    40
+   ],
+   "lens": {
+    "pos": [
+     -177.536,
+     23.921,
+     55.664
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.7608,
+    "toTarget": 30.587,
+    "eff": 30.587,
+    "centre": 31.883,
+    "ground": 3.273,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 20,
+    "sig": "34da0d4b"
+   }
+  },
+  {
+   "view": "sky_dawn_harbor",
+   "mode": 2,
+   "src": "views/sky.json",
+   "time": 5.9,
+   "viewParams": {
+    "azimuth": -1.92,
+    "elevation": 0.13,
+    "distance": 46,
+    "fov": 52
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": 1.22159,
+   "pinned": null,
+   "occDist": 45.6544,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": -1.92,
+    "elevation": 0.26,
+    "distance": 46
+   },
+   "params": {
+    "azimuth": -1.92,
+    "elevation": 0.13,
+    "distance": 46,
+    "fov": 52
+   },
+   "player": [
+    100,
+    3.17,
+    58
+   ],
+   "lens": {
+    "pos": [
+     58.595,
+     17.262,
+     42.923
+    ],
+    "fov": 52,
+    "az": -1.92,
+    "el": 0.2646,
+    "toTarget": 45.654,
+    "eff": 45.926,
+    "centre": 49.286,
+    "ground": 4.777,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 21,
+    "sig": "52117b5e"
+   }
+  },
+  {
+   "view": "candy_village",
+   "mode": 2,
+   "src": "views.json",
+   "time": 11,
+   "viewParams": null,
+   "vis": 0.6,
+   "raw": 0.6,
+   "feather": 0,
+   "total": 5,
+   "blocked": [
+    "hips:candyArch_matte@25.9",
+    "knees:candyArch_matte@25.8"
+   ],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 30.8402,
+   "goalDistance": null,
+   "occLift": 0.1073,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.5,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -140,
+    4.584,
+    40
+   ],
+   "lens": {
+    "pos": [
+     -122.184,
+     24.519,
+     57.816
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.6147,
+    "toTarget": 30.84,
+    "eff": 31.427,
+    "centre": 32.592,
+    "ground": 5.211,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 22,
+    "sig": "bcb14bb1"
+   }
+  },
+  {
+   "view": "cat_main_street",
+   "mode": 2,
+   "src": "views/cat_architecture.json",
+   "time": 12,
+   "viewParams": {
+    "azimuth": -0.92,
+    "elevation": 0.46,
+    "distance": 56
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": 2.22159,
+   "pinned": null,
+   "occDist": 55.9984,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": -0.92,
+    "elevation": 0.46,
+    "distance": 56
+   },
+   "params": {
+    "azimuth": -0.92,
+    "elevation": 0.46,
+    "distance": 56,
+    "fov": 30
+   },
+   "player": [
+    112,
+    5.112,
+    2
+   ],
+   "lens": {
+    "pos": [
+     74.908,
+     38.282,
+     30.244
+    ],
+    "fov": 30,
+    "az": -0.92,
+    "el": 0.5871,
+    "toTarget": 55.998,
+    "eff": 56.558,
+    "centre": 57.648,
+    "ground": 5.185,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 23,
+    "sig": "8da44947"
+   }
+  },
+  {
+   "view": "cat_residential",
+   "mode": 2,
+   "src": "views/cat_architecture.json",
+   "time": 15,
+   "viewParams": {
+    "azimuth": 0.78,
+    "elevation": 0.68,
+    "distance": 86
+   },
+   "vis": 0.6,
+   "raw": 0.6,
+   "feather": 0,
+   "total": 5,
+   "blocked": [
+    "hips:cat_heights_matte@67.9",
+    "knees:cat_heights_matte@68.1"
+   ],
+   "cutClear": [],
+   "facing": -2.36159,
+   "pinned": null,
+   "occDist": 86.1558,
+   "goalDistance": null,
+   "occLift": 0.1207,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.78,
+    "elevation": 0.5,
+    "distance": 86
+   },
+   "params": {
+    "azimuth": 0.78,
+    "elevation": 0.68,
+    "distance": 86,
+    "fov": 30
+   },
+   "player": [
+    182,
+    5.34,
+    48
+   ],
+   "lens": {
+    "pos": [
+     231.109,
+     57.956,
+     97.642
+    ],
+    "fov": 30,
+    "az": 0.78,
+    "el": 0.6258,
+    "toTarget": 86.156,
+    "eff": 86.745,
+    "centre": 87.657,
+    "ground": -3.736,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 24,
+    "sig": "904b3e2d"
+   }
+  },
+  {
+   "view": "candy_forest",
+   "mode": 2,
+   "src": "views.json",
+   "time": 14,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 31.3431,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -200,
+    6.949,
+    -20
+   ],
+   "lens": {
+    "pos": [
+     -182.224,
+     26.819,
+     -2.224
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.6401,
+    "toTarget": 31.343,
+    "eff": 31.343,
+    "centre": 31.343,
+    "ground": 5.736,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 25,
+    "sig": "7cd28552"
+   }
+  },
+  {
+   "view": "candy_meadow",
+   "mode": 2,
+   "src": "views.json",
+   "time": 12,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 19.22,
+   "goalDistance": null,
+   "occLift": 0.1247,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 1,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -110,
+    3.891,
+    -45
+   ],
+   "lens": {
+    "pos": [
+     -100.146,
+     18.277,
+     -35.146
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.7597,
+    "toTarget": 19.22,
+    "eff": 19.22,
+    "centre": 19.22,
+    "ground": 3.613,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 26,
+    "sig": "82913f8d"
+   }
+  },
+  {
+   "view": "candy_river",
+   "mode": 2,
+   "src": "views.json",
+   "time": 13,
+   "viewParams": null,
+   "vis": 0.8,
+   "raw": 0.8,
+   "feather": 0,
+   "total": 5,
+   "blocked": [
+    "knees:terrain_river@26.3"
+   ],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 26.2656,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.5126,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -120,
+    3.933,
+    30
+   ],
+   "lens": {
+    "pos": [
+     -103.747,
+     18.703,
+     46.253
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.5051,
+    "toTarget": 26.266,
+    "eff": 26.718,
+    "centre": 27.944,
+    "ground": 5.066,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 27,
+    "sig": "94f9714e"
+   }
+  },
+  {
+   "view": "occ_silhouette",
+   "mode": 2,
+   "src": "views/player.json",
+   "time": 12,
+   "viewParams": null,
+   "vis": 0,
+   "raw": 0,
+   "feather": 0,
+   "total": 5,
+   "blocked": [
+    "hat:candyArch_great_cupcake_in_matte@19.1",
+    "head:candyArch_great_cupcake_in_matte@19.3",
+    "chest:candyArch_great_cupcake_in_matte@19.1",
+    "hips:candyArch_great_cupcake_in_matte@19.0",
+    "knees:candyArch_great_cupcake_in_matte@19.0"
+   ],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 31.1685,
+   "goalDistance": null,
+   "occLift": 0.1384,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -94,
+    6.33,
+    -24
+   ],
+   "lens": {
+    "pos": [
+     -78.203,
+     29.214,
+     -8.203
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.7716,
+    "toTarget": 31.169,
+    "eff": 31.169,
+    "centre": 33.474,
+    "ground": 4.678,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 28,
+    "sig": "7e9944e0"
+   }
+  },
+  {
+   "view": "occ_whisker_night",
+   "mode": 2,
+   "src": "views/player.json",
+   "time": 22,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 31.0361,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 0.5,
+    "distance": 31
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    182,
+    5.34,
+    48
+   ],
+   "lens": {
+    "pos": [
+     199.909,
+     25.419,
+     65.909
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 0.616,
+    "toTarget": 31.03,
+    "eff": 31.619,
+    "centre": 32.551,
+    "ground": 4.548,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 29,
+    "sig": "c031c26c"
+   }
+  },
+  {
+   "view": "candy_arrival",
+   "mode": 3,
+   "src": "views.json",
+   "time": 9.5,
+   "viewParams": {
+    "azimuth": -1.435,
+    "distance": 44
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": 1.70659,
+   "pinned": null,
+   "occDist": 61.4564,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": -1.435,
+    "elevation": 1.1,
+    "distance": 61.6
+   },
+   "params": {
+    "azimuth": -1.435,
+    "elevation": 0.64,
+    "distance": 44,
+    "fov": 30
+   },
+   "player": [
+    -50,
+    4.962,
+    26
+   ],
+   "lens": {
+    "pos": [
+     -68.157,
+     64.767,
+     28.481
+    ],
+    "fov": 30,
+    "az": -1.435,
+    "el": 1.268,
+    "toTarget": 61.451,
+    "eff": 61.451,
+    "centre": 61.451,
+    "ground": 5.282,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 30,
+    "sig": "2272aaa4"
+   }
+  },
+  {
+   "view": "cat_arrival",
+   "mode": 3,
+   "src": "views/cat_architecture.json",
+   "time": 10,
+   "viewParams": {
+    "azimuth": 0.95,
+    "elevation": 0.52,
+    "distance": 52
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.19159,
+   "pinned": null,
+   "occDist": 72.5182,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.95,
+    "elevation": 1.1,
+    "distance": 72.8
+   },
+   "params": {
+    "azimuth": 0.95,
+    "elevation": 0.52,
+    "distance": 52,
+    "fov": 30
+   },
+   "player": [
+    46,
+    4.095,
+    22
+   ],
+   "lens": {
+    "pos": [
+     68.857,
+     72.093,
+     38.346
+    ],
+    "fov": 30,
+    "az": 0.95,
+    "el": 1.1729,
+    "toTarget": 72.514,
+    "eff": 72.514,
+    "centre": 72.695,
+    "ground": 5.146,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 31,
+    "sig": "f64e855c"
+   }
+  },
+  {
+   "view": "cat_plaza",
+   "mode": 3,
+   "src": "views/cat_architecture.json",
+   "time": 11,
+   "viewParams": {
+    "azimuth": 0.78,
+    "elevation": 0.56,
+    "distance": 48
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.36159,
+   "pinned": null,
+   "occDist": 66.8216,
+   "goalDistance": null,
+   "occLift": 0.12,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.78,
+    "elevation": 1.1,
+    "distance": 67.2
+   },
+   "params": {
+    "azimuth": 0.78,
+    "elevation": 0.56,
+    "distance": 48,
+    "fov": 30
+   },
+   "player": [
+    80,
+    4.773,
+    23.464
+   ],
+   "lens": {
+    "pos": [
+     93.301,
+     71.01,
+     36.909
+    ],
+    "fov": 30,
+    "az": 0.78,
+    "el": 1.2838,
+    "toTarget": 66.819,
+    "eff": 67.779,
+    "centre": 67.834,
+    "ground": 4.78,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 32,
+    "sig": "93722643"
+   }
+  },
+  {
+   "view": "cat_park",
+   "mode": 3,
+   "src": "views.json",
+   "time": 13,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 42.9819,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 1.1,
+    "distance": 43.4
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    137.2,
+    5.007,
+    -66.614
+   ],
+   "lens": {
+    "pos": [
+     150.071,
+     45.095,
+     -53.744
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 1.1335,
+    "toTarget": 42.982,
+    "eff": 42.982,
+    "centre": 42.982,
+    "ground": 6.208,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 33,
+    "sig": "600d2e6f"
+   }
+  },
+  {
+   "view": "cat_gym",
+   "mode": 3,
+   "src": "views/cat_architecture.json",
+   "time": 16,
+   "viewParams": {
+    "azimuth": 0.78,
+    "elevation": 0.5,
+    "distance": 58
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.36159,
+   "pinned": null,
+   "occDist": 80.824,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.78,
+    "elevation": 1.1,
+    "distance": 81.2
+   },
+   "params": {
+    "azimuth": 0.78,
+    "elevation": 0.5,
+    "distance": 58,
+    "fov": 30
+   },
+   "player": [
+    197.347,
+    6.259,
+    -18.538
+   ],
+   "lens": {
+    "pos": [
+     217.856,
+     82.704,
+     0.825
+    ],
+    "fov": 30,
+    "az": 0.78,
+    "el": 1.1988,
+    "toTarget": 80.824,
+    "eff": 80.404,
+    "centre": 80.867,
+    "ground": 5.526,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 34,
+    "sig": "0abc07b5"
+   }
+  },
+  {
+   "view": "candy_lake",
+   "mode": 3,
+   "src": "views.json",
+   "time": 15,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 43.186,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 1.1,
+    "distance": 43.4
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -193.2,
+    1.68,
+    40
+   ],
+   "lens": {
+    "pos": [
+     -180.102,
+     41.842,
+     53.098
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 1.1275,
+    "toTarget": 43.186,
+    "eff": 43.186,
+    "centre": 44.143,
+    "ground": 3.595,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 35,
+    "sig": "df6c052a"
+   }
+  },
+  {
+   "view": "sky_dawn_harbor",
+   "mode": 3,
+   "src": "views/sky.json",
+   "time": 5.9,
+   "viewParams": {
+    "azimuth": -1.92,
+    "elevation": 0.13,
+    "distance": 46,
+    "fov": 52
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": 1.22159,
+   "pinned": null,
+   "occDist": 64.3578,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": -1.92,
+    "elevation": 1.1,
+    "distance": 64.4
+   },
+   "params": {
+    "azimuth": -1.92,
+    "elevation": 0.13,
+    "distance": 46,
+    "fov": 52
+   },
+   "player": [
+    100,
+    3.17,
+    58
+   ],
+   "lens": {
+    "pos": [
+     75.29,
+     64.06,
+     49.002
+    ],
+    "fov": 52,
+    "az": -1.92,
+    "el": 1.1499,
+    "toTarget": 64.358,
+    "eff": 65.272,
+    "centre": 65.423,
+    "ground": 4.228,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 36,
+    "sig": "74ce7cb8"
+   }
+  },
+  {
+   "view": "candy_village",
+   "mode": 3,
+   "src": "views.json",
+   "time": 11,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 43.5926,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 1.1,
+    "distance": 43.4
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -140,
+    4.584,
+    40
+   ],
+   "lens": {
+    "pos": [
+     -126.553,
+     45.96,
+     53.447
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 1.1194,
+    "toTarget": 43.593,
+    "eff": 44.495,
+    "centre": 44.717,
+    "ground": 4.654,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 37,
+    "sig": "325d83ec"
+   }
+  },
+  {
+   "view": "cat_main_street",
+   "mode": 3,
+   "src": "views/cat_architecture.json",
+   "time": 12,
+   "viewParams": {
+    "azimuth": -0.92,
+    "elevation": 0.46,
+    "distance": 56
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": 2.22159,
+   "pinned": null,
+   "occDist": 78.7167,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 2,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": -0.92,
+    "elevation": 1.1,
+    "distance": 78.4
+   },
+   "params": {
+    "azimuth": -0.92,
+    "elevation": 0.46,
+    "distance": 56,
+    "fov": 30
+   },
+   "player": [
+    112,
+    5.112,
+    2
+   ],
+   "lens": {
+    "pos": [
+     87.941,
+     79.939,
+     20.32
+    ],
+    "fov": 30,
+    "az": -0.92,
+    "el": 1.1765,
+    "toTarget": 78.717,
+    "eff": 79.641,
+    "centre": 79.75,
+    "ground": 4.404,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 38,
+    "sig": "144210cb"
+   }
+  },
+  {
+   "view": "cat_residential",
+   "mode": 3,
+   "src": "views/cat_architecture.json",
+   "time": 15,
+   "viewParams": {
+    "azimuth": 0.78,
+    "elevation": 0.68,
+    "distance": 86
+   },
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.36159,
+   "pinned": null,
+   "occDist": 88.3944,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.78,
+    "elevation": 1.1,
+    "distance": 88
+   },
+   "params": {
+    "azimuth": 0.78,
+    "elevation": 0.68,
+    "distance": 86,
+    "fov": 30
+   },
+   "player": [
+    182,
+    5.34,
+    48
+   ],
+   "lens": {
+    "pos": [
+     203.741,
+     90.302,
+     69.977
+    ],
+    "fov": 30,
+    "az": 0.78,
+    "el": 1.2135,
+    "toTarget": 88.394,
+    "eff": 89.332,
+    "centre": 89.405,
+    "ground": 4.246,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 39,
+    "sig": "e374d746"
+   }
+  },
+  {
+   "view": "candy_forest",
+   "mode": 3,
+   "src": "views.json",
+   "time": 14,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 43.798,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 1.1,
+    "distance": 43.4
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -200,
+    6.949,
+    -20
+   ],
+   "lens": {
+    "pos": [
+     -186.615,
+     47.594,
+     -6.615
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 1.1238,
+    "toTarget": 43.796,
+    "eff": 43.796,
+    "centre": 43.796,
+    "ground": 6.177,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 40,
+    "sig": "11a26654"
+   }
+  },
+  {
+   "view": "candy_meadow",
+   "mode": 3,
+   "src": "views.json",
+   "time": 12,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 43.6594,
+   "goalDistance": null,
+   "occLift": 0.1415,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0.8,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 1.1,
+    "distance": 43.4
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -110,
+    3.891,
+    -45
+   ],
+   "lens": {
+    "pos": [
+     -100.876,
+     46.745,
+     -35.876
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 1.2707,
+    "toTarget": 43.655,
+    "eff": 43.655,
+    "centre": 43.655,
+    "ground": 3.576,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 41,
+    "sig": "dcb73bb0"
+   }
+  },
+  {
+   "view": "candy_river",
+   "mode": 3,
+   "src": "views.json",
+   "time": 13,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 43.436,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 1.1,
+    "distance": 43.4
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -120,
+    3.933,
+    30
+   ],
+   "lens": {
+    "pos": [
+     -106.981,
+     45.328,
+     43.019
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 1.133,
+    "toTarget": 43.43,
+    "eff": 44.256,
+    "centre": 44.419,
+    "ground": 4.698,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 42,
+    "sig": "c0de820c"
+   }
+  },
+  {
+   "view": "occ_silhouette",
+   "mode": 3,
+   "src": "views/player.json",
+   "time": 12,
+   "viewParams": null,
+   "vis": 0,
+   "raw": 0,
+   "feather": 0,
+   "total": 5,
+   "blocked": [
+    "hat:candyArch_great_cupcake_in_waffle@35.0",
+    "head:candyArch_great_cupcake_in_waffle@35.0",
+    "chest:candyArch_great_cupcake_in_waffle@35.0",
+    "hips:candyArch_great_cupcake_in_matte@34.6",
+    "knees:candyArch_great_cupcake_in_matte@34.6"
+   ],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 43.2563,
+   "goalDistance": null,
+   "occLift": 0.139,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 1.1,
+    "distance": 43.4
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    -94,
+    6.33,
+    -24
+   ],
+   "lens": {
+    "pos": [
+     -85.011,
+     48.82,
+     -15.011
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 1.2725,
+    "toTarget": 43.251,
+    "eff": 43.251,
+    "centre": 44.781,
+    "ground": 4.931,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 43,
+    "sig": "1b3acc45"
+   }
+  },
+  {
+   "view": "occ_whisker_night",
+   "mode": 3,
+   "src": "views/player.json",
+   "time": 22,
+   "viewParams": null,
+   "vis": 1,
+   "raw": 1,
+   "feather": 0,
+   "total": 5,
+   "blocked": [],
+   "cutClear": [],
+   "facing": -2.35619,
+   "pinned": null,
+   "occDist": 43.1034,
+   "goalDistance": null,
+   "occLift": 0,
+   "terrainLift": null,
+   "tilt": null,
+   "densityK": null,
+   "cutK": null,
+   "occYaw": null,
+   "culledList": [],
+   "fading": 0,
+   "occBlocked": 0,
+   "current": {
+    "azimuth": 0.7854,
+    "elevation": 1.1,
+    "distance": 43.4
+   },
+   "params": {
+    "azimuth": 0.7854,
+    "elevation": 0.64,
+    "distance": 31,
+    "fov": 30
+   },
+   "player": [
+    182,
+    5.34,
+    48
+   ],
+   "lens": {
+    "pos": [
+     194.954,
+     46.502,
+     60.954
+    ],
+    "fov": 30,
+    "az": 0.7854,
+    "el": 1.1318,
+    "toTarget": 43.099,
+    "eff": 44.007,
+    "centre": 44.133,
+    "ground": 5.114,
+    "clamp": false
+   },
+   "free": false,
+   "page": {
+    "seq": 44,
+    "sig": "fa487f26"
+   }
+  }
+ ],
+ "s9rows": [],
+ "summary": {
+  "m1": {
+   "n": 15,
+   "cutMean15": 0.8267,
+   "rawMean15": 0.8267,
+   "featherMean15": 0,
+   "cutMean13": 0.8769,
+   "rawMean13": 0.8769,
+   "full15": 9,
+   "full13": 8,
+   "min": 0,
+   "minRaw": 0,
+   "below08": [
+    "candy_village",
+    "cat_residential",
+    "occ_silhouette"
+   ],
+   "clamped": []
+  },
+  "m2": {
+   "n": 15,
+   "cutMean15": 0.8533,
+   "rawMean15": 0.8533,
+   "featherMean15": 0,
+   "cutMean13": 0.9077,
+   "rawMean13": 0.9077,
+   "full15": 10,
+   "full13": 9,
+   "min": 0,
+   "minRaw": 0,
+   "below08": [
+    "candy_village",
+    "cat_residential",
+    "occ_silhouette"
+   ],
+   "clamped": []
+  },
+  "m3": {
+   "n": 15,
+   "cutMean15": 0.9333,
+   "rawMean15": 0.9333,
+   "featherMean15": 0,
+   "cutMean13": 1,
+   "rawMean13": 1,
+   "full15": 14,
+   "full13": 13,
+   "min": 0,
+   "minRaw": 0,
+   "below08": [
+    "occ_silhouette"
+   ],
+   "clamped": []
+  },
+  "retried": [],
+  "contaminated": [],
+  "seedCrossCheck": {
+   "m1RawMean13": {
+    "seed": 0.908,
+    "now": 0.8769
+   },
+   "m3Mean13": {
+    "seed": 0.985,
+    "now": 1
+   },
+   "holdD": {
+    "seed": {
+     "net": 2.7,
+     "path": 23.7
+    },
+    "now": {
+     "net": 2.69,
+     "path": 24.08,
+     "pathFine": 25.91,
+     "facing0": 2.356
+    },
+    "a4D": {
+     "net": 2.694,
+     "path": 25.906
+    }
+   }
+  }
+ },
+ "scripts": {
+  "a4": {
+   "status": "ok",
+   "setup": "mode 2, snap at (-110,-45), facing 5π/4, az π/4, 10 settle frames, 120 frames per key",
+   "keys": {
+    "W": {
+     "net": 25.55,
+     "path": 25.55,
+     "ratio": 1,
+     "sumAbsDaz": 0,
+     "maxYawRate": 0,
+     "azStart": 0.7854,
+     "azEnd": 0.7854,
+     "trace": [
+      [
+       -111.35,
+       -46.35,
+       -2.356,
+       0.785
+      ],
+      [
+       -112.89,
+       -47.89,
+       -2.356,
+       0.785
+      ],
+      [
+       -114.34,
+       -49.34,
+       -2.356,
+       0.785
+      ],
+      [
+       -115.84,
+       -50.84,
+       -2.356,
+       0.785
+      ],
+      [
+       -117.45,
+       -52.45,
+       -2.356,
+       0.785
+      ],
+      [
+       -119.06,
+       -54.06,
+       -2.356,
+       0.785
+      ],
+      [
+       -120.53,
+       -55.53,
+       -2.356,
+       0.785
+      ],
+      [
+       -122.03,
+       -57.03,
+       -2.356,
+       0.785
+      ],
+      [
+       -123.53,
+       -58.53,
+       -2.356,
+       0.785
+      ],
+      [
+       -125.01,
+       -60.01,
+       -2.356,
+       0.785
+      ],
+      [
+       -126.53,
+       -61.53,
+       -2.356,
+       0.785
+      ],
+      [
+       -128.07,
+       -63.07,
+       -2.356,
+       0.785
+      ]
+     ]
+    },
+    "A": {
+     "net": 2.744,
+     "path": 26.011,
+     "ratio": 0.1055,
+     "sumAbsDaz": 15.886,
+     "maxYawRate": 4.33,
+     "azStart": 0.9349,
+     "azEnd": -2.0287,
+     "trace": [
+      [
+       -110.41,
+       -43.31,
+       0.288,
+       2.161
+      ],
+      [
+       -108.65,
+       -42.27,
+       1.623,
+       -2.785
+      ],
+      [
+       -107.21,
+       -43.71,
+       2.958,
+       -1.454
+      ],
+      [
+       -108.31,
+       -45.51,
+       -1.995,
+       -0.12
+      ],
+      [
+       -110.32,
+       -44.87,
+       -0.663,
+       1.212
+      ],
+      [
+       -110.22,
+       -42.98,
+       0.671,
+       2.541
+      ],
+      [
+       -108.18,
+       -42.65,
+       1.998,
+       -2.407
+      ],
+      [
+       -107.38,
+       -44.55,
+       -2.948,
+       -1.074
+      ],
+      [
+       -109.06,
+       -45.82,
+       -1.616,
+       0.259
+      ],
+      [
+       -110.69,
+       -44.5,
+       -0.292,
+       1.59
+      ],
+      [
+       -109.89,
+       -42.83,
+       1.053,
+       2.92
+      ],
+      [
+       -107.88,
+       -43.26,
+       2.38,
+       -2.029
+      ]
+     ]
+    },
+    "S": {
+     "net": 0.338,
+     "path": 23.983,
+     "ratio": 0.0141,
+     "sumAbsDaz": 31.9974,
+     "maxYawRate": 8.6626,
+     "azStart": 0.4864,
+     "azEnd": -0.095,
+     "trace": [
+      [
+       -110.55,
+       -43.72,
+       -1.405,
+       -1.988
+      ],
+      [
+       -110.98,
+       -45.17,
+       2.207,
+       1.614
+      ],
+      [
+       -110.07,
+       -44.15,
+       -0.498,
+       -1.07
+      ],
+      [
+       -111.5,
+       -44.73,
+       3.124,
+       2.527
+      ],
+      [
+       -110.08,
+       -44.87,
+       0.441,
+       -0.152
+      ],
+      [
+       -111.41,
+       -44.16,
+       -2.254,
+       -2.843
+      ],
+      [
+       -110.61,
+       -45.39,
+       1.353,
+       0.759
+      ],
+      [
+       -110.85,
+       -43.97,
+       -1.343,
+       -1.928
+      ],
+      [
+       -111.36,
+       -45.37,
+       2.261,
+       1.673
+      ],
+      [
+       -110.34,
+       -44.37,
+       -0.432,
+       -1.011
+      ],
+      [
+       -111.79,
+       -44.85,
+       -3.099,
+       2.588
+      ],
+      [
+       -110.34,
+       -45.04,
+       0.5,
+       -0.095
+      ]
+     ]
+    },
+    "D": {
+     "net": 2.694,
+     "path": 25.906,
+     "ratio": 0.104,
+     "sumAbsDaz": 15.8885,
+     "maxYawRate": 4.3288,
+     "azStart": 0.6359,
+     "azEnd": -2.6862,
+     "trace": [
+      [
+       -108.34,
+       -45.4,
+       1.282,
+       -0.591
+      ],
+      [
+       -107.32,
+       -43.65,
+       -0.055,
+       -1.928
+      ],
+      [
+       -108.81,
+       -42.16,
+       -1.386,
+       3.023
+      ],
+      [
+       -110.61,
+       -43.26,
+       -2.719,
+       1.69
+      ],
+      [
+       -110,
+       -45.24,
+       2.237,
+       0.359
+      ],
+      [
+       -108.14,
+       -45.13,
+       0.901,
+       -0.97
+      ],
+      [
+       -107.83,
+       -43.11,
+       -0.433,
+       -2.307
+      ],
+      [
+       -109.77,
+       -42.28,
+       -1.765,
+       2.643
+      ],
+      [
+       -111.03,
+       -43.96,
+       -3.098,
+       1.311
+      ],
+      [
+       -109.78,
+       -45.54,
+       1.858,
+       -0.019
+      ],
+      [
+       -108.12,
+       -44.75,
+       0.519,
+       -1.35
+      ],
+      [
+       -108.57,
+       -42.72,
+       -0.812,
+       -2.686
+      ]
+     ]
+    }
+   },
+   "checks": [
+    {
+     "id": "W net/path",
+     "value": 1,
+     "op": ">=",
+     "limit": 0.95,
+     "pass": true
+    },
+    {
+     "id": "A net/path",
+     "value": 0.1055,
+     "op": ">=",
+     "limit": 0.85,
+     "pass": false
+    },
+    {
+     "id": "A Σ|Δaz|",
+     "value": 15.886,
+     "op": "<=",
+     "limit": 1.6,
+     "pass": false
+    },
+    {
+     "id": "S net/path",
+     "value": 0.0141,
+     "op": ">=",
+     "limit": 0.85,
+     "pass": false
+    },
+    {
+     "id": "S Σ|Δaz|",
+     "value": 31.9974,
+     "op": "<=",
+     "limit": 0.15,
+     "pass": false
+    },
+    {
+     "id": "D net/path",
+     "value": 0.104,
+     "op": ">=",
+     "limit": 0.85,
+     "pass": false
+    },
+    {
+     "id": "D Σ|Δaz|",
+     "value": 15.8885,
+     "op": "<=",
+     "limit": 1.6,
+     "pass": false
+    },
+    {
+     "id": "drag: orbit applied (rad, 1.57 wanted)",
+     "value": 0,
+     "op": ">=",
+     "limit": 1.4,
+     "pass": false
+    },
+    {
+     "id": "drag: |az − (travelYaw+π)| at 3.0 s",
+     "value": 0,
+     "op": "<=",
+     "limit": 0.1,
+     "pass": true
+    },
+    {
+     "id": "drag: max auto yaw after frame 25 (rad/s)",
+     "value": 0,
+     "op": "<=",
+     "limit": 1.1,
+     "pass": true
+    }
+   ],
+   "drag": {
+    "orbitApplied": 0,
+    "offBehindAt3s": 0,
+    "travelYaw": -2.3562,
+    "azAt3s": 0.7854,
+    "maxAutoYawAfter25": 0,
+    "trace": [
+     [
+      -111.35,
+      -46.35,
+      0.785
+     ],
+     [
+      -112.89,
+      -47.89,
+      0.785
+     ],
+     [
+      -114.34,
+      -49.34,
+      0.785
+     ],
+     [
+      -115.84,
+      -50.84,
+      0.785
+     ],
+     [
+      -117.45,
+      -52.45,
+      0.785
+     ],
+     [
+      -119.06,
+      -54.06,
+      0.785
+     ],
+     [
+      -120.53,
+      -55.53,
+      0.785
+     ],
+     [
+      -122.03,
+      -57.03,
+      0.785
+     ],
+     [
+      -123.53,
+      -58.53,
+      0.785
+     ],
+     [
+      -125.01,
+      -60.01,
+      0.785
+     ],
+     [
+      -126.53,
+      -61.53,
+      0.785
+     ],
+     [
+      -128.07,
+      -63.07,
+      0.785
+     ]
+    ]
+   },
+   "page": {
+    "seq": 45,
+    "sig": "08395b51"
+   }
+  },
+  "a4seed": {
+   "hold_D": {
+    "net": 2.69,
+    "path": 24.08,
+    "pathFine": 25.91,
+    "facing0": 2.356
+   },
+   "hold_S": {
+    "net": 0.67,
+    "path": 17.37,
+    "pathFine": 23.71,
+    "facing0": 1.762
+   },
+   "hold_W": {
+    "net": 29.33,
+    "path": 29.68,
+    "pathFine": 29.85,
+    "facing0": 2.377
+   },
+   "status": "ok",
+   "note": "replica of tools/_tmp/camprobe.mjs (path summed over 10-frame samples, as the seed did; pathFine = every frame)",
+   "page": {
+    "seq": 46,
+    "sig": "c717f115"
+   }
+  },
+  "seed": {
+   "status": "ok",
+   "note": "tools/_tmp/camprobe.mjs protocol: setMode(1) → teleport → setParams({el .64, dist 31, fov 30, ...view}) → snap → setView(null) → step(30)",
+   "shippedMean": 0.9231,
+   "overheadMean": 0.9846,
+   "rows": [
+    {
+     "view": "candy_arrival",
+     "cfg": "shipped",
+     "vis": 1,
+     "eff": 44.4,
+     "by": []
+    },
+    {
+     "view": "candy_arrival",
+     "cfg": "overhead_mode3",
+     "vis": 1,
+     "eff": 62,
+     "by": []
+    },
+    {
+     "view": "cat_arrival",
+     "cfg": "shipped",
+     "vis": 1,
+     "eff": 52.3,
+     "by": []
+    },
+    {
+     "view": "cat_arrival",
+     "cfg": "overhead_mode3",
+     "vis": 1,
+     "eff": 73,
+     "by": []
+    },
+    {
+     "view": "cat_plaza",
+     "cfg": "shipped",
+     "vis": 1,
+     "eff": 48.7,
+     "by": []
+    },
+    {
+     "view": "cat_plaza",
+     "cfg": "overhead_mode3",
+     "vis": 1,
+     "eff": 68.1,
+     "by": []
+    },
+    {
+     "view": "cat_park",
+     "cfg": "shipped",
+     "vis": 0.8,
+     "eff": 30.9,
+     "by": [
+      "knees:cat_nature_outcrop[inst]@30.4"
+     ]
+    },
+    {
+     "view": "cat_park",
+     "cfg": "overhead_mode3",
+     "vis": 0.8,
+     "eff": 43.2,
+     "by": [
+      "knees:cat_nature_outcrop[inst]@43.0"
+     ]
+    },
+    {
+     "view": "cat_gym",
+     "cfg": "shipped",
+     "vis": 1,
+     "eff": 56.6,
+     "by": []
+    },
+    {
+     "view": "cat_gym",
+     "cfg": "overhead_mode3",
+     "vis": 1,
+     "eff": 80.4,
+     "by": []
+    },
+    {
+     "view": "candy_lake",
+     "cfg": "shipped",
+     "vis": 1,
+     "eff": 30.6,
+     "by": []
+    },
+    {
+     "view": "candy_lake",
+     "cfg": "overhead_mode3",
+     "vis": 1,
+     "eff": 43,
+     "by": []
+    },
+    {
+     "view": "sky_dawn_harbor",
+     "cfg": "shipped",
+     "vis": 1,
+     "eff": 45.9,
+     "by": []
+    },
+    {
+     "view": "sky_dawn_harbor",
+     "cfg": "overhead_mode3",
+     "vis": 1,
+     "eff": 65,
+     "by": []
+    },
+    {
+     "view": "candy_village",
+     "cfg": "shipped",
+     "vis": 1,
+     "eff": 31.4,
+     "by": []
+    },
+    {
+     "view": "candy_village",
+     "cfg": "overhead_mode3",
+     "vis": 1,
+     "eff": 44.2,
+     "by": []
+    },
+    {
+     "view": "cat_main_street",
+     "cfg": "shipped",
+     "vis": 1,
+     "eff": 56.6,
+     "by": []
+    },
+    {
+     "view": "cat_main_street",
+     "cfg": "overhead_mode3",
+     "vis": 1,
+     "eff": 79.4,
+     "by": []
+    },
+    {
+     "view": "cat_residential",
+     "cfg": "shipped",
+     "vis": 0.4,
+     "eff": 86.8,
+     "by": [
+      "chest:cat_heights_matte@67.9",
+      "hips:cat_heights_matte@68.1"
+     ]
+    },
+    {
+     "view": "cat_residential",
+     "cfg": "overhead_mode3",
+     "vis": 1,
+     "eff": 89.3,
+     "by": []
+    },
+    {
+     "view": "candy_forest",
+     "cfg": "shipped",
+     "vis": 1,
+     "eff": 31.4,
+     "by": []
+    },
+    {
+     "view": "candy_forest",
+     "cfg": "overhead_mode3",
+     "vis": 1,
+     "eff": 43.8,
+     "by": []
+    },
+    {
+     "view": "candy_meadow",
+     "cfg": "shipped",
+     "vis": 1,
+     "eff": 19.2,
+     "by": []
+    },
+    {
+     "view": "candy_meadow",
+     "cfg": "overhead_mode3",
+     "vis": 1,
+     "eff": 43.8,
+     "by": []
+    },
+    {
+     "view": "candy_river",
+     "cfg": "shipped",
+     "vis": 0.8,
+     "eff": 30.4,
+     "by": [
+      "knees:terrain_river@29.9"
+     ]
+    },
+    {
+     "view": "candy_river",
+     "cfg": "overhead_mode3",
+     "vis": 1,
+     "eff": 44.4,
+     "by": []
+    }
+   ],
+   "page": {
+    "seq": 47,
+    "sig": "9b847780"
+   }
+  },
+  "a5": {
+   "status": "ok",
+   "setup": "mode 1 at (-110,-45), facing screen-up, hold W 50 frames (the route meets a prop at frame ~61), Q pressed on frame 10",
+   "azBefore": 0.7854,
+   "azAfter": 1.5708,
+   "maxHeadingRate": 2.5941,
+   "headingRateP95": 2.5239,
+   "facingErrAt1_2s": 0,
+   "minSpeed": 5.939,
+   "medianSpeed": 6.487,
+   "trace": [
+    [
+     0,
+     -110.07,
+     -45.07,
+     -2.356,
+     0.785,
+     null
+    ],
+    [
+     3,
+     -110.46,
+     -45.46,
+     -2.356,
+     0.785,
+     6.05
+    ],
+    [
+     6,
+     -110.9,
+     -45.9,
+     -2.356,
+     0.785,
+     6.37
+    ],
+    [
+     9,
+     -111.35,
+     -46.35,
+     -2.356,
+     0.785,
+     6.37
+    ],
+    [
+     12,
+     -111.81,
+     -46.8,
+     -2.33,
+     0.898,
+     6.43
+    ],
+    [
+     15,
+     -112.32,
+     -47.2,
+     -2.171,
+     1.15,
+     6.54
+    ],
+    [
+     18,
+     -112.92,
+     -47.48,
+     -1.922,
+     1.415,
+     6.53
+    ],
+    [
+     21,
+     -113.55,
+     -47.6,
+     -1.694,
+     1.566,
+     6.36
+    ],
+    [
+     24,
+     -114.17,
+     -47.63,
+     -1.595,
+     1.571,
+     6.14
+    ],
+    [
+     27,
+     -114.77,
+     -47.64,
+     -1.575,
+     1.571,
+     5.97
+    ],
+    [
+     30,
+     -115.36,
+     -47.64,
+     -1.572,
+     1.571,
+     5.95
+    ],
+    [
+     33,
+     -115.97,
+     -47.64,
+     -1.571,
+     1.571,
+     6.11
+    ],
+    [
+     36,
+     -116.6,
+     -47.64,
+     -1.571,
+     1.571,
+     6.5
+    ],
+    [
+     39,
+     -117.28,
+     -47.64,
+     -1.571,
+     1.571,
+     6.9
+    ],
+    [
+     42,
+     -117.98,
+     -47.64,
+     -1.571,
+     1.571,
+     6.98
+    ],
+    [
+     45,
+     -118.68,
+     -47.64,
+     -1.571,
+     1.571,
+     7
+    ],
+    [
+     48,
+     -119.38,
+     -47.64,
+     -1.571,
+     1.571,
+     7
+    ]
+   ],
+   "checks": [
+    {
+     "id": "heading change rate (rad/s)",
+     "value": 2.5941,
+     "op": "<=",
+     "limit": 0.9,
+     "pass": false
+    },
+    {
+     "id": "facing vs new screen-up at 1.2 s (rad)",
+     "value": 0,
+     "op": "<=",
+     "limit": 0.05,
+     "pass": true
+    },
+    {
+     "id": "never stops: min/median speed",
+     "value": 0.9155,
+     "op": ">=",
+     "limit": 0.5,
+     "pass": true
+    }
+   ],
+   "page": {
+    "seq": 48,
+    "sig": "6ede8a64"
+   }
+  },
+  "a6": {
+   "status": "ok",
+   "setup": "mode 1 at (-110,-45), virtual (0,∓1.58) 45 frames, frames 0 (cam_walk_toward_lens / cam_walk_away)",
+   "checks": [
+    {
+     "id": "toward: ground to the bottom edge (u)",
+     "value": 7.95,
+     "op": ">=",
+     "limit": 14,
+     "pass": false
+    },
+    {
+     "id": "away: ground to the top edge (u)",
+     "value": 9.1,
+     "op": ">=",
+     "limit": 22,
+     "pass": false
+    }
+   ],
+   "toward": {
+    "dist": 7.95,
+    "edge": "bottom",
+    "speed": 10.149,
+    "wantEdge": "bottom"
+   },
+   "away": {
+    "dist": 9.1,
+    "edge": "top",
+    "speed": 9.882,
+    "wantEdge": "top"
+   },
+   "page": {
+    "seq": 49,
+    "sig": "4e323f6f"
+   }
+  },
+  "a7": {
+   "status": "not implemented yet",
+   "why": "camera.look() does not exist",
+   "page": {
+    "seq": 50,
+    "sig": "22f9118d"
+   }
+  },
+  "a8": {
+   "status": "not implemented yet",
+   "why": "no V handling / camera.recentre()",
+   "page": {
+    "seq": 51,
+    "sig": "60300300"
+   }
+  },
+  "a9": {
+   "status": "not implemented yet",
+   "implemented": false,
+   "held": "bat",
+   "checks": [
+    {
+     "id": "right drag: weapon:use",
+     "value": 0,
+     "op": "==",
+     "limit": 0,
+     "pass": true
+    },
+    {
+     "id": "right drag: contextmenu defaultPrevented",
+     "value": false,
+     "op": "==",
+     "limit": true,
+     "pass": false
+    },
+    {
+     "id": "right drag 100 px: ||Δaz| − 0.6| (az change = 0.006·dx)",
+     "value": 0,
+     "op": "<=",
+     "limit": 0.001,
+     "pass": true
+    },
+    {
+     "id": "middle mousedown defaultPrevented",
+     "value": false,
+     "op": "==",
+     "limit": true,
+     "pass": false
+    },
+    {
+     "id": "left click fires (weapon:use)",
+     "value": 1,
+     "op": ">=",
+     "limit": 1,
+     "pass": true
+    },
+    {
+     "id": "left held + right press/release: pointer.down stays",
+     "value": false,
+     "op": "==",
+     "limit": true,
+     "pass": false
+    },
+    {
+     "id": "left held + right press/release: weapon:use",
+     "value": 1,
+     "op": "==",
+     "limit": 0,
+     "pass": false
+    },
+    {
+     "id": "touch pointer.down + 50 px: ||Δaz| − 0.3|",
+     "value": 0,
+     "op": "<=",
+     "limit": 0.001,
+     "pass": true
+    },
+    {
+     "id": "touch pointer.orbit + 50 px: ||Δaz| − 0.3|",
+     "value": 0.3,
+     "op": "<=",
+     "limit": 0.001,
+     "pass": false
+    }
+   ],
+   "rightDrag": {
+    "uses": 0,
+    "dAz": 0.6,
+    "want": 0.6,
+    "contextmenuPrevented": false
+   },
+   "rightTapUses": 1,
+   "middle": {
+    "mousedownPrevented": false,
+    "auxclickPrevented": false
+   },
+   "leftClickUses": 1,
+   "leftHeldRight": {
+    "pointerDownStays": false,
+    "uses": 1
+   },
+   "touch": {
+    "downOrbit": 0.3,
+    "orbitOrbit": 0,
+    "want": 0.3
+   },
+   "page": {
+    "seq": 52,
+    "sig": "548653a4"
+   }
+  },
+  "a10": {
+   "status": "ok",
+   "route": "teleport (178,48) walk W 300 frames; teleport (-200,-20) walk W 300 frames",
+   "modes": {
+    "1": {
+     "legs": [
+      {
+       "from": [
+        178,
+        48
+       ],
+       "net": 9.98,
+       "yawMax": 0,
+       "yawSum": 0,
+       "yawP95": 0,
+       "elMax": 0.3258,
+       "elP95": 0.1963,
+       "fovMax": 0,
+       "whiskerMax": null,
+       "curElRateMax": 0,
+       "occLiftRateMax": 0.3246
+      },
+      {
+       "from": [
+        -200,
+        -20
+       ],
+       "net": 58.47,
+       "yawMax": 0,
+       "yawSum": 0,
+       "yawP95": 0,
+       "elMax": 0.759,
+       "elP95": 0.4888,
+       "fovMax": 0,
+       "whiskerMax": null,
+       "curElRateMax": 0,
+       "occLiftRateMax": 0.7667
+      }
+     ],
+     "yawMax": 0,
+     "yawSum": 0,
+     "elMax": 0.759,
+     "fovMaxDegS": 0,
+     "elFramesOverCap": 151,
+     "yawFramesOverCap": 0
+    },
+    "2": {
+     "legs": [
+      {
+       "from": [
+        178,
+        48
+       ],
+       "net": 22.15,
+       "yawMax": 4.3158,
+       "yawSum": 4.141965,
+       "yawP95": 2.3569,
+       "elMax": 0.4125,
+       "elP95": 0.2069,
+       "fovMax": 0,
+       "whiskerMax": null,
+       "curElRateMax": 0,
+       "occLiftRateMax": 0.4125
+      },
+      {
+       "from": [
+        -200,
+        -20
+       ],
+       "net": 58.75,
+       "yawMax": 4.2799,
+       "yawSum": 2.295681,
+       "yawP95": 1.7371,
+       "elMax": 0.759,
+       "elP95": 0.5187,
+       "fovMax": 0,
+       "whiskerMax": null,
+       "curElRateMax": 0,
+       "occLiftRateMax": 0.759
+      }
+     ],
+     "yawMax": 4.3158,
+     "yawSum": 6.437645,
+     "elMax": 0.759,
+     "fovMaxDegS": 0,
+     "elFramesOverCap": 148,
+     "yawFramesOverCap": 70
+    },
+    "3": {
+     "legs": [
+      {
+       "from": [
+        178,
+        48
+       ],
+       "net": 9.98,
+       "yawMax": 0,
+       "yawSum": 0,
+       "yawP95": 0,
+       "elMax": 0.5527,
+       "elP95": 0.0859,
+       "fovMax": 0,
+       "whiskerMax": null,
+       "curElRateMax": 0,
+       "occLiftRateMax": 0.5527
+      },
+      {
+       "from": [
+        -200,
+        -20
+       ],
+       "net": 58.47,
+       "yawMax": 0,
+       "yawSum": 0,
+       "yawP95": 0,
+       "elMax": 0.7862,
+       "elP95": 0.5314,
+       "fovMax": 0,
+       "whiskerMax": null,
+       "curElRateMax": 0,
+       "occLiftRateMax": 0.7862
+      }
+     ],
+     "yawMax": 0,
+     "yawSum": 0,
+     "elMax": 0.7862,
+     "fovMaxDegS": 0,
+     "elFramesOverCap": 93,
+     "yawFramesOverCap": 0
+    }
+   },
+   "checks": [
+    {
+     "id": "m1: auto yaw (rad/s)",
+     "value": 0,
+     "op": "<=",
+     "limit": 1.1,
+     "pass": true
+    },
+    {
+     "id": "m1: auto elevation (rad/s)",
+     "value": 0.759,
+     "op": "<=",
+     "limit": 0.15,
+     "pass": false
+    },
+    {
+     "id": "m1: FOV rate (°/s)",
+     "value": 0,
+     "op": "<=",
+     "limit": 12,
+     "pass": true
+    },
+    {
+     "id": "m1: auto yaw Σ|Δaz| (exactly 0)",
+     "value": 0,
+     "op": "<=",
+     "limit": 1e-9,
+     "pass": true
+    },
+    {
+     "id": "m2: auto yaw (rad/s)",
+     "value": 4.3158,
+     "op": "<=",
+     "limit": 1.1,
+     "pass": false
+    },
+    {
+     "id": "m2: auto elevation (rad/s)",
+     "value": 0.759,
+     "op": "<=",
+     "limit": 0.15,
+     "pass": false
+    },
+    {
+     "id": "m2: FOV rate (°/s)",
+     "value": 0,
+     "op": "<=",
+     "limit": 12,
+     "pass": true
+    },
+    {
+     "id": "m2: whisker yaw (rad/s)",
+     "value": null,
+     "op": "<=",
+     "limit": 0.5,
+     "pass": false
+    },
+    {
+     "id": "m3: auto yaw (rad/s)",
+     "value": 0,
+     "op": "<=",
+     "limit": 1.1,
+     "pass": true
+    },
+    {
+     "id": "m3: auto elevation (rad/s)",
+     "value": 0.7862,
+     "op": "<=",
+     "limit": 0.15,
+     "pass": false
+    },
+    {
+     "id": "m3: FOV rate (°/s)",
+     "value": 0,
+     "op": "<=",
+     "limit": 12,
+     "pass": true
+    },
+    {
+     "id": "m3: auto yaw Σ|Δaz| (exactly 0)",
+     "value": 0,
+     "op": "<=",
+     "limit": 1e-9,
+     "pass": true
+    }
+   ],
+   "page": {
+    "seq": 53,
+    "sig": "6320dafb"
+   }
+  },
+  "s7": {
+   "status": "ok",
+   "traversal": {
+    "status": "not implemented yet",
+    "why": "camera.cutout.isPatched(o) does not exist (nothing is patched today)",
+    "protectedMeshes": 125,
+    "neverFade": 26,
+    "flagged": 111
+   },
+   "ferryDeck": {
+    "calls": [
+     {
+      "path": "ferry.moor",
+      "status": "ok"
+     }
+    ],
+    "free": true,
+    "visible": 0,
+    "rawVisible": null,
+    "rays": [
+     {
+      "pt": "hat",
+      "clear": false,
+      "rawClear": null,
+      "by": [
+       "sugarfin-canopy@18.1"
+      ]
+     },
+     {
+      "pt": "head",
+      "clear": false,
+      "rawClear": null,
+      "by": [
+       "sugarfin-canopy@17.7"
+      ]
+     },
+     {
+      "pt": "chest",
+      "clear": false,
+      "rawClear": null,
+      "by": [
+       "sugarfin-canopy@17.4"
+      ]
+     },
+     {
+      "pt": "hips",
+      "clear": false,
+      "rawClear": null,
+      "by": [
+       "sugarfin-canopy@17.2"
+      ]
+     },
+     {
+      "pt": "knees",
+      "clear": false,
+      "rawClear": null,
+      "by": [
+       "sugarfin-canopy@17.0"
+      ]
+     }
+    ],
+    "checks": [
+     {
+      "id": "ferry mesh cut-clear rays",
+      "value": 0,
+      "op": "==",
+      "limit": 0,
+      "pass": true
+     }
+    ]
+   },
+   "camUpdate": [
+    {
+     "label": "cam_moon_moment",
+     "events": 80,
+     "maxStale": 0.130969,
+     "maxPitchQ": 0.4249,
+     "maxPitchMW": 0.4249,
+     "pitchMismatch": 0.044598,
+     "basisYawMaxStep": 0,
+     "atHold": {
+      "occYaw": null,
+      "densityK": null,
+      "cutK": null
+     },
+     "checks": [
+      {
+       "id": "cam_moon_moment: matrixWorld at camera:update includes the final pose (rad)",
+       "value": 0.131,
+       "op": "<=",
+       "limit": 0.000001,
+       "pass": false
+      }
+     ]
+    },
+    {
+     "label": "cam_follow_street",
+     "events": 75,
+     "maxStale": 0.157588,
+     "maxPitchQ": 0,
+     "maxPitchMW": 0.0163,
+     "pitchMismatch": 0.016348,
+     "basisYawMaxStep": 0.180851,
+     "atHold": null,
+     "checks": [
+      {
+       "id": "cam_follow_street: matrixWorld at camera:update includes the final pose (rad)",
+       "value": 0.1576,
+       "op": "<=",
+       "limit": 0.000001,
+       "pass": false
+      }
+     ]
+    }
+   ],
+   "lensElev": [
+    {
+     "view": "candy_meadow",
+     "mode": 1,
+     "curEl": 0.64,
+     "tilt": null,
+     "sum": null,
+     "renderedMinusLift": 0.6366,
+     "densityK": null,
+     "want": 0.64,
+     "check": {
+      "id": "candy_meadow m1: current.elevation + tilt",
+      "value": null,
+      "op": "<=",
+      "limit": 0.01,
+      "pass": false
+     },
+     "proxyCheck": {
+      "id": "candy_meadow m1: rendered el − occLift",
+      "value": 0.0034,
+      "op": "<=",
+      "limit": 0.01,
+      "pass": true
+     }
+    },
+    {
+     "view": "candy_meadow",
+     "mode": 2,
+     "curEl": 0.64,
+     "tilt": null,
+     "sum": null,
+     "renderedMinusLift": 0.633,
+     "densityK": null,
+     "want": 0.46,
+     "check": {
+      "id": "candy_meadow m2: current.elevation + tilt",
+      "value": null,
+      "op": "<=",
+      "limit": 0.01,
+      "pass": false
+     },
+     "proxyCheck": {
+      "id": "candy_meadow m2: rendered el − occLift",
+      "value": 0.173,
+      "op": "<=",
+      "limit": 0.01,
+      "pass": false
+     }
+    },
+    {
+     "view": "candy_meadow",
+     "mode": 3,
+     "curEl": 1.1,
+     "tilt": null,
+     "sum": null,
+     "renderedMinusLift": 1.1191,
+     "densityK": null,
+     "want": 1.1,
+     "check": {
+      "id": "candy_meadow m3: current.elevation + tilt",
+      "value": null,
+      "op": "<=",
+      "limit": 0.01,
+      "pass": false
+     },
+     "proxyCheck": {
+      "id": "candy_meadow m3: rendered el − occLift",
+      "value": 0.0191,
+      "op": "<=",
+      "limit": 0.01,
+      "pass": false
+     }
+    },
+    {
+     "view": "cat_main_street",
+     "mode": 1,
+     "curEl": 0.5,
+     "tilt": null,
+     "sum": null,
+     "renderedMinusLift": 0.4967,
+     "densityK": null,
+     "want": 0.5,
+     "check": {
+      "id": "cat_main_street m1: current.elevation + tilt",
+      "value": null,
+      "op": "<=",
+      "limit": 0.01,
+      "pass": false
+     },
+     "proxyCheck": {
+      "id": "cat_main_street m1: rendered el − occLift",
+      "value": 0.0033,
+      "op": "<=",
+      "limit": 0.01,
+      "pass": true
+     }
+    },
+    {
+     "view": "cat_main_street",
+     "mode": 2,
+     "curEl": 0.5,
+     "tilt": null,
+     "sum": null,
+     "renderedMinusLift": 0.5021,
+     "densityK": null,
+     "want": 0.4,
+     "check": {
+      "id": "cat_main_street m2: current.elevation + tilt",
+      "value": null,
+      "op": "<=",
+      "limit": 0.01,
+      "pass": false
+     },
+     "proxyCheck": {
+      "id": "cat_main_street m2: rendered el − occLift",
+      "value": 0.1021,
+      "op": "<=",
+      "limit": 0.01,
+      "pass": false
+     }
+    },
+    {
+     "view": "cat_main_street",
+     "mode": 3,
+     "curEl": 1.1,
+     "tilt": null,
+     "sum": null,
+     "renderedMinusLift": 1.1325,
+     "densityK": null,
+     "want": 1.1,
+     "check": {
+      "id": "cat_main_street m3: current.elevation + tilt",
+      "value": null,
+      "op": "<=",
+      "limit": 0.01,
+      "pass": false
+     },
+     "proxyCheck": {
+      "id": "cat_main_street m3: rendered el − occLift",
+      "value": 0.0325,
+      "op": "<=",
+      "limit": 0.01,
+      "pass": false
+     }
+    }
+   ],
+   "interiors": [
+    {
+     "view": "candy_in_house0",
+     "mode": 1,
+     "calls": [],
+     "params": {
+      "elevation": 0.72,
+      "distance": 16,
+      "azimuth": 1.8925,
+      "fov": 30
+     },
+     "current": {
+      "elevation": 0.5,
+      "distance": 16,
+      "azimuth": 1.8925
+     },
+     "camFov": 30,
+     "occYaw": null,
+     "densityK": null,
+     "pitch": 0,
+     "azWriters": {},
+     "checks": [
+      {
+       "id": "candy_in_house0 m1: cam.fov == p.fov",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.01,
+       "pass": true
+      },
+      {
+       "id": "candy_in_house0 m1: current.azimuth follows params.azimuth",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.02,
+       "pass": true
+      }
+     ]
+    },
+    {
+     "view": "candy_in_house0",
+     "mode": 2,
+     "calls": [],
+     "params": {
+      "elevation": 0.72,
+      "distance": 16,
+      "azimuth": 1.8925,
+      "fov": 30
+     },
+     "current": {
+      "elevation": 0.5,
+      "distance": 16,
+      "azimuth": 1.8925
+     },
+     "camFov": 30,
+     "occYaw": null,
+     "densityK": null,
+     "pitch": 0,
+     "azWriters": {
+      "systems/camera.js ← main.js ← core/debug.js": 60
+     },
+     "checks": [
+      {
+       "id": "candy_in_house0 m2: cam.fov == p.fov",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.01,
+       "pass": true
+      },
+      {
+       "id": "candy_in_house0 m2: current.azimuth follows params.azimuth",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.02,
+       "pass": true
+      }
+     ]
+    },
+    {
+     "view": "cat_in_meow",
+     "mode": 1,
+     "calls": [
+      {
+       "path": "catArchitecture.enter",
+       "status": "ok"
+      }
+     ],
+     "params": {
+      "elevation": 0.34,
+      "distance": 16,
+      "azimuth": 0.28,
+      "fov": 30
+     },
+     "current": {
+      "elevation": 0.34,
+      "distance": 16,
+      "azimuth": 0.28
+     },
+     "camFov": 30,
+     "occYaw": null,
+     "densityK": null,
+     "pitch": 0,
+     "azWriters": {},
+     "checks": [
+      {
+       "id": "cat_in_meow m1: cam.fov == p.fov",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.01,
+       "pass": true
+      },
+      {
+       "id": "cat_in_meow m1: current.azimuth follows params.azimuth",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.02,
+       "pass": true
+      }
+     ]
+    },
+    {
+     "view": "cat_in_meow",
+     "mode": 2,
+     "calls": [
+      {
+       "path": "catArchitecture.enter",
+       "status": "ok"
+      }
+     ],
+     "params": {
+      "elevation": 0.34,
+      "distance": 16,
+      "azimuth": 0.28,
+      "fov": 30
+     },
+     "current": {
+      "elevation": 0.34,
+      "distance": 16,
+      "azimuth": 0.28
+     },
+     "camFov": 30,
+     "occYaw": null,
+     "densityK": null,
+     "pitch": 0,
+     "azWriters": {
+      "systems/camera.js ← main.js ← core/debug.js": 60
+     },
+     "checks": [
+      {
+       "id": "cat_in_meow m2: cam.fov == p.fov",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.01,
+       "pass": true
+      },
+      {
+       "id": "cat_in_meow m2: current.azimuth follows params.azimuth",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.02,
+       "pass": true
+      }
+     ]
+    },
+    {
+     "view": "palace_throne_play",
+     "mode": 1,
+     "calls": [],
+     "params": {
+      "elevation": 0.95,
+      "distance": 17,
+      "azimuth": 0.785,
+      "fov": 30
+     },
+     "current": {
+      "elevation": 0.95,
+      "distance": 17,
+      "azimuth": 0.785
+     },
+     "camFov": 30,
+     "occYaw": null,
+     "densityK": null,
+     "pitch": 0,
+     "azWriters": {},
+     "checks": [
+      {
+       "id": "palace_throne_play m1: cam.fov == p.fov",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.01,
+       "pass": true
+      },
+      {
+       "id": "palace_throne_play m1: current.azimuth follows params.azimuth",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.02,
+       "pass": true
+      }
+     ]
+    },
+    {
+     "view": "palace_throne_play",
+     "mode": 2,
+     "calls": [],
+     "params": {
+      "elevation": 0.64,
+      "distance": 31,
+      "azimuth": 0.785,
+      "fov": 30
+     },
+     "current": {
+      "elevation": 0.64,
+      "distance": 31,
+      "azimuth": 0.785
+     },
+     "camFov": 30,
+     "occYaw": null,
+     "densityK": null,
+     "pitch": 0,
+     "azWriters": {
+      "systems/camera.js ← main.js ← core/debug.js": 80
+     },
+     "checks": [
+      {
+       "id": "palace_throne_play m2: cam.fov == p.fov",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.01,
+       "pass": true
+      },
+      {
+       "id": "palace_throne_play m2: current.azimuth follows params.azimuth",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.02,
+       "pass": true
+      }
+     ]
+    },
+    {
+     "view": "cave_corridor",
+     "mode": 1,
+     "calls": [],
+     "params": {
+      "elevation": 0.95,
+      "distance": 22,
+      "azimuth": 2.7203,
+      "fov": 30
+     },
+     "current": {
+      "elevation": 0.95,
+      "distance": 22,
+      "azimuth": 2.7203
+     },
+     "camFov": 30,
+     "occYaw": null,
+     "densityK": null,
+     "pitch": 0,
+     "azWriters": {
+      "systems/camera.js ← systems/escape/cave.js ← systems/escape.js": 1
+     },
+     "checks": [
+      {
+       "id": "cave_corridor m1: cam.fov == p.fov",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.01,
+       "pass": true
+      },
+      {
+       "id": "cave_corridor m1: current.azimuth follows params.azimuth",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.02,
+       "pass": true
+      }
+     ]
+    },
+    {
+     "view": "cave_corridor",
+     "mode": 2,
+     "calls": [],
+     "params": {
+      "elevation": 0.64,
+      "distance": 31,
+      "azimuth": 0.7854,
+      "fov": 30
+     },
+     "current": {
+      "elevation": 0.64,
+      "distance": 31,
+      "azimuth": 0.7854
+     },
+     "camFov": 30,
+     "occYaw": null,
+     "densityK": null,
+     "pitch": 0,
+     "azWriters": {
+      "systems/camera.js ← main.js ← core/debug.js": 70
+     },
+     "checks": [
+      {
+       "id": "cave_corridor m2: cam.fov == p.fov",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.01,
+       "pass": true
+      },
+      {
+       "id": "cave_corridor m2: current.azimuth follows params.azimuth",
+       "value": 0,
+       "op": "<=",
+       "limit": 0.02,
+       "pass": true
+      }
+     ]
+    }
+   ],
+   "determinism": {
+    "view": "candy_arrival",
+    "maxMatrixDiff": 0,
+    "state1": [
+     null,
+     null,
+     null,
+     null
+    ],
+    "state2": [
+     null,
+     null,
+     null,
+     null
+    ],
+    "checks": [
+     {
+      "id": "snap() twice: matrixWorld diff",
+      "value": 0,
+      "op": "<=",
+      "limit": 0.000001,
+      "pass": true
+     },
+     {
+      "id": "snap() twice: state equal",
+      "value": true,
+      "op": "==",
+      "limit": true,
+      "pass": true
+     }
+    ]
+   },
+   "flying": {
+    "calls": [
+     {
+      "path": "escape.routes.flyer.debugFly",
+      "status": "ok"
+     }
+    ],
+    "flyingAt30": true,
+    "at0_5s": {
+     "fov": 30
+    },
+    "at30": {
+     "lens": 37.79,
+     "el": 0.3969,
+     "fov": 40
+    },
+    "distanceWriters": {
+     "systems/camera.js ← systems/escape/flyer.js ← systems/escape.js": 1
+    },
+    "checks": [
+     {
+      "id": "flying: lens distance ≈ 44 (|Δ|)",
+      "value": 6.2096,
+      "op": "<=",
+      "limit": 1,
+      "pass": false
+     },
+     {
+      "id": "flying: elevation ≈ 0.38 (|Δ|)",
+      "value": 0.0169,
+      "op": "<=",
+      "limit": 0.02,
+      "pass": true
+     },
+     {
+      "id": "flying: FOV ≈ 40 (|Δ|)",
+      "value": 0,
+      "op": "<=",
+      "limit": 0.5,
+      "pass": true
+     },
+     {
+      "id": "flying: FOV at 0.5 s",
+      "value": 30,
+      "op": ">=",
+      "limit": 38,
+      "pass": false
+     },
+     {
+      "id": "flying: flyer never writes params.distance",
+      "value": 1,
+      "op": "==",
+      "limit": 0,
+      "pass": false
+     }
+    ]
+   },
+   "page": {
+    "seq": 54,
+    "sig": "9c2d40cc"
+   },
+   "stateSeen": [
+    "player.locked",
+    "player.onVehicle",
+    "flying",
+    "vehicle",
+    "cinematic"
+   ]
+  }
+ },
+ "frame": {
+  "cat_plaza": {
+   "calls": 303,
+   "triangles": 1110303
+  },
+  "candy_village": {
+   "calls": 217,
+   "triangles": 725991
+  }
+ },
+ "reloads": [],
+ "errors": [],
+ "warnings": 55,
+ "timing": {
+  "machine": "Benjamins-MacBook-Pro-3.local · Apple M1 Pro · darwin 24.6.0",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/131.0.6778.33 Safari/537.36",
+  "glRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0) (0x0000C0DE)), SwiftShader driver)",
+  "rows": {
+   "candy_arrival_m1": {
+    "ms": 791,
+    "camMs": null,
+    "occMs": 11.2
+   },
+   "cat_arrival_m1": {
+    "ms": 618.8,
+    "camMs": null,
+    "occMs": 8.4
+   },
+   "cat_plaza_m1": {
+    "ms": 613.6,
+    "camMs": null,
+    "occMs": 6.9
+   },
+   "cat_park_m1": {
+    "ms": 509.5,
+    "camMs": null,
+    "occMs": 3.4
+   },
+   "cat_gym_m1": {
+    "ms": 643.6,
+    "camMs": null,
+    "occMs": 5.8
+   },
+   "candy_lake_m1": {
+    "ms": 461,
+    "camMs": null,
+    "occMs": 5.2
+   },
+   "sky_dawn_harbor_m1": {
+    "ms": 634.7,
+    "camMs": null,
+    "occMs": 8.7
+   },
+   "candy_village_m1": {
+    "ms": 549.1,
+    "camMs": null,
+    "occMs": 12.4
+   },
+   "cat_main_street_m1": {
+    "ms": 645.1,
+    "camMs": null,
+    "occMs": 4.1
+   },
+   "cat_residential_m1": {
+    "ms": 685.2,
+    "camMs": null,
+    "occMs": 6.8
+   },
+   "candy_forest_m1": {
+    "ms": 451,
+    "camMs": null,
+    "occMs": 6.2
+   },
+   "candy_meadow_m1": {
+    "ms": 453.9,
+    "camMs": null,
+    "occMs": 5.2
+   },
+   "candy_river_m1": {
+    "ms": 452.5,
+    "camMs": null,
+    "occMs": 5.8
+   },
+   "occ_silhouette_m1": {
+    "ms": 456.1,
+    "camMs": null,
+    "occMs": 3
+   },
+   "occ_whisker_night_m1": {
+    "ms": 1055.6,
+    "camMs": null,
+    "occMs": 2.6
+   },
+   "candy_arrival_m2": {
+    "ms": 887.7,
+    "camMs": null,
+    "occMs": 11.8
+   },
+   "cat_arrival_m2": {
+    "ms": 628.6,
+    "camMs": null,
+    "occMs": 8.6
+   },
+   "cat_plaza_m2": {
+    "ms": 641.2,
+    "camMs": null,
+    "occMs": 6.9
+   },
+   "cat_park_m2": {
+    "ms": 491,
+    "camMs": null,
+    "occMs": 3.5
+   },
+   "cat_gym_m2": {
+    "ms": 656,
+    "camMs": null,
+    "occMs": 5.6
+   },
+   "candy_lake_m2": {
+    "ms": 464.4,
+    "camMs": null,
+    "occMs": 5.3
+   },
+   "sky_dawn_harbor_m2": {
+    "ms": 585.8,
+    "camMs": null,
+    "occMs": 8.8
+   },
+   "candy_village_m2": {
+    "ms": 544.9,
+    "camMs": null,
+    "occMs": 12.5
+   },
+   "cat_main_street_m2": {
+    "ms": 647.1,
+    "camMs": null,
+    "occMs": 4.1
+   },
+   "cat_residential_m2": {
+    "ms": 682.9,
+    "camMs": null,
+    "occMs": 6.9
+   },
+   "candy_forest_m2": {
+    "ms": 443,
+    "camMs": null,
+    "occMs": 6.2
+   },
+   "candy_meadow_m2": {
+    "ms": 440.3,
+    "camMs": null,
+    "occMs": 4.9
+   },
+   "candy_river_m2": {
+    "ms": 448.7,
+    "camMs": null,
+    "occMs": 5.7
+   },
+   "occ_silhouette_m2": {
+    "ms": 434.2,
+    "camMs": null,
+    "occMs": 3.1
+   },
+   "occ_whisker_night_m2": {
+    "ms": 1034.2,
+    "camMs": null,
+    "occMs": 2.6
+   },
+   "candy_arrival_m3": {
+    "ms": 775.6,
+    "camMs": null,
+    "occMs": 4.5
+   },
+   "cat_arrival_m3": {
+    "ms": 609.8,
+    "camMs": null,
+    "occMs": 2.8
+   },
+   "cat_plaza_m3": {
+    "ms": 631.5,
+    "camMs": null,
+    "occMs": 5.3
+   },
+   "cat_park_m3": {
+    "ms": 490.6,
+    "camMs": null,
+    "occMs": 6.9
+   },
+   "cat_gym_m3": {
+    "ms": 606.7,
+    "camMs": null,
+    "occMs": 5.6
+   },
+   "candy_lake_m3": {
+    "ms": 451.2,
+    "camMs": null,
+    "occMs": 5.4
+   },
+   "sky_dawn_harbor_m3": {
+    "ms": 604.7,
+    "camMs": null,
+    "occMs": 8.8
+   },
+   "candy_village_m3": {
+    "ms": 548.7,
+    "camMs": null,
+    "occMs": 6.4
+   },
+   "cat_main_street_m3": {
+    "ms": 652.6,
+    "camMs": null,
+    "occMs": 4.1
+   },
+   "cat_residential_m3": {
+    "ms": 684.6,
+    "camMs": null,
+    "occMs": 6.8
+   },
+   "candy_forest_m3": {
+    "ms": 436.5,
+    "camMs": null,
+    "occMs": 5.3
+   },
+   "candy_meadow_m3": {
+    "ms": 441.8,
+    "camMs": null,
+    "occMs": 4.5
+   },
+   "candy_river_m3": {
+    "ms": 443.7,
+    "camMs": null,
+    "occMs": 5.6
+   },
+   "occ_silhouette_m3": {
+    "ms": 433.9,
+    "camMs": null,
+    "occMs": 4.8
+   },
+   "occ_whisker_night_m3": {
+    "ms": 1020,
+    "camMs": null,
+    "occMs": 2.5
+   }
+  },
+  "scripts": {
+   "a4": 3182,
+   "a4seed": 1938,
+   "seed": 13833,
+   "a5": 437,
+   "a6": 550,
+   "a7": 1,
+   "a8": 1,
+   "a9": 589,
+   "a10": 7658,
+   "s7": 10318
+  },
+  "frameMs": {
+   "cat_plaza": {
+    "median": 3,
+    "samples": [
+     4.1,
+     3,
+     2.5,
+     3.1,
+     3
+    ]
+   },
+   "candy_village": {
+    "median": 2.3,
+    "samples": [
+     2.5,
+     2.3,
+     1.9,
+     2.3,
+     1.9
+    ]
+   }
+  },
+  "reloads": [],
+  "wallS": 177.1
+ }
+}

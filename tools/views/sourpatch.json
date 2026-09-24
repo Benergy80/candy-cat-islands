@@ -127,5 +127,142 @@
   "dist": 22,
   "el": 0.5,
   "az": 0.785
+ },
+ "sour_dawn_turn": {
+  "pos": [
+   -140,
+   40
+  ],
+  "time": 6.08,
+  "frames": 30,
+  "dist": 28,
+  "el": 0.6,
+  "az": 0,
+  "call": {
+   "sourPatch.debug.rehearseNight": [
+    7
+   ]
+  }
+ },
+ "sour_water_melt": {
+  "pos": [
+   -47,
+   44.5
+  ],
+  "time": 22,
+  "frames": 170,
+  "dist": 22,
+  "el": 0.72,
+  "az": 0.785,
+  "call": {
+   "sourPatch.debug.lungeAt": [
+    2.4,
+    4.75
+   ]
+  }
+ },
+ "sour_hunt_cap": {
+  "pos": [
+   -90,
+   24
+  ],
+  "time": 22.5,
+  "frames": 170,
+  "dist": 54,
+  "el": 0.82,
+  "az": 0.785,
+  "fov": 40
+ },
+ "sour_dawn_walk": {
+  "pos": [
+   -140,
+   40
+  ],
+  "time": 6.08,
+  "frames": 330,
+  "dist": 30,
+  "el": 0.55,
+  "az": 0.785,
+  "call": {
+   "sourPatch.debug.rehearseNight": [
+    7
+   ]
+  }
+ },
+ "sour_dawn_after": {
+  "pos": [
+   -140,
+   40
+  ],
+  "time": 6.08,
+  "frames": 1350,
+  "dist": 30,
+  "el": 0.6,
+  "az": 0.785,
+  "call": {
+   "sourPatch.debug.rehearseNight": [
+    7
+   ]
+  }
+ },
+ "sour_river_bank_night": {
+  "pos": [
+   -129,
+   31
+  ],
+  "time": 22.5,
+  "frames": 200,
+  "dist": 17,
+  "el": 0.62,
+  "az": -0.8
+ },
+ "sour_dawn_60": {
+  "pos": [
+   -140,
+   40
+  ],
+  "time": 6.08,
+  "frames": 1800,
+  "dist": 30,
+  "el": 0.6,
+  "az": 0.785,
+  "call": {
+   "sourPatch.debug.rehearseNight": [
+    7
+   ]
+  }
+ },
+ "sour_river_bank_top": {
+  "pos": [
+   -123,
+   30
+  ],
+  "time": 22.5,
+  "frames": 200,
+  "dist": 20,
+  "el": 1.05,
+  "az": -0.8
+ },
+ "sour_river_bank_noon": {
+  "pos": [
+   -120,
+   30
+  ],
+  "time": 12,
+  "frames": 900,
+  "dist": 16,
+  "el": 0.55,
+  "az": -0.8
+ },
+ "sour_river_lip_night": {
+  "pos": [
+   -120,
+   30
+  ],
+  "time": 22,
+  "frames": 1200,
+  "dist": 15,
+  "el": 0.5,
+  "az": 2.3
  }
 }
