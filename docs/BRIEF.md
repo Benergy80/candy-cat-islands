@@ -1,4 +1,4 @@
-# Candyland & Cat Island — Builder Brief (READ FULLY BEFORE TOUCHING CODE)
+# Escape from the Candy Kingdom and Cat Island — Builder Brief (READ FULLY BEFORE TOUCHING CODE)
 
 A browser 3D exploration game in Three.js (r170, ES modules, no bundler). Isometric third-person
 camera. Two islands joined by a ferry. Target feel: **FarmVille charm + Pikmin life** — chunky
@@ -274,3 +274,156 @@ and then lands at the camera position 2")
 - Verification: a real-flow Playwright run (no ?shot; ?intro=1): dismiss the title with a keydown, sample the camera every 0.5 s — it must
   pass within 60 u of palace, cupcake, village and pier in that order; end state = mode 2, `isFree()` false, player unlocked, HUD visible,
   time unfrozen; skip mid-flight lands in the same end state; six screenshots (tools/views/intro.json keyframes via `play(t)`); no errors.
+
+## WAVE 4 — transport, the rainbow bridge, the invasions, the ending (added 2026-09-24; Ben's requirements)
+Ben: "more ways for players to get from Candyland to Cat Island, like the plane with the Candyland banner can be convinced to fly you off
+island but only in the daytime when he stops to refuel. The flying machine on Cat Island should have its runway pointed towards Candyland
+and there should be nothing blocking the runway takeoff zone. Once a player has found a way back and forth 3 times a rainbow bridge can
+connect the 2 islands and the tigers can invade Candyland while the sour patch kids invade Cat Island." The Sugar blimp is a two-way ride.
+**Tone: "a fun game with a scary side — a light horror game."** Days are charming; nights after the bridge are genuinely tense (thicker fog,
+eyes in the dark, giggles you cannot place, the tigers' silhouettes crossing the rainbow), never gore. Every route fires the shared escape
+events so containment's round-trip counter (escape_returns, already 3 → honorary citizenship) drives the bridge.
+
+### Contract L — routes and rides (escape.js ROUTE_NAMES now includes blimp, biplane, bridge, ending; stubs exist)
+- **Shared:** every ride: `escape.start(route)` on boarding, `escape.success(route, {to})` on landing on the OTHER island (both directions),
+  `player.onVehicle = true`, `ctx.state.vehicle = route` while riding, camera left to the camera system (Contract E framing when airborne:
+  set `ctx.state.flying = {alt, speed}`), HUD prompt via interaction.register, skip-safe under the cinematic, never throws if a sibling
+  system is missing. Rides hush ambient dialogue (see flyer.js). Map markers via ui.addMapMarker (glyph 'plane').
+- **Blimp (planes.js + escape/blimp.js — ONE builder, "air-routes"):** two MOORING MASTS on the loop it already flies: Sugar Pier (candy_dock
+  side, beside the ferry) and Fish Harbor (100,58). Each pass the blimp noses in, moors ≈ 20 s (a rope ladder drops, the props idle,
+  letters lit at night), E climbs you into the gondola; it unmoors and drifts its loop (speed 4.6, ≈ 90 s round) to the other mast where E
+  (or the ladder auto-drop) lets you down. Runs day AND night. The mast sign shows "next blimp 0:40"; the map marker tracks it.
+  API: `planes.blimp = { moored: 'candy'|'cat'|null, eta(mast) }`. Riding view from the gondola; the ride counts as a route both ways.
+- **Biplane (planes.js + escape/biplane.js — the same "air-routes" builder):** a FUEL STOP on Candyland: a short grass airstrip with a candy
+  fuel pump and a windsock near Lollipop Meadow / Gumdrop Village (pick a flat clear spot with world.isFreeGround, register colliders and a
+  clearance claim), where the banner biplane lands every ≈ 3 min BY DAY ONLY (never after lampsOn), taxis to the pump, refuels ≈ 25 s, and
+  takes off. While it refuels: talk to the pilot (E): a 3-line convince (he wants a candy — any inventory candy — and a promise not to
+  touch the banner); then E boards you (a passenger seat behind him) and he flies you to Cat Island and drops you at Wing Nut Field
+  (lands, you step off, he takes off and resumes the loop). Night: the pump is dark and the sign says "FLIGHTS RESUME AT DAWN".
+- **planes.summonJet({x, y, z}) → Promise** (air-routes builder, for the ending): the MEOW AIR jet diverts from its crossing, banks around
+  the point, slows to a hover-pass 12 u above it with a rope ladder trailing to y, holds ≈ 8 s, then climbs away east and out of the map;
+  resolves when the ladder is at the point. Deterministic; works even if the jet is mid-crossing.
+- **Flyer runway (escape/flyer.js — "flyer-runway" builder):** measure the takeoff corridor from Wing Nut Field (210,12): a 90 u × 26 u box
+  along the bearing, climbing at the flyer's real climb rate; raycast it against ctx.colliders (boxes and circles with their h) and
+  world.height. Rotate the pad/runway to the clearest bearing within ±30° of the true bearing to Sugar Pier and extend the clearance claim to
+  cover the corridor (nature and cat architecture honour claims at world:ready). If a landmark still blocks it, edit only what the corridor
+  needs (you may add a narrow exclusion in cat/nature.js and cat/architecture/*.js placement passes; nothing else). Also: Wingnut tows her
+  home only when she is abandoned > 120 u from the visitor for 60 s (so she serves as the return trip); a "TAKE-OFF →" arrow on the runway.
+- **Rainbow bridge (escape/bridge.js — "bridge" builder):** when story `escape_returns` reaches 3 (containment sets it on the third return;
+  the medal card may still play), a 25 s cinematic (camera.cinematic) raises a RAINBOW ARC from Sugar Pier's seaward end to the Arrivals
+  Pier (42,22): seven bands, translucent, glowing, apex ≈ 60 u over the strait, wide enough to walk (deck 5 u), with low candy-cane rails;
+  a WALKABLE deck via ctx.walkables (Contract A: groundInfo returns the deck) both ways, sparkle motes, a hum. Crossing it fires
+  escape.success both directions. Story flag `rainbow_bridge`. API: `escape.routes.bridge = { up, ends: {candy:{x,z}, cat:{x,z}},
+  path: [[x,z]...] (deck centreline every 4 u), heightAt(x,z), apex: {x,y,z}, debugRaise() }`. Objective after the medal: "The islands
+  are joined. So are their problems." At night the bridge's far end is where the raids come from (see Contract M).
+- **Ending (escape/ending.js — the same "bridge" builder):** the real escape. After the bridge: two BOARDING PASS halves: one the Mayor
+  hands over with the medal (containment giveMedal → story `pass_cat`; the bridge builder may add that 3-line hand-off in containment.js's
+  giveMedal card), one from the Candy Palace throne room (a new interactable on the throne, "the King's half", story `pass_candy`).
+  With both: an interactable at the bridge apex, "Signal MEOW AIR" (a flare): the jet answers via planes.summonJet(apex); the ladder drops,
+  E climbs (a 6 s climb; below, the tigers and kids gather on the deck and look up — the light-horror beat), the jet climbs out east; a
+  CREDITS sequence (own DOM under ctx.uiRoot, the title's visual language): both islands shrinking below, "ESCAPED. For real." then
+  "Original Game Concept by Daniel Lavitt · Produced by ChiLab + Claude" and the systems' credits, ≈ 40 s, any key skips; then back to the
+  title card with the world reset (reload is acceptable: location.reload()). Story flag `escaped_for_real`.
+
+### Contract M — the invasions (after `rainbow_bridge`)
+- **Tigers into Candyland (cat/citizens.js + citizens/* — "tigers" builder):** at tiger time, a raiding party of 3–5 tigers crosses the
+  bridge (walk its path; fallback: spawn at the Candyland end if the bridge API is missing) and HUNTS on Candyland with the existing tiger
+  rules (stalk, pounce, scruff-carry); a caught visitor is carried back OVER THE RAINBOW to the guest bed on Cat Island (a 20 s carry, the
+  camera following, the bands glowing under them — the signature image). At dawn they cross back. Salt lines do not stop tigers; catnip
+  (an inventory candy 'catnip' if it exists, else the star) does. Their eyes glow on the bridge from far away.
+- **Kids into Cat Island (candy/sourpatch.js + sourpatch/* — "kids" builder):** at night, a pack of ≤ 10 kids crosses the bridge (same
+  fallback), hunts on Cat Island with the existing rules (cap 10 total, water melts them, dawn reversion — they walk back over the bridge at
+  dawn, the ones on Cat Island simply go home over it); the cats' salt lines at the Arrivals Pier stop them there, so the plaza is a refuge
+  and the rest of Cat Island is not; a "they're on the bridge" giggle cue at dusk.
+- Both: tone rules above; deterministic; budgets: ≤ +12 draw calls and ≤ +60k tris total; zero console errors; NPCs never intersect props
+  (Contract A); the raiding parties are visible on the world map (ui.addMapMarker glyph 'weapon' as a threat dot, or a new 'threat' glyph).
+
+### Verification (every builder) — as WAVE 3, plus: a scripted end-to-end run by the integration verifier: ferry → Cat Island → three
+escapes and three returns (any routes; debug hooks allowed: containment's counters via story.set) → bridge cinematic → night raids on both
+islands → both passes → the jet → credits → title. Zero console errors; fpsbench at candy_village / cat_main_street / sea_crossing within
+5% of docs/PERF_BASELINE.md's post-pass numbers; mobilebench within budget.
+
+### Contract N — Whisker Heights navigability + the scruff-carry rework (added 2026-09-24 evening; queued behind WAVE 4)
+**Whisker Heights (cat/architecture/outskirts.js buildHeights + catHouse's garden; owner "heights"):** Ben: "too crowded with too many fences
+and few ways in or out. It should be a little more easily navigable." Today: nine houses, each with an 11-point semicircular garden fence of
+radius ≈ 0.75·max(w,d)+3.2 (≈ 10–11 u) plus a hedge, packed round a 9.5 u green; the arcs overlap into corridors and dead ends.
+Required: (1) a clear RING LANE ≥ 3.2 u wide around the green that no fence, hedge, bench, planter or lamp intrudes on; (2) at least FOUR
+open ways in/out of the district, each ≥ 3 u wide and free of props: west to Purrliament Square (the cat_main path end at 178,48 → 152,6),
+north toward the gym road (175,−10), south toward Fish Harbor / the guest house, east toward the Watchtower / Wing Nut Field; (3) every
+garden fence gets a GATE opening (fence()'s gap options, or a shorter arc) facing the lane, and gardens shrink (garden ≤ 0.6) or become
+flank-only fences where two arcs would otherwise touch; hedges never cross a lane; (4) a walkability proof: a scripted visitor walks from
+each of the four entries to the green and to every house's front door using only pushOut-legal motion (Contract A) — reachable within a
+bounded path length (≤ 1.6× the straight line), no stuck frames; and a static check that no collider intersects the lane polygons;
+(5) the district keeps its charm (the topiary cat, the mailboxes, the lamps) — render before/after at the same views (cat_residential,
+cam_dense_heights) and READ them; a critic judges "still Whisker Heights, now walkable".
+**The scruff-carry (cat/citizens.js startCarry/placeCarried/updateCarry/endCarry + citizens/tiger.js poses; owner "carry"):** Ben: "the
+tiger drops the player before the camera moves to the bed … Ideally the tiger does not drop the player before the camera transition. That
+entire transition could be reworked." Root cause today: placeCarried runs only while stage ≤ 1 (camera:update hook), and stage 2 (the fade)
+stops it, so the ground-follow drops him during the 1.1 s fade; the tiger (3.4 u/s, 4 s timeout) never actually reaches the bed.
+Rework as ONE continuous cinematic, the visitor never leaving the jaws until the lights are out:
+1. CATCH (0.9 s): pounce contact, screen shake, "Got you. Come on. Bed.", he goes limp in the scruff (dangling pose, a little swing).
+2. CARRY (real distance, 6–14 s; speed 4.2 u/s, no timeout): the tiger walks the actual route to the guest house (Contract A ground/pushOut;
+   after the rainbow bridge, over the bridge from Candyland — the signature image), the camera on a following cinematic (target = the
+   tiger's jaws, distance 11 → 9, elevation 0.32, a slow orbit of ≤ 30°), fog/lamps as-is; other tigers fall in behind ("the escort").
+3. ARRIVAL (2.5 s): at the guest house door the tiger pauses, the door opens (containment owns the bed spot: ask
+   catContainment.spots.bed / the door if exposed, else the doorway in front of the bed), the tiger walks him to the bed and TUCKS him in
+   (a 'tuck' pose: head dips, he slides from the jaws onto the pillow, the blanket comes up — a simple animated quad; a purr).
+4. LIGHTS OUT (1.2 s): the room lamp dims, fade to black WITH him still in bed, THEN time → 06:00 and the wake-up: the visitor sits up in
+   the bed at dawn, a cat asleep on his feet, "You slept. Everyone is very glad." Objective unchanged. Story `carried_home` as today.
+Skip: any key after step 1 jumps to LIGHTS OUT (still no drop). Deterministic; the carry survives a paused game; endCarry restores every
+player field it touched (onFerry, locked, rotation, emotion). Verify by script: at no frame between CATCH and the fade's end is
+|player.position − mouthPoint| > 0.5 u (sample every frame); the fade reaches 1.0 before the time skip; the wake-up puts him within 1 u of
+the bed with the room lit. Render six beats (catch, carry on Main Street at night, carry over the rainbow if the bridge is up, arrival,
+tuck-in, dawn wake-up) and READ them; a critic judges it as a little horror-comedy beat ("funny and a bit unsettling, never cruel").
+
+### Contract O — safety rails, doors, the smoothie stand, the dusk ritual (added 2026-09-24 night; queued behind WAVE 4; Ben's asks)
+**Ramps and handrails (owner "rails": candy/architecture/pier.js, candy/architecture/lake.js, candy/architecture/cupcake.js,
+cat/architecture/kit.js + outskirts.js (watchtower stair, gym deck), escape/parts.js, escape/cave.js stairs, escape/flyer.js runway lip,
+escape/catapult.js platform):** Ben: "all ramps on or in buildings should have handrails to help keep players from falling off." Audit every
+ramp, stair and elevated deck edge a walkable registers (ctx.walkables + the deck/ramp builders); wherever the drop is > 1.2 u, add a
+handrail on the open side(s): posts every ≈ 1.6 u + a top rail (and a mid rail on stairs), in each site's material language (candy-cane
+posts on Candyland, timber/wrought on Cat Island, icing on the palace, rope in the cave), with COLLIDERS (thin box colliders with h so
+the visitor and NPCs cannot walk through; the walkable itself unchanged). Merge into the owner's existing meshes (≤ +1 draw call per site).
+Prove: a scripted visitor pushed sideways off each ramp/deck edge is stopped by the rail (position stays on the deck); renders of each site
+READ; a critic checks the rails read as part of the building, not bolted on.
+**Doors (owner "doors": cat/architecture/parts.js doorUnit + callers in mainstreet.js, arrival.js, square.js, outskirts.js; candy
+architecture doors; escape/palace.js doors + cellar door; guest house door in containment/scenery.js):** Ben: "All doors that can open
+should be big enough for the player." Audit every door that ANIMATES open (leaf/flap/swing/portcullis) or that the visitor is meant to walk
+through: the clear opening must be ≥ 1.4 u wide × 2.3 u tall (visitor radius 0.36, height ≈ 1.8, with headroom), the collider gap must
+match the visual gap exactly, and the threshold must be walkable (Contract A). Cat-sized doors that are decorative stay decorative but must
+NOT animate open (or they get the human door beside them enlarged instead, per the architecture's own joke). Prove with a script that walks
+through each opening door from outside to inside and back (no pushOut hit inside the doorway); renders of the six most-used doors READ.
+**Smoothie stand (owner "tunnel": cat/containment.js cnt_tunnel + containment/scenery.js SPOTS.tunnel/smoothie; and cat/architecture/
+outskirts.js's 'smoothie' act — one builder, two files):** Ben: "something is preventing the player from looking behind the smoothie stand (E
+not working)." Cause: two overlapping interactables (the gym's 'Smoothie stand' menu chatter at r 3.6 in front, the story's 'Look behind the
+smoothie stand' at r 3.4 behind); interaction.nearest picks by distance; onTunnel also returns silently when a card is open. Fix: ONE prompt
+at the stand ("Look behind the smoothie stand" when the tunnel story is live, the menu joke folded into its first line), the tunnel spot
+reachable (no collider between the approach and SPOTS.tunnel; the stand's colBox trimmed or the spot moved beside it), a clear sparkle/arrow
+on the tunnel mouth once Mr. Sardine has moved, and never a silent E: if a card is open, close it; if nothing can happen, say why. Prove by
+script (nearest() label at 6 approach angles, E → the expected line, with and without the fish, and the transit to the cove).
+**The dusk ritual (owner "ritual": candy/sourpatch.js + sourpatch/*.js — after the WAVE 4 kids builder lands):** Ben: "Instead of disappearing,
+when Sour Patch kids all look at you and run away at 7:30 they should all gather in their town and have a freaky ritual before returning as
+their zombie forms to hunt the player." Replace the fade-out at home (duskBrain stage 1: vis → 0) with: every kid RUNS to the Sour Shrine
+(LANDMARKS.sour_shrine — "their town": add a ring of candy-cane torches and a sugar-crystal altar in sourpatch's own meshes if the shrine is
+bare; ≤ +4 draw calls) and forms concentric rings; the RITUAL (≈ 40 s, from the 7:30 freeze to lampsOn): unison sway and head tilt, the
+torches light one by one, a low hum + giggle chant (audio if present), the altar glows, then all 24 turn their backs to the centre and their
+eyes go dark, a pulse of light, and they turn around ZOMBIE: the night rig (mouth open, eyes lit, the reach pose) — the existing hunting
+look, now revealed on-screen instead of via spawn. Then the hunt begins as today (cap 10, watchers, salt lines, water). The player can WATCH
+from the shrine's edge (a light-horror beat: if he steps inside the outer ring during the ritual every head snaps to him, the chant stops,
+and the hunt starts early); if he is on Cat Island the ritual still runs (they gather regardless). Dawn reversion unchanged. Deterministic;
+rings placed with pushOut; NPCs never intersect props. Prove by script (all kids within 14 u of the shrine by 19:40, torches lit, the
+zombie switch at lampsOn, hunt cap after); render the freeze, the run, the rings with torches, the back-turned beat, the reveal; READ them;
+a critic: "genuinely freaky, never gore".
+
+### Contract P — THE NAME (added 2026-09-24 night; Ben): the game is now **"Escape from the Candy Kingdom and Cat Island"**, and the candy
+island is **the Candy Kingdom** (never "Candyland" — treat the old word as retired everywhere the player can read it). Applied by the
+orchestrator: <title>, og/twitter tags, manifest, loader/title lettering (a "rename-title" builder). QUEUED behind WAVE 4 as the "rename"
+job: a grep-driven sweep of every USER-VISIBLE string in src/ (dialogue, toasts, objectives, signs painted into canvas atlases, the biplane
+banner "WELCOME TO CANDYLAND" → "WELCOME TO THE CANDY KINGDOM" (re-fit the banner length), the minimap/atlas island labels and the
+"Explored: Candyland NN%" footer, loading captions, help card, the ferry's "back to Candyland", the intro cinematic captions, the credits).
+Grammar: "on Candyland" → "in the Candy Kingdom"; "Candyland Island" → "the Candy Kingdom"; "to Candyland" → "to the Candy Kingdom";
+title-case in signs ("THE CANDY KINGDOM"); possessive "Candyland's" → "the Kingdom's". Identifiers, ids, file names, story flags and
+LANDMARK ids stay as they are ('candy', 'candy_village', island: 'candy'). Comments may keep the old word. Verification: `grep -rn
+"Candyland" src/ --include=*.js` shows only comments and identifiers; a scripted tour reads the HUD, map, objective and three NPC lines at
+six spots and finds no "Candyland"; renders of the biplane banner, the welcome arch/sign, the map footer READ. Builders CURRENTLY running
+(WAVE 4) should use "the Candy Kingdom" in any NEW text they write.

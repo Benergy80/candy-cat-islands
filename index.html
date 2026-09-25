@@ -9,9 +9,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="Candy &amp; Cat" />
+<meta name="apple-mobile-web-app-title" content="Candy Kingdom" />
 <meta name="format-detection" content="telephone=no" />
-<meta name="description" content="Escape from Candyland and Cat Island — a little 3D holiday on two very strange islands, and the long way home. Plays in your browser, desktop or phone." />
+<meta name="description" content="Escape from the Candy Kingdom and Cat Island — a little 3D holiday on two very strange islands, and the long way home. Plays in your browser, desktop or phone." />
 <link rel="manifest" href="./manifest.webmanifest" />
 <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
 <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
@@ -19,12 +19,12 @@
 <link rel="preload" href="./loading/fonts/ld-display.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="preload" href="./loading/fonts/ld-body.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="preload" href="./loading/fonts/ld-body-it.woff2" as="font" type="font/woff2" crossorigin />
-<title>Escape from Candyland and Cat Island</title>
+<title>Escape from the Candy Kingdom and Cat Island</title>
 <!-- link previews (iMessage, WhatsApp, Slack, Discord, X): the title card at dusk, shot at 1200×630 from ?shot=1&intro=1
      with the start pill hidden. Absolute URLs on purpose — scrapers do not resolve relative ones. Square variant second. -->
 <meta property="og:type" content="website" />
-<meta property="og:site_name" content="Escape from Candyland and Cat Island" />
-<meta property="og:title" content="Escape from Candyland and Cat Island" />
+<meta property="og:site_name" content="Escape from the Candy Kingdom and Cat Island" />
+<meta property="og:title" content="Escape from the Candy Kingdom and Cat Island" />
 <meta property="og:description" content="A little 3D holiday on two very strange islands — and the long way home. Plays in your browser, desktop or phone." />
 <meta property="og:url" content="https://benergy80.github.io/candy-cat-islands/" />
 <meta property="og:locale" content="en_US" />
@@ -33,12 +33,12 @@
 <meta property="og:image:type" content="image/jpeg" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
-<meta property="og:image:alt" content="Title card: the Escape from Candyland and Cat Island logo over the two islands at dusk — Candyland on the left, Cat Island on the right." />
+<meta property="og:image:alt" content="Title card: the Escape from the Candy Kingdom and Cat Island logo over the two islands at dusk — Candyland on the left, Cat Island on the right." />
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="Escape from Candyland and Cat Island" />
+<meta name="twitter:title" content="Escape from the Candy Kingdom and Cat Island" />
 <meta name="twitter:description" content="A little 3D holiday on two very strange islands — and the long way home. Plays in your browser, desktop or phone." />
 <meta name="twitter:image" content="https://benergy80.github.io/candy-cat-islands/og/title-1200x630.jpg" />
-<meta name="twitter:image:alt" content="Title card: the Escape from Candyland and Cat Island logo over the two islands at dusk — Candyland on the left, Cat Island on the right." />
+<meta name="twitter:image:alt" content="Title card: the Escape from the Candy Kingdom and Cat Island logo over the two islands at dusk — Candyland on the left, Cat Island on the right." />
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0a12; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
     overscroll-behavior: none; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
@@ -95,6 +95,10 @@
      What the title card has no twin for (the progress plate, the tip, the credit pill, the pop counter)
      leaves first, in 0.36 s, so nothing of ours is left floating over the new screen while the sky and
      the logo dissolve.
+     The logo HOLDS STILL through that fade: its idle keyframes (letter bob, breath, ears, tail, lollipop, AND
+     sway, sparkles) pause where they are, and title.js stands its logo in exactly those poses (read off these
+     elements' computed transforms) until #loading is gone, then eases into its own motion. Both idle on
+     different clocks, so without the pause the fade showed two logos in two poses (THE HOLD in title.js).
      .ld-gone (touch.js's 'turn your phone' card is up instead of the title, there is no title at all, or a
      key/tap lands during the hand-off) takes the WHOLE screen away in 0.24 s, on the root's own opacity:
      a fresh transition (CSS never retimes one already running on the children), so it works whenever it
@@ -103,6 +107,8 @@
   #loading.done > * { opacity: 0; transition: opacity .7s cubic-bezier(.4, 0, .3, 1); }
   #loading.done > .ld-lower, #loading.done > .ld-credit, #loading.done > .ld-score, #loading.done > .ld-fx { transition-duration: .36s; }
   #loading.done > .ld-top { transition: opacity .6s cubic-bezier(.4, 0, .3, 1) .12s; }
+  #loading.done .ld-li, #loading.done .ld-lolw, #loading.done .ld-ears, #loading.done .ld-tail, #loading.done .ld-andr,
+  #loading.done .ld-spark { animation-play-state: paused; }
   #loading.ld-gone { opacity: 0; transition: opacity .24s ease; }
   #loading.ld-gone .ld-block { opacity: 0; transition: opacity .22s ease; }
   #loading * { box-sizing: border-box; }
@@ -156,11 +162,11 @@
     display: flex; align-items: center; justify-content: center; padding: 0 12px; }
   .ld-block { display: flex; flex-direction: column; align-items: center; transform-origin: 50% 50%; }
   .ld-logo { position: relative; display: flex; flex-direction: column; align-items: center; padding: 0 .46em; font-size: var(--tf); line-height: .9; }
-  /* The ribbon is logo lettering, sized exactly as the title's .cci-ti-eyebrow (style.js) so the two logos
-     register at the hand-off. On a phone held upright it comes out ~12.8 px: bold, caps, letter-spaced, cream
-     on a dark-outlined pink ribbon. It is exempt from the 14 px text floor; if the title ever floors its
-     eyebrow (max(.235em, 14px)), change this line to match or the crossfade will show two ribbons. */
-  .ld-eyebrow { position: relative; z-index: 3; font-size: .235em; margin-bottom: .1em; animation: ld-pop .45s cubic-bezier(.3,1.7,.5,1) .12s both; }
+  /* The ribbon is logo lettering, sized exactly as the title's .cci-ti-eyebrow (title.js LOGO_CSS: .255em,
+     .275em on phones either way up) so the two logos register at the hand-off. On a phone held upright it comes
+     out ~18 px: bold, caps, letter-spaced, cream on a dark-outlined pink ribbon. If the title ever changes its
+     eyebrow size, change this line (and the two media rules below) to match or the crossfade will show two ribbons. */
+  .ld-eyebrow { position: relative; z-index: 3; font-size: .255em; margin-bottom: .1em; animation: ld-pop .45s cubic-bezier(.3,1.7,.5,1) .12s both; }
   .ld-rib { position: relative; display: inline-block; padding: .26em .95em .2em; transform: rotate(-3deg);
     font: 800 1em/1 var(--fd); letter-spacing: .17em; color: #fff8ee; white-space: nowrap;
     background: linear-gradient(180deg, #ff86ae 0%, var(--pink) 58%, #d7386f 100%);
@@ -174,36 +180,57 @@
   .ld-word { position: relative; display: flex; align-items: flex-end; justify-content: center; white-space: nowrap;
     font: 800 1em/.94 var(--fd); letter-spacing: -.01em; }
   /* the ink drop-shadow sits on a STATIC wrapper per letter (and on the ornaments), never on a parent of
-     something animated: WebKit clips animated children of a filtered element to its box */
-  .ld-lf, .ld-ears svg, .ld-tail svg, .ld-lolw svg { filter: drop-shadow(0 .06em 0 var(--ink)) drop-shadow(0 .15em .16em rgba(16,4,24,.5)); }
+     something animated: WebKit clips animated children of a filtered element to its box. The third shadow is a
+     soft plum glow all round, so the lettering holds its own over a bright cloud behind it (the title's live sky
+     has them; title.js LOGO_CSS adds the same glow to the title's words) */
+  .ld-lf, .ld-ears svg, .ld-tail svg, .ld-lolw svg { filter: drop-shadow(0 .06em 0 var(--ink)) drop-shadow(0 .15em .16em rgba(16,4,24,.5)) drop-shadow(0 0 .22em rgba(40,10,52,.45)); }
   .ld-lf { position: relative; display: block; }
-  .ld-l { position: relative; display: inline-block; animation: ld-drop .55s cubic-bezier(.3,1.55,.5,1) both; animation-delay: calc(.2s + var(--i) * .05s); }
+  .ld-l { position: relative; display: inline-block; animation: ld-drop .55s cubic-bezier(.3,1.55,.5,1) both; animation-delay: calc(.2s + var(--i) * .04s); }
   .ld-li { position: relative; display: block; transform-origin: 50% 85%; }
   .ld-l b { display: block; font: inherit; }
   .ld-l .o { position: absolute; left: 0; top: 0; color: var(--ink); -webkit-text-stroke: .17em var(--ink); }
   .ld-l .f { position: relative; color: transparent; -webkit-background-clip: text; background-clip: text; }
+  /* the K's outline is trimmed at the stem's own outline (-.02em): its upper arm's 45° corner mitres out into a
+     dark spur there when painted (title.js LOGO_CSS has the geometry; the title's K gets the same trim) */
+  .ld-l.kk .o { clip-path: inset(-.5em -.5em -.5em -.02em); }
   .ld-l.cd .ld-li { animation: ld-bobA 2.7s ease-in-out infinite; animation-delay: calc(var(--i) * -.29s); }
-  .ld-l.cd:nth-child(odd) .ld-li { animation-name: ld-bobB; }
+  .ld-l.cd.od .ld-li { animation-name: ld-bobB; }
+  /* CANDY KINGDOM: one line wherever the window is wider than 3:4; on portrait windows CANDY stacks CENTRED over
+     KINGDOM and the logo is set 1.2x (the reasoning is at title.js's LOGO_CSS; this mirrors it rule for rule,
+     same breakpoint). The lollipop rides the CANDY line, so it peeks from behind that C either way (in portrait
+     it drops beside the C, clear of the ribbon). */
+  .ld-cline { position: relative; display: flex; align-items: flex-end; }
   .ld-l.cd .f { background-image:
       linear-gradient(180deg, rgba(255,255,255,.66) 0%, rgba(255,255,255,.14) 30%, rgba(255,255,255,0) 44%),
       linear-gradient(0deg, rgba(90,10,50,.32) 0%, rgba(90,10,50,0) 30%),
       repeating-linear-gradient(126deg, var(--c) 0 .09em, #fff6ec .09em .18em); }
-  .ld-cat { font-size: .8em; margin-top: .02em; }
+  /* CAT ISLAND is the other half of the name, so on one-line windows it is set at .96 of CANDY KINGDOM's size
+     with a touch more tracking (~70% of line 1's width; at .8 it read as line 1's subtitle). Portrait windows
+     keep .8: there it already matches KINGDOM's width. Both lines share the gloss, the plum under-shade and the
+     candy stripe (faint cream on mint), so they read as one lockup; title.js LOGO_CSS mirrors all of it. */
+  .ld-cat { font-size: .96em; letter-spacing: .015em; margin-top: .02em; }
   .ld-l.ct { animation-name: ld-rise; animation-delay: calc(.8s + var(--i) * .04s); }
   .ld-l.ct .ld-li { transform-origin: 50% 100%; animation: ld-breath 5s ease-in-out infinite; animation-delay: calc(var(--i) * -.22s); }
   .ld-l.ct .f { background-image:
-      linear-gradient(180deg, rgba(255,255,255,.62) 0%, rgba(255,255,255,.1) 34%, rgba(255,255,255,0) 46%),
+      linear-gradient(180deg, rgba(255,255,255,.66) 0%, rgba(255,255,255,.14) 30%, rgba(255,255,255,0) 44%),
+      linear-gradient(0deg, rgba(90,10,50,.32) 0%, rgba(90,10,50,0) 30%),
+      repeating-linear-gradient(126deg, rgba(255,246,236,0) 0 .09em, rgba(255,246,236,.2) .09em .18em),
       linear-gradient(180deg, #e6fff6 0%, #a2f0d7 40%, #52c7a8 72%, #2fa88c 100%); }
   .ld-sp { display: inline-block; width: .24em; }
   .ld-ears { position: absolute; left: .01em; top: -.25em; width: .7em; height: .5em; transform-origin: 25% 100%; animation: ld-flick 3.7s ease-in-out infinite; }
-  .ld-tail { position: absolute; right: -.42em; bottom: .08em; width: .5em; height: .7em; transform-origin: 8% 92%; animation: ld-sway 3.9s ease-in-out infinite alternate; }
+  /* the tail rises from BEHIND the D (its root is hidden in the D's bowl) and curls over above the cap line, ringed
+     and dark-tipped, as the ears peek over the C: a cat behind the words. (Sat on the baseline after the D in
+     the letters' own mint, it read as an S: "CAT ISLANDS".) The pivot is the hidden root. */
+  .ld-tail { position: absolute; right: -.56em; bottom: .36em; width: .86em; height: 1em; transform-origin: 23.3% 80%; animation: ld-sway 3.9s ease-in-out infinite alternate; }
   .ld-lolli { position: absolute; left: -.34em; top: -.36em; width: .6em; height: 1.04em; animation: ld-pop .5s cubic-bezier(.3,1.6,.5,1) .35s both; }
   .ld-lolw { display: block; width: 100%; height: 100%; transform-origin: 50% 90%; animation: ld-lolli 4.8s ease-in-out infinite alternate; }
-  .ld-and { position: relative; z-index: 2; display: flex; align-items: center; gap: .18em; margin: .06em 0 .02em; font-size: .27em; animation: ld-pop .45s cubic-bezier(.3,1.7,.5,1) .62s both; }
+  .ld-and { position: relative; z-index: 2; display: flex; align-items: center; margin: .06em 0 .02em; font-size: .27em; animation: ld-pop .45s cubic-bezier(.3,1.7,.5,1) .62s both; }
+  /* the badge's sway turns the whole row, stars and all, as title.js turns .cci-ti-and (turning only the pill
+     left the two logos' stars ~5 px apart at the crossfade) */
+  .ld-andr { display: flex; align-items: center; gap: .18em; animation: ld-andw 5.6s ease-in-out infinite alternate; }
   .ld-andb { font: 800 1em/1 var(--fd); letter-spacing: .1em; color: var(--ink); padding: .2em .55em .14em .65em; border-radius: 999px;
     background: linear-gradient(180deg, #ffeab0, var(--gold) 70%, #f0ab2c); border: .1em solid var(--ink);
-    box-shadow: 0 .12em 0 var(--ink), 0 .26em .5em rgba(16,4,24,.4), inset 0 .07em 0 rgba(255,255,255,.75);
-    animation: ld-andw 5.6s ease-in-out infinite alternate; }
+    box-shadow: 0 .12em 0 var(--ink), 0 .26em .5em rgba(16,4,24,.4), inset 0 .07em 0 rgba(255,255,255,.75); }
   .ld-and .st { width: .85em; height: .85em; filter: drop-shadow(0 .07em 0 var(--ink)); }
   .ld-spark { position: absolute; width: .19em; height: .19em; color: #fff6d6; filter: drop-shadow(0 0 .05em rgba(255,214,130,.95)); animation: ld-twinkle 1.9s ease-in-out infinite; }
   .ld-spark.s1 { right: .18em; top: .2em; }
@@ -222,6 +249,9 @@
   @keyframes ld-twinkle { 0%, 55%, 100% { transform: scale(0) rotate(0); } 20% { transform: scale(1.1) rotate(45deg); } }
 
   /* ── credit ────────────────────────────────────────────────────────────── */
+  /* .ld-tight: fit() found the pill would meet the progress plate (wide phones on their side) — slimmer pill */
+  #loading.ld-tight .ld-credit { font-size: .86em; }
+  #loading.ld-tight .ld-cplate { padding-top: .18em; padding-bottom: .2em; }
   .ld-credit { position: absolute; left: 0; right: 0; top: calc(env(safe-area-inset-top, 0px) + var(--zt) + var(--zh) / 2 + var(--tf) * 1.3 + 8px);
     display: flex; justify-content: center; padding: 0 16px; animation: ld-up .5s ease-out .25s backwards; }
   .ld-cplate { display: inline-flex; align-items: center; gap: .55em; max-width: 100%; padding: .42em 1.05em .46em;
@@ -380,10 +410,18 @@
     .ld-prod { padding-top: 4px; font-size: 14px; }
     .ld-cloud.c3 { display: none; }
     .ld-score { top: calc(env(safe-area-inset-top, 0px) + 8px); right: calc(env(safe-area-inset-right, 0px) + 10px); font-size: 14px; padding: .28em .8em .3em .5em; border-width: 2px; }
+    .ld-eyebrow { font-size: .275em; }
   }
   /* tall windows (portrait phones): the logo rides lower in its sky, like the title's */
   @media (max-aspect-ratio: 3/4) {
     #loading { --zt: 7vh; --zh: 46vh; --hz: 57vh; --lower: 62vh; --isle: clamp(190px, 58vw, 420px); }
+    .ld-logo { font-size: calc(var(--tf) * 1.2); }
+    .ld-eyebrow { font-size: .275em; }
+    .ld-candy { flex-direction: column; align-items: center; }
+    .ld-candy > .ld-sp { display: none; }
+    .ld-cline.k { margin-top: -.05em; }
+    .ld-cat { font-size: .8em; letter-spacing: -.01em; }
+    .ld-lolli { left: -.44em; top: .1em; }
     .ld-isle.l { left: -12vw; }
     .ld-isle.r { right: -14vw; }
     .ld-sun { width: 16vw; height: 16vw; margin: -8vw 0 0 -8vw; }
@@ -448,7 +486,7 @@
 <body>
   <div id="app"></div>
   <div id="ui"></div>
-  <div id="loading" aria-busy="true" aria-label="Loading Escape from Candyland and Cat Island">
+  <div id="loading" aria-busy="true" aria-label="Loading Escape from the Candy Kingdom and Cat Island">
     <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
       <defs>
         <linearGradient id="ld-cg" x1="0" y1="0" x2="0" y2="1">
@@ -489,7 +527,7 @@
       <i style="left:4vw;top:10.5vh;width:3vw;animation-delay:-3s"></i>
     </div>
 
-    <!-- CANDYLAND on the western horizon: palace towers, lollipops, the Great Cupcake, a candy cane, the donut arch, the pier -->
+    <!-- THE CANDY KINGDOM on the western horizon: palace towers, lollipops, the Great Cupcake, a candy cane, the donut arch, the pier -->
     <svg class="ld-isle l" viewBox="0 0 600 160" preserveAspectRatio="xMinYMax meet" aria-hidden="true">
       <g fill="#c79bc6">
         <path d="M0 160 V114 C50 104 110 108 170 106 C240 104 290 116 350 126 C420 138 500 150 600 158 V160 Z"/>
@@ -571,32 +609,32 @@
       <i class="f" style="left:97%;animation-duration:19s;animation-delay:-2.5s"><b style="background:#ffd166"></b></i>
     </div>
 
-    <h1 class="ld-srt">Escape from Candyland and Cat Island</h1>
+    <h1 class="ld-srt">Escape from the Candy Kingdom and Cat Island</h1>
     <div class="ld-top" aria-hidden="true">
       <div class="ld-block">
         <div class="ld-logo">
-          <div class="ld-eyebrow"><span class="ld-rib">ESCAPE FROM</span></div>
+          <div class="ld-eyebrow"><span class="ld-rib">ESCAPE FROM THE</span></div>
           <div class="ld-word ld-candy">
-            <span class="ld-lolli"><span class="ld-lolw"><svg viewBox="0 0 60 104" fill="none" focusable="false">
+            <span class="ld-cline c"><span class="ld-lolli"><span class="ld-lolw"><svg viewBox="0 0 60 104" fill="none" focusable="false">
               <rect x="25.5" y="44" width="9" height="57" rx="4.5" fill="#fff6ec" stroke="#24122c" stroke-width="4.5"/>
               <path d="M27 56 l6 -4 M27 70 l6 -4 M27 84 l6 -4" stroke="#ef4f84" stroke-width="3.2" stroke-linecap="round"/>
               <circle cx="30" cy="30" r="26" fill="#ff5c93" stroke="#24122c" stroke-width="5"/>
               <clipPath id="ld-lc"><circle cx="30" cy="30" r="23.5"/></clipPath>
               <path clip-path="url(#ld-lc)" d="M30 30 a3 3 0 0 1 6 0 a6 6 0 0 1 -12 0 a9 9 0 0 1 18 0 a12 12 0 0 1 -24 0 a15 15 0 0 1 30 0 a18 18 0 0 1 -36 0 a21 21 0 0 1 42 0 a24 24 0 0 1 -48 0" stroke="#fff6ec" stroke-width="2.9" stroke-linecap="round"/>
               <path d="M14 18 q6 -9 16 -10" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity=".7"/>
-            </svg></span></span>
-            <span class="ld-l cd" style="--c:#f2447f;--i:0"><span class="ld-li"><span class="ld-lf"><b class="o">C</b><b class="f">C</b></span></span></span><span class="ld-l cd" style="--c:#ff7a4d;--i:1"><span class="ld-li"><span class="ld-lf"><b class="o">A</b><b class="f">A</b></span></span></span><span class="ld-l cd" style="--c:#f2447f;--i:2"><span class="ld-li"><span class="ld-lf"><b class="o">N</b><b class="f">N</b></span></span></span><span class="ld-l cd" style="--c:#a765ee;--i:3"><span class="ld-li"><span class="ld-lf"><b class="o">D</b><b class="f">D</b></span></span></span><span class="ld-l cd" style="--c:#f2447f;--i:4"><span class="ld-li"><span class="ld-lf"><b class="o">Y</b><b class="f">Y</b></span></span></span><span class="ld-l cd" style="--c:#20b3a6;--i:5"><span class="ld-li"><span class="ld-lf"><b class="o">L</b><b class="f">L</b></span></span></span><span class="ld-l cd" style="--c:#ff7a4d;--i:6"><span class="ld-li"><span class="ld-lf"><b class="o">A</b><b class="f">A</b></span></span></span><span class="ld-l cd" style="--c:#f2447f;--i:7"><span class="ld-li"><span class="ld-lf"><b class="o">N</b><b class="f">N</b></span></span></span><span class="ld-l cd" style="--c:#a765ee;--i:8"><span class="ld-li"><span class="ld-lf"><b class="o">D</b><b class="f">D</b></span></span></span>
+            </svg></span></span><span class="ld-l cd" style="--c:#f2447f;--i:0"><span class="ld-li"><span class="ld-lf"><b class="o">C</b><b class="f">C</b></span></span></span><span class="ld-l cd od" style="--c:#ff7a4d;--i:1"><span class="ld-li"><span class="ld-lf"><b class="o">A</b><b class="f">A</b></span></span></span><span class="ld-l cd" style="--c:#f2447f;--i:2"><span class="ld-li"><span class="ld-lf"><b class="o">N</b><b class="f">N</b></span></span></span><span class="ld-l cd od" style="--c:#a765ee;--i:3"><span class="ld-li"><span class="ld-lf"><b class="o">D</b><b class="f">D</b></span></span></span><span class="ld-l cd" style="--c:#f2447f;--i:4"><span class="ld-li"><span class="ld-lf"><b class="o">Y</b><b class="f">Y</b></span></span></span></span><span class="ld-sp"></span><span class="ld-cline k"><span class="ld-l cd od kk" style="--c:#20b3a6;--i:5"><span class="ld-li"><span class="ld-lf"><b class="o">K</b><b class="f">K</b></span></span></span><span class="ld-l cd" style="--c:#ff7a4d;--i:6"><span class="ld-li"><span class="ld-lf"><b class="o">I</b><b class="f">I</b></span></span></span><span class="ld-l cd od" style="--c:#f2447f;--i:7"><span class="ld-li"><span class="ld-lf"><b class="o">N</b><b class="f">N</b></span></span></span><span class="ld-l cd" style="--c:#a765ee;--i:8"><span class="ld-li"><span class="ld-lf"><b class="o">G</b><b class="f">G</b></span></span></span><span class="ld-l cd od" style="--c:#f2447f;--i:9"><span class="ld-li"><span class="ld-lf"><b class="o">D</b><b class="f">D</b></span></span></span><span class="ld-l cd" style="--c:#20b3a6;--i:10"><span class="ld-li"><span class="ld-lf"><b class="o">O</b><b class="f">O</b></span></span></span><span class="ld-l cd od" style="--c:#ff7a4d;--i:11"><span class="ld-li"><span class="ld-lf"><b class="o">M</b><b class="f">M</b></span></span></span></span>
           </div>
-          <div class="ld-and"><svg class="st"><use href="#ld-star"/></svg><span class="ld-andb">AND</span><svg class="st"><use href="#ld-star"/></svg></div>
+          <div class="ld-and"><span class="ld-andr"><svg class="st"><use href="#ld-star"/></svg><span class="ld-andb">AND</span><svg class="st"><use href="#ld-star"/></svg></span></div>
           <div class="ld-word ld-cat">
             <span class="ld-l ct" style="--i:0"><span class="ld-li"><span class="ld-ears"><svg viewBox="0 0 100 72" fill="none" focusable="false">
               <g stroke="#24122c" stroke-width="8" stroke-linejoin="round"><path d="M5 70 L15 5 L49 50 Z" fill="#a8f0d6"/><path d="M51 50 L85 5 L95 70 Z" fill="#a8f0d6"/></g>
               <path d="M18.5 50 L21.5 23 L37 44 Z" fill="#ff9fbf"/><path d="M63 44 L78.5 23 L81.5 50 Z" fill="#ff9fbf"/>
-            </svg></span><span class="ld-lf"><b class="o">C</b><b class="f">C</b></span></span></span><span class="ld-l ct" style="--i:1"><span class="ld-li"><span class="ld-lf"><b class="o">A</b><b class="f">A</b></span></span></span><span class="ld-l ct" style="--i:2"><span class="ld-li"><span class="ld-lf"><b class="o">T</b><b class="f">T</b></span></span></span><span class="ld-sp"></span><span class="ld-l ct" style="--i:3"><span class="ld-li"><span class="ld-lf"><b class="o">I</b><b class="f">I</b></span></span></span><span class="ld-l ct" style="--i:4"><span class="ld-li"><span class="ld-lf"><b class="o">S</b><b class="f">S</b></span></span></span><span class="ld-l ct" style="--i:5"><span class="ld-li"><span class="ld-lf"><b class="o">L</b><b class="f">L</b></span></span></span><span class="ld-l ct" style="--i:6"><span class="ld-li"><span class="ld-lf"><b class="o">A</b><b class="f">A</b></span></span></span><span class="ld-l ct" style="--i:7"><span class="ld-li"><span class="ld-lf"><b class="o">N</b><b class="f">N</b></span></span></span><span class="ld-l ct" style="--i:8"><span class="ld-li"><span class="ld-tail"><svg viewBox="0 0 80 110" fill="none" focusable="false">
-              <path d="M8 98 C44 102 64 80 56 54 C50 34 54 18 70 14" stroke="#24122c" stroke-width="30" stroke-linecap="round"/>
-              <path d="M8 98 C44 102 64 80 56 54 C50 34 54 18 70 14" stroke="#8eebcd" stroke-width="17" stroke-linecap="round"/>
-              <path d="M55.6 41 C53.5 29 58 19 69 14.5" stroke="#2a9d8f" stroke-width="17" stroke-linecap="round"/>
-              <path d="M22 94 C42 94 53 84 55 70" stroke="#e6fff6" stroke-width="5" stroke-linecap="round" opacity=".85"/>
+            </svg></span><span class="ld-lf"><b class="o">C</b><b class="f">C</b></span></span></span><span class="ld-l ct" style="--i:1"><span class="ld-li"><span class="ld-lf"><b class="o">A</b><b class="f">A</b></span></span></span><span class="ld-l ct" style="--i:2"><span class="ld-li"><span class="ld-lf"><b class="o">T</b><b class="f">T</b></span></span></span><span class="ld-sp"></span><span class="ld-l ct" style="--i:3"><span class="ld-li"><span class="ld-lf"><b class="o">I</b><b class="f">I</b></span></span></span><span class="ld-l ct" style="--i:4"><span class="ld-li"><span class="ld-lf"><b class="o">S</b><b class="f">S</b></span></span></span><span class="ld-l ct" style="--i:5"><span class="ld-li"><span class="ld-lf"><b class="o">L</b><b class="f">L</b></span></span></span><span class="ld-l ct" style="--i:6"><span class="ld-li"><span class="ld-lf"><b class="o">A</b><b class="f">A</b></span></span></span><span class="ld-l ct" style="--i:7"><span class="ld-li"><span class="ld-lf"><b class="o">N</b><b class="f">N</b></span></span></span><span class="ld-l ct" style="--i:8"><span class="ld-li"><span class="ld-tail"><svg viewBox="0 -16 86 100" fill="none" focusable="false">
+              <path d="M20 64 C29 53 36 42 36 28 C36 12 45 1 56 3 C66 5 70 14 66 24" stroke="#24122c" stroke-width="31" stroke-linecap="round"/>
+              <path d="M20 64 C29 53 36 42 36 28 C36 12 45 1 56 3 C66 5 70 14 66 24" stroke="#a8f0d6" stroke-width="15" stroke-linecap="round"/>
+              <path d="M20 64 C29 53 36 42 36 28 C36 12 45 1 56 3 C66 5 70 14 66 24" pathLength="100" stroke="#3aae98" stroke-width="15" stroke-dasharray="0 27 6 10 6 10 6 100"/>
+              <path d="M20 64 C29 53 36 42 36 28 C36 12 45 1 56 3 C66 5 70 14 66 24" pathLength="100" stroke="#1f6b63" stroke-width="15" stroke-linecap="round" stroke-dasharray="0 82 18 100"/>
+              <path d="M27.5 48 C30.5 43 32 36 32 29" stroke="#f0fffa" stroke-width="3.2" stroke-linecap="round" opacity=".8"/>
             </svg></span><span class="ld-lf"><b class="o">D</b><b class="f">D</b></span></span></span>
           </div>
           <span class="ld-spark s1"><svg><use href="#ld-sparkg"/></svg></span>
@@ -685,7 +723,7 @@
     if (!root) return;
     var q = function (s) { return root.querySelector(s); };
     var fillO = q('.ld-fillo'), fillI = q('.ld-filli'), rider = q('.ld-rider'), capEl = q('.ld-cap'), capT = q('.ld-cap span'),
-      pctEl = q('.ld-pct'), track = q('.ld-track'), tipT = q('.ld-tip-t'), tipW = q('.ld-tipw'), sr = q('[role=status]'), block = q('.ld-block'), top = q('.ld-top'), credit = q('.ld-credit'),
+      pctEl = q('.ld-pct'), track = q('.ld-track'), tipT = q('.ld-tip-t'), tipW = q('.ld-tipw'), sr = q('[role=status]'), block = q('.ld-block'), cline = q('.ld-cline.c'), top = q('.ld-top'), credit = q('.ld-credit'),
       lower = q('.ld-lower'), plate = q('.ld-plate'), tipP = q('.ld-tip'), prod = q('.ld-prod'),
       whale = q('.ld-whale'), wb = q('.ld-wb'), fx = q('.ld-fx'), scoreEl = q('.ld-score'), scoreT = q('.ld-score-t');
     var SHOT = false; try { SHOT = new URLSearchParams(location.search).get('shot') === '1'; } catch (e) {}
@@ -956,15 +994,28 @@
       if (n > 0 && !fits(tipI)) { var j = pickTip(tipI); if (j >= 0) { tipI = j; tipT.textContent = order[j]; } }
     }
 
-    // ── keep the logo inside its sky zone on odd windows (the title does the same) ──
+    // ── keep the logo inside its sky zone on odd windows (title.js's fit() does exactly the same, so the
+    //    two logos register at the hand-off). The lollipop is placed absolutely, so it isn't in the block's
+    //    box: at the far end of its sway its ink reaches .64em left of the CANDY line (title.js LOLLI_INK).
+    //    What hangs past the block counts on both sides (the logo stays centred), and that ink keeps 8 px
+    //    from the window edge (the block keeps its 12 px). ──
     function fit() {
       try {
         block.style.transform = 'none';
         var aw = top.clientWidth - 24, ah = top.clientHeight - 4, bw = block.offsetWidth, bh = block.offsetHeight;
-        var s = clamp(Math.min(aw / Math.max(1, bw), ah / Math.max(1, bh)), 0.4, 1);
+        var oh = Math.max(0, block.getBoundingClientRect().left - cline.getBoundingClientRect().left
+          + 0.64 * (parseFloat(getComputedStyle(cline).fontSize) || 0));
+        var s = clamp(Math.min(aw / Math.max(1, bw), (aw + 8) / Math.max(1, bw + 2 * oh), ah / Math.max(1, bh)), 0.4, 1);
         block.style.transform = s < 0.999 ? 'scale(' + s.toFixed(4) + ')' : 'none';
         var r = block.getBoundingClientRect(), R = root.getBoundingClientRect();
-        credit.style.top = Math.round(r.bottom - R.top + (window.innerHeight <= 480 ? 6 : 12)) + 'px';
+        // the credit hangs 6/12 px under the logo block — but never onto the progress plate: on wide phones
+        // held sideways the taller CANDY KINGDOM block pushed it into the plate, so it is bounded by the
+        // lower column's top (a slimmer pill via .ld-tight if the two would otherwise meet)
+        var want = r.bottom - R.top + (window.innerHeight <= 480 ? 6 : 12);
+        root.classList.remove('ld-tight');
+        var cap = lower.offsetTop - credit.offsetHeight - 6;
+        if (want > cap) { root.classList.add('ld-tight'); cap = lower.offsetTop - credit.offsetHeight - 5; }
+        credit.style.top = Math.round(Math.min(want, Math.max(cap, r.bottom - R.top - 4))) + 'px';
       } catch (e) {}
       try { fitLower(); } catch (e) {}
     }

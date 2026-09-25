@@ -26,7 +26,7 @@
 // interior, e.g. the palace).
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ROUTE_NAMES = ['palace', 'cave', 'catapult', 'canoe', 'flyer'];
+const ROUTE_NAMES = ['palace', 'cave', 'catapult', 'canoe', 'flyer', 'blimp', 'biplane', 'bridge', 'ending'];
 
 // Top-level await: main.js already `await import`s this module, so the routes
 // are all resolved before create() runs and create() can stay synchronous.

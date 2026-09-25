@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "Escape from Candyland and Cat Island",
-  "short_name": "Candy & Cat",
-  "description": "Candyland and Cat Island: a little 3D holiday on two very strange islands.",
+  "name": "Escape from the Candy Kingdom and Cat Island",
+  "short_name": "Candy Kingdom",
+  "description": "The Candy Kingdom and Cat Island: a little 3D holiday on two very strange islands, and the long way home.",
   "lang": "en",
   "dir": "ltr",
   "start_url": "./",
