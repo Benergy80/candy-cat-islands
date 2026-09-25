@@ -1739,10 +1739,12 @@ export function create(ctx) {
       fitT = 0;
     }
 
-    // portrait → the rotate card, and the world holds its breath behind it
+    // portrait used to raise a 'turn your phone' card and pause the world. Ben
+    // (2026-09-24): "it actually looks great upright" — the card is gone; upright
+    // play is a first-class layout. rotateForced remains as a test hook only.
     const tall = H() > W() * 1.05;
     if (!tall) portraitOk = false;
-    const showRot = rotateForced != null ? !!rotateForced : (tall && !portraitOk);
+    const showRot = rotateForced != null ? !!rotateForced : false;
     if (showRot !== cls.portrait) {
       setCls('portrait', showRot, 'tch-portrait');
       if (showRot) releaseAll();
