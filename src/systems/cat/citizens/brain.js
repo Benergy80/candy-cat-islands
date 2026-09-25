@@ -374,6 +374,12 @@ function step(c, tx, tz, speed, dt, ctx, S) {
   // what keeps bodies out of props; steering only keeps them from grinding.
   const padC = tiger ? 1.25 : 0.8;
   const near = Math.min(1, d / 1.6);
+  // (the live `solid` rules — a deck's gated rail — are judged by THIS body's
+  //  feet, as citizens.js pushAll does: the player's position is lent c.y,
+  //  a tiger's 0.4 u higher for its height — citizens.js TIGER_GATE_LIFT)
+  const Pl = ctx.systems.player?.position, lend = !!Pl && c.y === c.y && c.y > -1e8 && c.y < 1e8, keepY = lend ? Pl.y : 0;
+  if (lend) Pl.y = c.y + (tiger ? 0.4 : 0);
+  try {
   if (cols) for (let i = 0; i < cols.length; i++) {
     const o = cols[i];
     if (!S?.solidsNear && S?.isLow && S.isLow(o)) continue;
@@ -388,6 +394,7 @@ function step(c, tx, tz, speed, dt, ctx, S) {
     }
     if (gap < padC) { const w = (padC - Math.max(gap, 0)) / padC * 2.2 * near; ux += _push.x * w; uz += _push.z * w; }
   }
+  } finally { if (lend) Pl.y = keepY; }
   // one tiger ahead in its lane (a narrow passage, a pack on the move): step
   // aside early — head-on, both keep to their right — instead of meeting nose
   // to nose and shoving until the watchdog sits one of them down
@@ -755,4 +762,4 @@ function animate(c, dt, ctx, S) {
   r.root.updateMatrixWorld(true);
 }
 
-export { wrapPi, solidPush };
+export { wrapPi, solidPush, step, dampAngle };

@@ -455,6 +455,15 @@ export function createRig(ctx, N, rand) {
     group, N, materials: { gummy, eyeMat, pupilMat, lidMat, mouthMat, grinMat, blobMat, poolMat, glowMat },
     drawCalls: 11,
 
+    /** Kid i's gummy colour `hex` at brightness f (1 = as made). WAVE 4 polish:
+     *  the raid's night column goes dark against the lit rainbow (raid.js). */
+    shade(i, hex, f) {
+      _c.setHex(hex).multiplyScalar(f);
+      head.setColorAt(i, _c); torso.setColorAt(i, _c);
+      for (let l = 0; l < 4; l++) limb.setColorAt(i * 4 + l, _c);
+      head.instanceColor.needsUpdate = true; torso.instanceColor.needsUpdate = true; limb.instanceColor.needsUpdate = true;
+    },
+
     setColor(i, hex) {
       _c.setHex(hex);
       head.setColorAt(i, _c); torso.setColorAt(i, _c);
@@ -511,6 +520,20 @@ export function createRig(ctx, N, rand) {
       blob.setMatrixAt(i, ZERO_M); pool.setMatrixAt(i, ZERO_M);
       for (let s = 0; s < 2; s++) { eye.setMatrixAt(i * 2 + s, ZERO_M); pupil.setMatrixAt(i * 2 + s, ZERO_M); lid.setMatrixAt(i * 2 + s, ZERO_M); glow.setMatrixAt(i * 2 + s, ZERO_M); }
       for (let l = 0; l < 4; l++) limb.setMatrixAt(i * 4 + l, ZERO_M);
+    },
+
+    /**
+     * WAVE 4 (raid.js): where kid i's eye s (0 left, 1 right) glows right
+     * now, read back off the glow halo this frame's pose() wrote (world
+     * space). false while that glow is off (by day, eyes shut, hidden).
+     */
+    eyePoint(i, s, out) {
+      if (hidden[i]) return false;
+      glow.getMatrixAt(i * 2 + s, _m);
+      const e = _m.elements;
+      if (e[0] * e[0] + e[1] * e[1] + e[2] * e[2] < 1e-8) return false;
+      out.set(e[12], e[13], e[14]);
+      return true;
     },
 
     /**
@@ -651,7 +674,7 @@ export function createRig(ctx, N, rand) {
             _p.addScaledVector(_gA, 0.14 / (_gA.length() || 1));
             _q2.copy(cam.quaternion);
           } else _q2.identity();
-          const gs = 0.36 * gn * sc;
+          const gs = 0.36 * gn * sc * (k.eyeBoost || 1);     // (k.eyeBoost: the raid's night column, raid.js)
           _s.set(gs, gs, 1);
           _m.compose(_p, _q2, _s);
           glow.setMatrixAt(i * 2 + s, _m);

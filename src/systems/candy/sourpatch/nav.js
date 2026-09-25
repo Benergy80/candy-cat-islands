@@ -50,7 +50,7 @@ const LINE_STEP = 0.6;      // lineClear sample spacing
 const MARK_SKIP = 1.0;      // …the first metre ignores keep-off marks (a kid may walk OUT of one)
 const K_NEAR = 8;           // entry / exit candidates considered
 // the way-round grid (aligned to one fixed lattice over Candyland so its cache persists)
-const GC = 0.7, GX0 = -292, GZ0 = -132, GNX = 400, GNZ = 378;
+const GC = 0.7, GX0_C = -292, GZ0_C = -132, GNX_C = 400, GNZ_C = 378;
 const WIN = 56;             // A* window: WIN × WIN cells (39 u) centred on the kid
 const EXPAND_MAX = 1600;    // A* expansions per call
 const NEW_MAX = 260;        // static cells computed per call (the rest next frame)
@@ -60,6 +60,12 @@ const NB_DX = [1, -1, 0, 0, 1, 1, -1, -1], NB_DZ = [0, 0, 1, -1, 1, -1, 1, -1];
 
 export function createNav(ctx, env) {
   const { world } = ctx;
+  // WAVE 4 (the raids): the grid and the path network are per instance, so
+  // the pack that crosses the rainbow gets a Cat Island nav of its own
+  // (env.island 'cat', env.grid {x0, z0, nx, nz}); Candyland's is unchanged.
+  const ISL = env.island || 'candy';
+  const GX0 = env.grid?.x0 ?? GX0_C, GZ0 = env.grid?.z0 ?? GZ0_C;
+  const GNX = env.grid?.nx ?? GNX_C, GNZ = env.grid?.nz ?? GNZ_C;
   let V = 0, built = false;
   let X = new Float32Array(0), Z = new Float32Array(0);
   let adj = new Int16Array(0), adjN = new Uint8Array(0);
@@ -99,7 +105,7 @@ export function createNav(ctx, env) {
     if (built) return;
     built = true;
     const xs = [], zs = [], pathOf = [], edges = [];
-    const paths = (world.PATHS || []).filter((p) => p.island === 'candy' && Array.isArray(p.points) && p.points.length > 1);
+    const paths = (world.PATHS || []).filter((p) => p.island === ISL && Array.isArray(p.points) && p.points.length > 1);
     paths.forEach((path, pi) => {
       let pts;
       try {

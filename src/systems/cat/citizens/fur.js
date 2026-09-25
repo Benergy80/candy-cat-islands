@@ -240,6 +240,7 @@ export function furMaterial(opts = {}) {
   const rimU = { value: 0 };
   const rimC = { value: new THREE.Color(opts.rimColor ?? 0xffc07a) };
   m.userData.rim = rimU;
+  m.userData.rimColor = rimC;
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uTileSize = { value: TILE_SIZE };
     sh.vertexShader = 'attribute vec2 aTile;\nuniform vec2 uTileSize;\n' + sh.vertexShader;

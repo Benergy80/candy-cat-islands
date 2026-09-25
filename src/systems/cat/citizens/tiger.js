@@ -111,6 +111,16 @@ const TPOSE = {
   sit:    { sit: 1, tail: -0.55, curl: 0.30, wrap: 1, swish: 0.35, freq: 0, stride: 0, chest: 0.25 },
   watch:  { sit: 1, tail: -0.55, curl: 0.28, wrap: 1, swish: 0.24, freq: 0, stride: 0, eye: 1.12, chest: 0.30 },
   carry:  { crouch: 0.02, tail: -0.70, curl: 0.34, swish: 0.8, freq: 1.65, stride: 0.44, roll: 1.0, mouth: 0.55, headY: 0.11, pitch: -0.14 },
+  // the raiding party (citizens/raid.js): a long, low, ground-eating lope over
+  // the rainbow, and the same lope with a visitor hanging out of it
+  lope:   { crouch: 0.08, tail: -1.05, curl: 0.34, swish: 0.7, freq: 2.15, stride: 0.52, roll: 1.15, headY: -0.05, headZ: 0.05, pitch: 0.05 },
+  // …opened out into a bound on a long deck (≈ 9 u/s): longer reach, the back
+  // flexing, head level and pushed forward, ears half back, tail streaming low
+  bound:  { crouch: 0.06, tail: -0.82, curl: 0.22, swish: 0.8, freq: 3.6, stride: 0.66, roll: 0.85, ear: 0.45, headY: -0.03, headZ: 0.08, pitch: 0.04, bound: 0.75 },
+  carryrun: { crouch: 0.04, tail: -0.80, curl: 0.30, swish: 0.9, freq: 2.55, stride: 0.56, roll: 0.9, mouth: 0.55, headY: 0.13, pitch: -0.16, bound: 0.5 },
+  // home at dawn: head low, ears back, tail down — a sheepish trot
+  trot:   { crouch: 0.12, tail: -1.30, curl: 0.18, swish: 0.35, freq: 3.0, stride: 0.60, roll: 1.0, ear: 0.40, headY: -0.08, pitch: 0.14, eye: 0.8 },
+  carrygallop: { crouch: 0.02, tail: -0.62, curl: 0.18, swish: 1.0, freq: 4.1, stride: 0.68, roll: 0.7, mouth: 0.55, headY: 0.15, pitch: -0.18, bound: 1 },
   yawn:   { sit: 0.9, tail: -0.55, curl: 0.30, wrap: 1, swish: 0.3, freq: 0, stride: 0, mouth: 1, pitch: -0.32, eye: 0.04, ear: 0.22 },
   flinch: { crouch: -0.07, rear: 0.24, tail: 0.66, curl: 0.10, swish: 2.4, freq: 1.2, stride: 0.30, ear: 1, pitch: -0.20, mouth: 0.45 },
   hiss:   { crouch: 0.08, tail: 0.58, curl: 0.10, swish: 2.8, freq: 0, stride: 0, ear: 1, mouth: 0.9, chest: 0.6, pitch: -0.12 },
@@ -191,6 +201,7 @@ for (const k in TPOSE) { const f = tposeVec(); for (const q in TREST) f[q] = TPO
 
 const POSE_OF = {
   prowl: 'prowl', stalk: 'stalk', crouch: 'crouch', rush: 'rush', roar: 'roar', carry: 'carry',
+  lope: 'lope', bound: 'bound', carryrun: 'carryrun', carrygallop: 'carrygallop', trot: 'trot',
   yawn: 'yawn', flinch: 'flinch', hiss: 'hiss', flee: 'flee', stun: 'stun', dizzy: 'stun',
   sulk: 'sulk', sit: 'sit', watch: 'watch', gossip: 'sit', groom: 'sit',
   sleep: 'sleep', loaf: 'sleep', sunbathe: 'sleep', nip: 'sleep', curl: 'sit', squat: 'sit',
@@ -232,7 +243,9 @@ export function applyTiger(c, k, el, dt, ctx) {
   tg.mv = damp(tg.mv, c.moving ? 1 : 0, 8, dt);
 
   // ── gait: diagonal pairs, heavy and slow ───────────────────────────────────
-  tg.gait += dt * a.freq * 2.35;
+  // (c.gaitK: a raider moving faster or slower than the pace its pose was
+  //  drawn for scales its cadence, so the paws keep up — citizens/raid.js)
+  tg.gait += dt * a.freq * 2.35 * (c.gaitK || 1);
   tg.swishPh += dt * (1.3 + a.swish * 1.5);
   const sw = Math.sin(tg.gait) * a.stride * tg.mv;
   const bob = tg.mv * (Math.abs(Math.sin(tg.gait * 2)) * 0.030 + a.bound * Math.max(0, Math.sin(tg.gait)) * 0.095);
@@ -241,7 +254,9 @@ export function applyTiger(c, k, el, dt, ctx) {
   // ── root ───────────────────────────────────────────────────────────────────
   const root = TG.root;
   root.position.set(c.x, c.y + (c.air || 0), c.z);
-  root.rotation.set(0, c.yaw, 0);
+  // (c.slope: a raider walking the rainbow pitches with the deck — its root
+  //  is built with rotation order YXZ; a citizen's slope is always 0)
+  root.rotation.set(c.slope || 0, c.yaw, 0);
   root.scale.setScalar(T * lerp(0.52, 1, k) * vis);
 
   // ── spine: the crouch, the shoulder roll, the pre-pounce wiggle ────────────
@@ -474,7 +489,8 @@ export function tigerPlan(c, h, ctx, S, T) {
   // lashing its tail, which is the frightening part anyway. (citizens.js
   // separateTigers() backs this with a hard 2-u exclusion round him.)
   const pl = ctx.systems.player;
-  const hunting = p && ctx.state.island === 'cat' && !pl.onFerry
+  // (T.island: the raiding party that crosses the rainbow hunts on Candyland)
+  const hunting = p && ctx.state.island === (T.island || 'cat') && !pl.onFerry
     && !T.carrying && c.huntRank < 3
     && !ctx.systems.powerups?.active;              // nobody hunts a STAR (Contract B)
   if (hunting) {

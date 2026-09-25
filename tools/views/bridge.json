@@ -1,0 +1,279 @@
+{
+  "bridge_day_pier": {
+    "free": [
+      -22,
+      -10
+    ],
+    "y": 22,
+    "az": -0.72,
+    "el": 0.1,
+    "dist": 118,
+    "fov": 40,
+    "time": 11,
+    "frames": 30,
+    "call": {
+      "escape.routes.bridge.debugRaise": [
+        true
+      ]
+    }
+  },
+  "bridge_overview": {
+    "free": [
+      0,
+      -14
+    ],
+    "y": 20,
+    "az": 0.12,
+    "el": 0.28,
+    "dist": 200,
+    "fov": 40,
+    "time": 12,
+    "frames": 30,
+    "call": {
+      "escape.routes.bridge.debugRaise": [
+        true
+      ]
+    }
+  },
+  "bridge_walk": {
+    "pos": [
+      -31,
+      22.5
+    ],
+    "time": 10,
+    "frames": 240,
+    "az": 0.35,
+    "el": 0.46,
+    "dist": 26,
+    "call": {
+      "escape.routes.bridge.debugRaise": [
+        true
+      ],
+      "escape.routes.bridge.debugWalk": [
+        "cat"
+      ]
+    }
+  },
+  "bridge_apex_night": {
+    "free": [
+      31,
+      18
+    ],
+    "y": 12,
+    "az": -2.5,
+    "el": 0.55,
+    "dist": 58,
+    "fov": 50,
+    "time": 22.5,
+    "frames": 50,
+    "call": {
+      "escape.routes.bridge.debugPlace": [
+        99,
+        "cat"
+      ]
+    }
+  },
+  "bridge_raise_mid": {
+    "pos": [
+      60,
+      18
+    ],
+    "time": 17.5,
+    "frames": 60,
+    "call": {
+      "escape.routes.bridge.debugCine": [
+        8
+      ]
+    }
+  },
+  "bridge_raise_hero": {
+    "pos": [
+      60,
+      18
+    ],
+    "time": 17.5,
+    "frames": 60,
+    "call": {
+      "escape.routes.bridge.debugCine": [
+        18.5
+      ]
+    }
+  },
+  "ending_kings_half": {
+    "pos": [
+      -150.6,
+      -33.6
+    ],
+    "time": 12,
+    "frames": 45
+  },
+  "ending_flare": {
+    "free": [
+      -1,
+      -48
+    ],
+    "y": 66,
+    "az": 3.14,
+    "el": 0.1,
+    "dist": 70,
+    "fov": 50,
+    "time": 20.8,
+    "frames": 120,
+    "call": {
+      "escape.routes.ending.debugSignal": []
+    }
+  },
+  "ending_climb": {
+    "time": 20.8,
+    "frames": 60,
+    "call": {
+      "escape.routes.ending.debugClimb": [
+        2.2
+      ]
+    }
+  },
+  "ending_credits_a": {
+    "time": 20.8,
+    "frames": 60,
+    "call": {
+      "escape.routes.ending.debugCredits": [
+        1.2
+      ]
+    }
+  },
+  "ending_credits_b": {
+    "time": 20.8,
+    "frames": 30,
+    "call": {
+      "escape.routes.ending.debugCredits": [
+        21
+      ]
+    }
+  },
+  "bridge_night_far_gate": {
+    "pos": [
+      -44,
+      26
+    ],
+    "free": [
+      22,
+      12
+    ],
+    "y": 9,
+    "az": -1.75,
+    "el": 0.22,
+    "dist": 46,
+    "fov": 45,
+    "time": 23,
+    "frames": 60,
+    "call": {
+      "escape.routes.bridge.debugRaise": [
+        true
+      ]
+    }
+  },
+  "ending_case": {
+    "time": 17,
+    "frames": 40,
+    "az": 2.75,
+    "el": 0.3,
+    "dist": 6.5,
+    "fov": 42,
+    "call": {
+      "escape.routes.bridge.debugPlace": [
+        "apex",
+        "cat"
+      ]
+    }
+  },
+  "ending_case_night": {
+    "time": 22,
+    "frames": 40,
+    "az": 2.75,
+    "el": 0.3,
+    "dist": 6.5,
+    "fov": 42,
+    "call": {
+      "escape.routes.bridge.debugPlace": [
+        "apex",
+        "cat"
+      ]
+    }
+  },
+  "ending_hatch": {
+    "time": 20.8,
+    "frames": 75,
+    "call": {
+      "escape.routes.ending.debugClimb": [
+        5.9
+      ]
+    }
+  },
+  "bridge_raise_hero_blimp_near": {
+    "pos": [
+      60,
+      18
+    ],
+    "time": 17.5,
+    "frames": 60,
+    "call": {
+      "planes.debugBlimp": [
+        0.817,
+        0,
+        true
+      ],
+      "escape.routes.bridge.debugCine": [
+        16.5
+      ]
+    }
+  },
+  "bridge_raise_hero_blimp_far": {
+    "pos": [
+      60,
+      18
+    ],
+    "time": 17.5,
+    "frames": 60,
+    "call": {
+      "planes.debugBlimp": [
+        0.283,
+        0,
+        true
+      ],
+      "escape.routes.bridge.debugCine": [
+        16.5
+      ]
+    }
+  },
+  "bridge_raise_swing": {
+    "pos": [
+      60,
+      18
+    ],
+    "time": 17.5,
+    "frames": 60,
+    "call": {
+      "escape.routes.bridge.debugCine": [
+        11
+      ]
+    }
+  },
+  "ending_credits_eyes": {
+    "time": 20.8,
+    "frames": 60,
+    "call": {
+      "escape.routes.ending.debugCredits": [
+        9
+      ]
+    }
+  },
+  "ending_credits_c": {
+    "time": 20.8,
+    "frames": 30,
+    "call": {
+      "escape.routes.ending.debugCredits": [
+        33
+      ]
+    }
+  }
+}

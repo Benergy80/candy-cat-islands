@@ -19,6 +19,12 @@
 //
 // All advisory: the hard constraint is still the ground core's pushOut in
 // citizens.js settle(). This only picks WHERE to walk.
+//
+// Opt-in extras (the raid on Candyland, o.keepBlockers): the blockers are also
+// kept in 4-u buckets, so clearRun() can ask whether a body of radius r fits
+// down a straight line between them, un-inflated (the grid's NAV_R closes the
+// 1.2-u gap between a fence's end and a post that a tiger's head fits through),
+// and add() stamps colliders appended after the build without rebuilding.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const UNREACHED = 0xffff;
@@ -48,7 +54,12 @@ export function createNav(world, o) {
   let mainComp = 0;
   const fields = new Map();                // key → { d: Uint16Array, sx, sz, cell, at }
   let landDone = false, built = false, bfsFrame = -1;
-  const stats = { builds: 0, buildMs: 0, landMs: 0, bfs: 0, bfsMs: 0, free: 0 };
+  const stats = { builds: 0, buildMs: 0, landMs: 0, bfs: 0, bfsMs: 0, free: 0, adds: 0, addMs: 0, ver: 0 };
+  // (o.keepBlockers) the blockers in 4-u buckets, each reaching BK_PAD past its
+  // footprint, so a clearRun of radius ≤ BK_PAD finds everything near a sample
+  const KEEP = !!o.keepBlockers, BK = 4, BK_PAD = 1.2;
+  const bkMap = KEEP ? new Map() : null;
+  const bkKey = (ix, iz) => (ix + 32768) * 65536 + (iz + 32768);
 
   const cx = (i) => X0 + ((i % NX) + 0.5) * C;
   const cz = (i) => Z0 + (((i / NX) | 0) + 0.5) * C;
@@ -85,6 +96,16 @@ export function createNav(world, o) {
     }
     return Math.hypot(dx, dz) - (c.r || 0);
   }
+  function keep(c) {
+    const br = (c.box ? 0.5 * Math.hypot(c.w || 0, c.d || 0) : (c.r || 0)) + BK_PAD;
+    if (!(br > BK_PAD) || br > 120) return;
+    for (let ix = Math.floor((c.x - br) / BK); ix <= Math.floor((c.x + br) / BK); ix++)
+      for (let iz = Math.floor((c.z - br) / BK); iz <= Math.floor((c.z + br) / BK); iz++) {
+        const k = bkKey(ix, iz);
+        let a = bkMap.get(k); if (!a) { a = []; bkMap.set(k, a); }
+        a.push(c);
+      }
+  }
   /** Mark every cell whose centre is within NAV_R of collider c. */
   function stamp(c) {
     const br = (c.box ? 0.5 * Math.hypot(c.w || 0, c.d || 0) : (c.r || 0)) + NAV_R;
@@ -106,6 +127,7 @@ export function createNav(world, o) {
     const t0 = performance.now();
     if (!landDone) buildLand();
     for (let i = 0; i < N; i++) blocked[i] = land[i] ? 0 : 1;
+    if (KEEP) bkMap.clear();
     const xa = X0 - 20, xb = X0 + NX * C + 20, za = Z0 - 20, zb = Z0 + NZ * C + 20;
     for (let k = 0; k < colliders.length; k++) {
       const c = colliders[k];
@@ -113,12 +135,35 @@ export function createNav(world, o) {
       if (c.x < xa || c.x > xb || c.z < za || c.z > zb) continue;
       if (!isBlocker(c)) continue;
       stamp(c);
+      if (KEEP) keep(c);
     }
     let free = 0; for (let i = 0; i < N; i++) if (!blocked[i]) free++;
     stats.free = free;
     label();
     fields.clear();                          // every field is stale now
-    built = true; stats.builds++; stats.buildMs = performance.now() - t0;
+    built = true; stats.builds++; stats.ver++; stats.buildMs = performance.now() - t0;
+  }
+  /**
+   * Colliders appended to the list since the build (indices from..to−1): stamp
+   * the ones inside the grid that stop a tiger, without clearing anything.
+   * Returns how many were stamped (0: nothing changed — no relabel, fields kept).
+   */
+  function add(colliders, from, to, isBlocker) {
+    if (!built) return 0;
+    const t0 = performance.now();
+    const xa = X0 - 2, xb = X0 + NX * C + 2, za = Z0 - 2, zb = Z0 + NZ * C + 2;
+    let n = 0;
+    for (let k = from; k < to; k++) {
+      const c = colliders[k];
+      if (!c || typeof c.x !== 'number' || typeof c.z !== 'number') continue;
+      const br = (c.box ? 0.5 * Math.hypot(c.w || 0, c.d || 0) : (c.r || 0)) + NAV_R;
+      if (c.x + br < xa || c.x - br > xb || c.z + br < za || c.z - br > zb) continue;
+      if (!isBlocker(c)) continue;
+      stamp(c); if (KEEP) keep(c); n++;
+    }
+    if (n) { label(); fields.clear(); stats.ver++; }
+    stats.adds++; stats.addMs = +(performance.now() - t0).toFixed(2);
+    return n;
   }
 
   /** Label the connected pieces of open ground (8-connected, no corner cutting, as the BFS walks). */
@@ -289,6 +334,25 @@ export function createNav(world, o) {
     return true;
   }
 
+  /**
+   * (o.keepBlockers) Does a body of radius r (≤ BK_PAD) fit all the way down
+   * the straight line (x0,z0)→(x1,z1), measured against the blockers
+   * themselves rather than the inflated grid? Sampled every 0.25 u.
+   */
+  function clearRun(x0, z0, x1, z1, r) {
+    if (!KEEP) return los(x0, z0, x1, z1);
+    const L = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.ceil(L / 0.25));
+    for (let k = 0; k <= n; k++) {
+      const t = k / n, x = x0 + (x1 - x0) * t, z = z0 + (z1 - z0) * t;
+      const i = cellOf(x, z);
+      if (i < 0 || !land[i]) return false;
+      const a = bkMap.get(bkKey(Math.floor(x / BK), Math.floor(z / BK)));
+      if (!a) continue;
+      for (let j = 0; j < a.length; j++) if (sd(a[j], x, z) < r) return false;
+    }
+    return true;
+  }
+
   /** How far (≤ maxL) the ray from (x,z) along (ux,uz) runs over open cells. */
   function ray(x, z, ux, uz, maxL) {
     const step = C * 0.45;
@@ -315,13 +379,24 @@ export function createNav(world, o) {
   }
 
   return {
-    build, field, los, clip, next, ray, cellOf, nearestOpen, forRing, stats,
+    build, add, field, los, clip, next, ray, cellOf, nearestOpen, forRing, clearRun, stats,
+    /** Signed distance from (x,z) to collider c's footprint (negative inside). */
+    sdist: sd,
+    /** The connected piece of open ground cell i belongs to (0 = shut). */
+    compOf: (i) => (i >= 0 && !blocked[i] ? comp[i] : 0),
     isOpen: (x, z) => open(cellOf(x, z)),
     /** Open AND on a real piece of street (not a pocket inside a planter ring)? */
     isMain: (x, z) => onMain(cellOf(x, z)),
     onMain,
     cellCentre(i, out) { out.x = cx(i); out.z = cz(i); return out; },
     reached: (f, x, z) => { const i = cellOf(x, z); return i >= 0 && f.d[i] !== UNREACHED; },
+    /** The walk from (x,z) to field f's source, in u (8-connected steps: a
+     *  slight under-estimate on the diagonals). Infinity if not connected. */
+    distAt(f, x, z) {
+      let i = cellOf(x, z);
+      if (i < 0 || blocked[i] || f.d[i] === UNREACHED) i = nearestOpen(x, z, 2, f.d);
+      return i < 0 ? Infinity : f.d[i] * C;
+    },
     get built() { return built; },
     /** Debug: the blocked mask (1 = shut), row-major NX × NZ. */
     mask: () => blocked,

@@ -584,6 +584,25 @@ export function arcCyl(B, key, rt, rb, h, seg, a0, a1, o = {}) {
   return g;
 }
 
+/** (see arcCyl above for the angle convention) */
+export function waffleArc(B, rt, rb, h, seg, a0, a1, o = {}) {
+  // A WAFFLE drum, or a wedge of one (a0..a1 world angles, as arcCyl) — so a
+  // wafer tower can have a doorway cut in it. The tile stays a constant world
+  // size and CONTINUES round the drum (u from the drum's own angle) and up it
+  // (`vOff` = how far above the drum's foot this piece starts), so a drum built
+  // in two pieces tiles as one. `capTop` keeps the top cap and drops the bottom.
+  const span = a1 - a0;
+  const n = Math.max(3, Math.round(seg * (span / (Math.PI * 2))));
+  const t0 = Math.PI / 2 - a1;
+  const g = new THREE.CylinderGeometry(rt, rb, h, n, 1, !o.capTop, t0, span);
+  if (o.capTop && g.groups.length > 2) { g.setIndex(Array.from(g.index.array.slice(0, g.groups[2].start))); g.clearGroups(); }
+  const uv = g.attributes.uv;
+  const sx = (2 * Math.PI * Math.max(rt, rb)) / WAFFLE_UNIT, sy = h / WAFFLE_UNIT, v0 = (o.vOff || 0) / WAFFLE_UNIT;
+  const u0 = (t0 / (Math.PI * 2)) * sx, su = (span / (Math.PI * 2)) * sx;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + uv.getX(i) * su, v0 + uv.getY(i) * sy);
+  return B.add('waffle', g, o);
+}
+
 /**
  * A SIGN WITH A BACK. The shared sign material is DoubleSide, because half the
  * boards in Candyland are read from both sides — which means a LONE quad shows
@@ -759,8 +778,15 @@ export function fenceLine(B, pts, groundY, o = {}) {
   }
 }
 
-/** A gumdrop-button door with icing frame. Faces +Z in local space of rotY. */
+/**
+ * A gumdrop-button door with icing frame. Faces +Z in local space of rotY.
+ * DECORATIVE: the icing frame is a slab behind the leaf, so this door never
+ * opens and never gets a collider gap. A door you can walk through is a
+ * `doorway()` (below); `leaf:false` is routed there so no enterable door can
+ * ever again be a white slab standing in its own opening.
+ */
 export function door(B, x, y, z, rotY, o = {}) {
+  if (o.leaf === false) return doorway(B, x, y, z, rotY, o);
   const w = o.w || 1.15, h = o.h || 2.0;
   const cs = Math.cos(rotY), sn = Math.sin(rotY);
   const at = (dz) => [x + sn * dz, 0, z + cs * dz];
@@ -776,6 +802,43 @@ export function door(B, x, y, z, rotY, o = {}) {
     for (const dy of [h * 0.28, h * 0.64]) B.box('icing', w * 0.66, 0.06, 0.06, { at: [p2[0], y + dy, p2[2]], rot: [0, rotY, 0], color: o.frame || C.icing });
   }
   return { x: p2[0], y: y + h * 0.5, z: p2[2] };
+}
+
+/**
+ * A WALK-THROUGH DOORWAY SURROUND (docs/BRIEF.md Contract O). The CLEAR opening
+ * is exactly `w` × `h`: the icing pilasters stand OUTSIDE it (inner faces at
+ * ±w/2) and the head sits ON it, so a wall gap cut with the same `w` — and the
+ * collider gap that goes with it — matches what you see to the centimetre.
+ * Nothing of the surround hangs into the opening (the old frame was a slab
+ * across it with a half-dome dipping into the top). The leaf is the shared
+ * instanced door in architecture.js, sized to the same w × h.
+ * Faces +Z of rotY; (x, z) = the OUTER wall face at the door's centre line,
+ * y = the foot of the jambs (the ground; the sill may sit higher).
+ *   o.jamb  pilaster width (0.26)      o.depth  front-to-back (0.24, 0.04 of it in the wall)
+ *   o.frame icing colour               o.knob   keystone gumdrop colour
+ *   o.head / o.arch / o.key / o.base  false drops the lintel, the icing eyebrow,
+ *   the keystone, the gumdrop plinths (a building with its own lintel keeps it)
+ */
+export function doorway(B, x, y, z, rotY, o = {}) {
+  const w = o.w ?? 1.6, h = o.h ?? 2.5, jw = o.jamb ?? 0.26, dp = o.depth ?? 0.24;
+  const cs = Math.cos(rotY), sn = Math.sin(rotY);
+  const P = (lx, ly, lz) => [x + lx * cs + lz * sn, y + ly, z - lx * sn + lz * cs];
+  const frame = o.frame ?? C.icing;
+  const fz = dp / 2 - 0.04;                        // 0.04 buried in the wall face
+  const R = { rot: [0, rotY, 0] };
+  for (const s of [-1, 1]) {
+    B.box('matte', jw, h, dp, { at: P(s * (w / 2 + jw / 2), h / 2, fz), ...R, color: frame });
+    // a plinth block at each foot, wider only OUTWARD (the inner face stays on ±w/2)
+    if (o.base !== false) B.box('matte', jw + 0.08, 0.34, dp + 0.08, { at: P(s * (w / 2 + (jw + 0.08) / 2), 0.17, fz + 0.02), ...R, color: o.baseColor ?? frame });
+  }
+  const top = o.head !== false ? h + 0.26 : h;
+  if (o.head !== false) B.box('matte', w + jw * 2 + 0.14, 0.26, dp + 0.06, { at: P(0, h + 0.13, fz + 0.01), ...R, color: frame });
+  // the icing EYEBROW: the top half of a flattened dome, sitting on the head
+  const Rb = w / 2 + jw, rise = Math.min(0.46, Rb * 0.42);
+  if (o.arch !== false) B.sph('icing', Rb, 14, 5, { at: P(0, top, fz), ...R, scale: [1, rise / Rb, 0.16 / Rb], thetaLen: Math.PI / 2, color: frame });
+  if (o.key !== false) B.sph('gloss', 0.19, 8, 6, { at: P(0, top + (o.arch !== false ? rise * 0.82 : 0.12), fz + 0.1), scale: [1, 0.86, 0.8], color: o.knob ?? C.pink });
+  const f = P(0, 0, dp + 0.02);
+  return { x: f[0], y: y + h * 0.5, z: f[2], top: y + top + (o.arch !== false ? rise : 0) + 0.2 };
 }
 
 /**

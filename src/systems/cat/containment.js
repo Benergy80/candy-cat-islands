@@ -251,6 +251,7 @@ export function create(ctx) {
   function onEscapeStart(e) {
     const route = e?.route || 'escape';
     if (e?.arrived === 'cat') return;                 // cave.js re-uses the event to come BACK
+    if (e?.to === 'cat') return;                      // WAVE 4: heading TO Cat Island (the rainbow, the blimp, the biplane) is no escape
     if (!S.arrived) return;                           // you have not even landed here yet
     const R = ROUTE(route);
     S.noticed++; S.lastRoute = route;
@@ -263,6 +264,18 @@ export function create(ctx) {
 
   /** You made it to Candyland. The cats are not upset. The cats are patient. */
   function onEscapeSuccess(e) {
+    // WAVE 4 (bridge builder): the two-way routes (the rainbow, the blimp, the
+    // biplane) also fire a success when they land you ON Cat Island. That is the
+    // way back, not an escape: the away/sawCandy watch below counts it as the
+    // return (onReturned), so it must not open a new trip here — r2 counted every
+    // rainbow crossing to Cat Island as an escape, lost the return, and set
+    // "Enjoy…" while he stood on Cat Island.
+    // r5: a ride's landing on Cat Island (the blimp's ladder foot, Wing Nut
+    // Field) also closes an open round trip, in case the watch below missed it
+    if (e?.to === 'cat') {
+      if (away.on && away.sawCandy && ctx.state.island === 'cat') onReturned();
+      return;
+    }
     const route = e?.route || 'escape';
     if (away.on && away.route === route) return;      // one success per trip
     S.escapeAttempts++; S.escapesMade++; S.lastRoute = route;
@@ -273,7 +286,8 @@ export function create(ctx) {
     // the route module usually pops its own "For now." card; give it a beat and
     // only fill in if it didn't (flag: escape_card_shown_<route>)
     cardCheck = { route, t: 0.9 };
-    ui()?.setObjective('Enjoy Candyland. The arrivals ferry runs every three hours.');
+    // (post-medal the objective is the real way out — the boarding pass, the flare — and stays)
+    if (!S.medal) ui()?.setObjective('Enjoy Candyland. The arrivals ferry runs every three hours.');
   }
 
   /**
@@ -311,6 +325,8 @@ export function create(ctx) {
     away = { on: false, route: null, sawCandy: false, t: 0 };
     S.returns++;
     story()?.set('escape_returns', S.returns);
+    // post-medal (WAVE 4): no more round-trip scoreboard — the goal is the real way out now
+    if (S.medal) { env.toast('Welcome back, Citizen. Your room is exactly as you left it.'); return; }
     env.toast('Welcome back! Your room is exactly as you left it.');
     ui()?.banner('YOU CAME BACK', `Round trip ${S.returns} of 3 — out by ${ROUTE(route).label}, and back again.`, 3.4);
     if (S.returns >= 3 && !S.medal) {
@@ -324,6 +340,12 @@ export function create(ctx) {
   }
 
   function giveMedal() {
+    // WAVE 4 (bridge builder): the rainbow's 25 s cinematic owns the screen —
+    // the Mayor waits politely until it has finished (pendingMedal stays set)
+    if (ctx.systems.escape?.routes?.bridge?.raising) return;
+    // …and never mid-ride: the card waits until he is back on his own feet
+    const pl = ctx.systems.player;
+    if (pl?.onVehicle || pl?.onFerry || ctx.state.vehicle || ctx.state.flying) return;
     S.medal = true; pendingMedal = false;
     story()?.set('honorary_citizen');
     cards?.show({
@@ -334,10 +356,19 @@ export function create(ctx) {
       sub: 'You are hereby a Citizen of Cat Island, First Class, Very Soft. Your suitcase has been unpacked for you.',
       buttons: [{
         label: 'Accept (you have no choice)', primary: true, onClick: () => {
-          ui()?.setObjective('Enjoy your life.');
+          // post-medal objective (WAVE 4): once the rainbow stands, the goal is the real way out
+          const joined = !!story()?.get('rainbow_bridge');
+          if (joined) ui()?.setObjective('The islands are joined. So are their problems.', 'The King’s half of the boarding pass is on the Candy Palace throne.');
+          else ui()?.setObjective('Enjoy your life.');
           ui()?.banner('CITIZEN', 'Honestly? The weather is lovely.', 3.6);
           const p = ctx.systems.player?.position;
           if (p) env.particles?.burst({ x: p.x, y: p.y + 2.2, z: p.z, count: 150, color: [0xffd86b, 0xff7aa2, 0x7fe3a8, 0x6fc7ff, 0xffffff], speed: 9, life: 2.8, size: 0.32, gravity: -3, spread: 4 });
+          // WAVE 4 — the boarding-pass hand-off (half of one; the King has the other)
+          story()?.set('pass_cat', true);
+          ui()?.say('Oh — and citizens receive HALF a MEOW AIR boarding pass. Seat 1A. Window. It is purely ceremonial.', { speaker: 'The Mayor' });
+          ui()?.say('The other half is on the throne of the Candy Palace. The King and I are not on speaking terms. He is mostly a puddle.', { speaker: 'The Mayor' });
+          ui()?.say('Please do not put the halves together. We would be SO sad. We would have to be sad AT you.', { speaker: 'The Mayor' });
+          ui()?.toast('Got: the Mayor’s half of a boarding pass');
         },
       }],
     });
@@ -610,6 +641,10 @@ export function create(ctx) {
     if (raftA.riding || raftB.riding || lifeguard.busy) return;
     if (ctx.state.island !== 'cat') return;
     if (exempt(p.x, p.z)) return;
+    // WAVE 4 (bridge builder): up on the rainbow, or stepping onto its foot at the
+    // pier head, the kitties cannot reach him (and must not bar the way onto it)
+    const rb = ctx.systems.escape?.routes?.bridge;
+    if (rb?.up && (rb.onDeck || Math.hypot(p.x - rb.ends.cat.x, p.z - rb.ends.cat.z) < 6)) return;
 
     const h = world.height(p.x, p.z);
     // (b) waded out past −0.3 → the lifeguard is on you in seconds.
@@ -729,7 +764,11 @@ export function create(ctx) {
       away.t += dt;
       if (ctx.state.island === 'candy') away.sawCandy = true;
       else if (away.sawCandy && away.t > 1.5 && ctx.state.island === 'cat'
-               && !ctx.systems.player?.onFerry && !ctx.state.ferry) onReturned();
+               && !ctx.systems.player?.onFerry && !ctx.state.ferry
+               // WAVE 4 r5 (bridge builder): not while he is still aboard the
+               // blimp or the biplane over Cat Island; the return (and the
+               // Mayor, and the rainbow) wait until he steps off
+               && !ctx.systems.player?.onVehicle && !ctx.state.vehicle) onReturned();
     }
 
     // actors

@@ -20,7 +20,9 @@
 //       because particles/ambient.js and inventory/places.js read it as a map.
 //       api.marks is the plain { id: {x,y,z} } map if you want only that.
 //   api.interiors = [{ id, name, x, z, w, d, rot, inside }]   enterable rooms
-//   api.doors     = [{ id, house, x, z, y, facing, open }]    swinging doors
+//   api.doors     = [{ id, house, x, z, y, w, h, facing, open }]   swinging doors
+//       (w × h = the leaf = the clear opening; ≥ 1.4 × 2.3 — Contract O. A door
+//       opens as the visitor comes within 2.5 u of it and shuts behind him.)
 //   api.enter(id) / api.exit()                teleport into / out of a room (debug + NPCs)
 //   events 'interior:enter' {id,name} · 'interior:exit' {id}
 //   ctx.walkables.push({ test(x,z) })         generic walkable-surface hook
@@ -361,15 +363,16 @@ export function create(ctx) {
             id: spec.id + '_door', house: spec.id, name: rec.name,
             x: o.x, y: o.y, z: o.z, rot: o.rot, w: o.w || 1.2, h: o.h || 2.2,
             facing: o.rot, color: o.color ?? C.chocMilk, swing: o.swing ?? 1,
-            open: 0, target: 0, entry: null,
+            open: 0, target: 0, entry: null, manual: null,
           };
           doorList.push(dr);
           rec.door = dr;
           interactables.push({
             id: dr.id, x: o.x + Math.sin(o.rot) * 1.1, z: o.z + Math.cos(o.rot) * 1.1, r: o.r || 2.3,
-            label: 'Open door',
+            label: 'Open door', _door: dr,
             onInteract(c, self) {
               dr.target = dr.target > 0.5 ? 0 : 1;
+              dr.manual = dr.target;                 // E wins over the auto-open until you walk away
               self.label = dr.target > 0.5 ? 'Close door' : 'Open door';
               c.systems.ui?.prompt(self.label, self);
               c.systems.particles?.burst?.({ x: dr.x, y: dr.y + 0.9, z: dr.z, count: 6, color: [0xfff3df, 0xffd6e8], speed: 1.1, life: 0.5, size: 0.13, gravity: -3, spread: 0.7 });
@@ -531,7 +534,9 @@ export function create(ctx) {
   ctx.events.on('world:ready', () => {
     try {
       const I = ctx.systems.interaction;
-      if (I?.register) for (const s of interactables) { try { I.register(s); } catch (e) { /* ignore */ } }
+      if (I?.register) for (const s of interactables) {
+        try { const e = I.register(s); if (s._door) s._door.entry = e; } catch (e) { /* ignore */ }
+      }
       const P = ctx.systems.particles;
       if (typeof P?.emitter === 'function') {
         // the fountain: sparkle off the jets, a lazy plume of sugar-steam above
@@ -736,6 +741,28 @@ export function create(ctx) {
     if (r.inG) r.inG.visible = k > 0.01;
   }
 
+  /**
+   * THE DOOR OPENS AS YOU COME TO IT (Contract O) — within DOOR_NEAR of the
+   * leaf on either side, or anywhere in the room — and shuts behind you when
+   * you walk off. It used to wait until you were already halfway through the
+   * wall, so the visitor walked through a shut leaf. E still works: it
+   * overrides the auto-open until you leave the doorstep.
+   */
+  const DOOR_NEAR2 = 2.5 * 2.5;
+  function doorAuto(d, p, inside) {
+    const dx = p.x - d.x, dz = p.z - d.z;
+    const near = inside || (dx * dx + dz * dz < DOOR_NEAR2 && Math.abs(p.y - d.y) < 3);
+    if (d.manual !== null) { if (near) return; d.manual = null; }
+    const t = near ? 1 : 0;
+    if (t === d.target) return;
+    d.target = t;
+    const e = d.entry;
+    if (e) {
+      e.label = t ? 'Close door' : 'Open door';
+      if (ctx.systems.interaction?.nearest?.() === e) ctx.systems.ui?.prompt(e.label, e);
+    }
+  }
+
   function updateRooms(dt, ctx, night) {
     const p = ctx.systems.player?.position;
     let active = null;
@@ -746,10 +773,10 @@ export function create(ctx) {
         if (r.inside && Math.abs(p.y - r.floorY) > 9 && !r.tall) r.inside = false;
         if (r.inside !== was) {
           ctx.events.emit(r.inside ? 'interior:enter' : 'interior:exit', { id: r.id, name: r.name, x: r.x, z: r.z });
-          if (r.door) r.door.target = r.inside ? 1 : 0;           // never walk through a shut door; it closes behind you
           if (r.inside && !r.seen) { r.seen = true; ctx.systems.ui?.toast?.('Inside ' + r.name, 2.6); }
         }
       }
+      if (r.door && p) doorAuto(r.door, p, r.inside);
       const k = damp(r.k, r.inside ? 1 : 0, 9, dt);
       if (Math.abs(k - r.k) > 0.001 || (k > 0.5) !== (r.k > 0.5)) applyRoom(r, k);
       // an OPEN door with the room hidden behind it is a hole through the house:
@@ -795,6 +822,7 @@ export function create(ctx) {
   }));
   const publicDoors = doorList.map((d) => ({
     id: d.id, house: d.house, name: d.name, x: d.x, y: d.y, z: d.z,
+    w: d.w, h: d.h,                                  // the leaf = the clear opening (Contract O)
     facing: d.rot, get open() { return d.open; },
     // where a Sour Patch Kid should stand to step through it
     ax: d.x + Math.sin(d.rot) * 1.1, az: d.z + Math.cos(d.rot) * 1.1,

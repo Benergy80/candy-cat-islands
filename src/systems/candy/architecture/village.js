@@ -2,13 +2,16 @@
 // Twelve gingerbread houses around an open plaza (kept clear for the Sour Patch
 // Kids), a sugar fountain that actually runs, a licorice bandstand, a market
 // row, signposts, fences, lampposts and wrapper bunting.
-import { C, SPRINKLE, lamppost, bench, signpost, fenceLine, door, windowPane, icingDrip, caneRun, plaque } from './kit.js';
+import { C, SPRINKLE, lamppost, bench, signpost, fenceLine, door, doorway, windowPane, icingDrip, caneRun, plaque } from './kit.js';
 import { HOUSE_NAMES } from './signs.js';
 import * as IN from './interiors.js';
 
 const CX = -140, CZ = 44;          // plaza centre (the road junction is at -140,40)
 const WALL_T = 0.42;               // wall thickness of an enterable house
 const DOOR_GAP = 1.6;              // clear opening left between the front wall segments
+// Contract O: the clear height of that opening above the FLOOR (the lintel,
+// the leaf and the icing surround all key off it). 2.5 ≥ the 2.3 minimum.
+const DOOR_H = 2.5;
 
 const WALLS = [0xc07b42, 0xefd9c2, 0xcf8b4e, 0xb06a38, 0xf7c6da, 0xd39a60, 0xa96234, 0xc6e8dc, 0xc07b42, 0xe8cfa0, 0xb87a46, 0xead0e8];
 const TRIMS = [C.icing, C.icingPink, C.icingMint, C.icingLemon];
@@ -36,10 +39,53 @@ export function buildVillage(A) {
   const r = A.rng('village');
   A.mark('gumdrop_village', CX, world.height(CX, CZ), CZ);
 
+  // ── keep every home's doorway and front walk clear (Contract O) ─────────
+  // The houses stand close enough that a neighbour's front garden reached into
+  // a home's front room (house 11's picket run and gumdrop shrub stood a metre
+  // inside house 2's door) and the plaza's west approach fence ran straight
+  // through house 0's front room, so the door you could now walk through led
+  // into a fence. `blocked` = inside any OTHER house's footprint, or on any
+  // home's front walk (1.25 either side of the door's centre line, 6 u out).
+  const FOOT = HOUSES.map((hs) => {
+    const rot = Math.atan2(CX - hs.x, CZ - hs.z);
+    return { x: hs.x, z: hs.z, w: hs.w, d: hs.d, cs: Math.cos(rot), sn: Math.sin(rot), home: !!hs.home };
+  });
+  const blocked = (px, pz, self = -1) => {
+    for (let k = 0; k < FOOT.length; k++) {
+      const f = FOOT[k], dx = px - f.x, dz = pz - f.z;
+      const lx = dx * f.cs - dz * f.sn, lz = dx * f.sn + dz * f.cs;
+      if (k !== self && Math.abs(lx) <= f.w / 2 + 0.35 && Math.abs(lz) <= f.d / 2 + 0.35) return true;
+      if (f.home && Math.abs(lx) <= 1.25 && lz > f.d / 2 - 0.1 && lz < f.d / 2 + 6.0) return true;
+    }
+    return false;
+  };
+  const segClear = (a, b, self = -1) => {
+    const n = Math.max(2, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.3));
+    for (let k = 0; k <= n; k++) if (blocked(a[0] + (b[0] - a[0]) * (k / n), a[1] + (b[1] - a[1]) * (k / n), self)) return false;
+    return true;
+  };
+  /** freeSpot, then off every doorway and front walk too. */
+  const spotClear = (x, z, clear) => {
+    const p = A.freeSpot(x, z, clear);
+    if (!blocked(p.x, p.z)) return p;
+    for (const rad of [1.6, 2.4, 3.2, 4.0]) for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2 + 0.3;
+      const q = A.freeSpot(x + Math.cos(a) * rad, z + Math.sin(a) * rad, clear);
+      if (!blocked(q.x, q.z) && !world.onPath(q.x, q.z, 0.6)) return q;
+    }
+    return p;
+  };
+
+  // the fountain's basin (r 4.62; built after the houses, so not yet in
+  // ctx.colliders): houses 0 and 2 face it across a 3-u strip, and a full-depth
+  // garden put their gates INSIDE its collider — the plot was sealed and the
+  // door behind it unreachable from the plaza
+  const KEEP_OUT = [{ x: -141, z: 47, r: 4.62 }];
+
   const eaves = [];
   HOUSES.forEach((hs, i) => {
     const rot = Math.atan2(CX - hs.x, CZ - hs.z);
-    const e = buildHouse(A, { ...hs, rot, i, r });
+    const e = buildHouse(A, { ...hs, rot, i, r, blocked, segClear, keepOut: KEEP_OUT });
     eaves.push(e);
   });
 
@@ -78,7 +124,7 @@ export function buildVillage(A) {
   // ── plaza furniture (kept out of the middle) ──────────────────────────────
   // benches are SOLID now, so none of them may sit on a front path
   for (const [bx, bz, br] of [[-142.6, 50.6, -0.9], [-137.2, 49.6, 2.4], [-143.5, 39.5, 0.5]]) {
-    const p = A.freeSpot(bx, bz, 1.6);
+    const p = spotClear(bx, bz, 1.6);
     bench(B, p.x, world.height(p.x, p.z), p.z, br, { A });
   }
 
@@ -91,7 +137,7 @@ export function buildVillage(A) {
   const lampSpots = [[-145.5, 43.5], [-136.5, 47.5], [-141.8, 52.4], [-133.0, 41.0], [-150.5, 38.5], [-127.5, 45.5], [-155.0, 45.5], [-142.5, 33.0]];
   const heads = [];
   lampSpots.forEach(([lx, lz], i) => {
-    const p = A.freeSpot(lx, lz, 2.3);
+    const p = spotClear(lx, lz, 2.3);
     heads.push(lamppost(B, p.x, world.height(p.x, p.z), p.z, { h: 4.0, variant: i % 2 ? 1 : 0 }));
     A.collide(p.x, p.z, 0.8);
   });
@@ -110,7 +156,7 @@ export function buildVillage(A) {
     const a = (i / 16) * Math.PI * 2 + r.range(-0.2, 0.2);
     const rad = r.range(20, 30);
     const x = CX + Math.cos(a) * rad, z = CZ + Math.sin(a) * rad * 0.85;
-    if (!world.isFreeGround(x, z, { pathMargin: 1.6, avoidLandmarks: false })) continue;
+    if (!world.isFreeGround(x, z, { pathMargin: 1.6, avoidLandmarks: false }) || blocked(x, z)) continue;
     const y = world.height(x, z);
     B.stripeCyl(0.11, 0.13, 2.5, { at: [x, y + 1.25, z], variant: i % 3, seg: 7 });
     B.sph('gloss', 0.15, 6, 5, { at: [x, y + 2.52, z], color: C.licorice });
@@ -119,9 +165,11 @@ export function buildVillage(A) {
   }
 
   // ── licorice fence lines along the plaza approach ─────────────────────────
+  // (a run that would cross a house or a home's front walk is left out)
   const gy = (x, z) => world.height(x, z);
-  fenceLine(B, [[-133.5, 47.5], [-131.0, 44.5], [-130.0, 40.5]], gy, { tipColor: C.pink, A });
-  fenceLine(B, [[-148.5, 50.5], [-150.5, 47.0], [-150.0, 43.0]], gy, { tipColor: C.green, A });
+  for (const [run, tip] of [[[[-133.5, 47.5], [-131.0, 44.5], [-130.0, 40.5]], C.pink], [[[-148.5, 50.5], [-150.5, 47.0], [-150.0, 43.0]], C.green]]) {
+    for (let k = 0; k < run.length - 1; k++) if (segClear(run[k], run[k + 1])) fenceLine(B, [run[k], run[k + 1]], gy, { tipColor: tip, A });
+  }
 
   return { sparkle: fountain.sparkle, steam: fountain.steam, splash: fountain.splash };
 }
@@ -166,7 +214,7 @@ function buildHouse(A, s) {
       W.box('matte', WALL_T, h, d - WALL_T * 2, { at: F.p(sx * (w / 2 - WALL_T / 2), 0.28 + h / 2, 0), rot: [0, rot, 0], color: wall });
     }
     // lintel over the doorway
-    W.box('matte', DOOR_GAP + 0.1, h - 2.5, WALL_T, { at: F.p(0, 0.28 + 2.5 + (h - 2.5) / 2, d / 2 - WALL_T / 2), rot: [0, rot, 0], color: wall });
+    W.box('matte', DOOR_GAP + 0.1, h - DOOR_H, WALL_T, { at: F.p(0, 0.28 + DOOR_H + (h - DOOR_H) / 2, d / 2 - WALL_T / 2), rot: [0, rot, 0], color: wall });
     // ── wall colliders: four runs, doorway left open ────────────────────────
     const P = (lx, lz) => F.p(lx, 0, lz);
     const bk = P(0, -d / 2 + WALL_T / 2); A.collideBox(bk[0], bk[2], w, WALL_T, rot, floorY + h);
@@ -215,26 +263,50 @@ function buildHouse(A, s) {
   A.chimney(chx[0], chx[1] + 1.6, chx[2]);
 
   // door + porch
+  // An ENTERABLE house gets a real doorway (Contract O): the clear opening is
+  // the wall gap itself, DOOR_GAP × DOOR_H above the floor, the icing surround
+  // stands outside it and the leaf fills it exactly — so what you see, the
+  // collider gap and the leaf are one rectangle. The porch is lifted to clear
+  // the taller surround, and the nameplate stands ON the canopy instead of
+  // hanging across the top of the door. Decorative houses keep their small
+  // shut door (it never opens, and it has no gap).
   const dz = d / 2;
-  const dw = E ? 1.3 : 1.15, dh = E ? 2.3 : 2.1;
-  const dp = door(B, ...xz(F.p(0, 0, dz)), rot, { w: dw, h: dh, y: 0, frame: trim, color: C.chocMilk, knob: SPRINKLE[i % SPRINKLE.length], leaf: !E });
+  const dw = E ? DOOR_GAP : 1.15, dh = E ? 0.28 + DOOR_H : 2.1;
+  const knob = SPRINKLE[i % SPRINKLE.length];
+  const dp = E
+    ? doorway(B, ...xz(F.p(0, 0, dz)), rot, { w: DOOR_GAP, h: dh, frame: trim, knob, baseColor: C.icing })
+    : door(B, ...xz(F.p(0, 0, dz)), rot, { w: dw, h: dh, y: 0, frame: trim, color: C.chocMilk, knob });
   if (E) {
     const hp = F.p(0, 0, dz - WALL_T * 0.5);
     E.door({
-      x: hp[0], y: floorY - 0.02, z: hp[2], rot, w: dw, h: dh, color: C.chocMilk, swing: 1, r: 2.4,
+      x: hp[0], y: floorY - 0.02, z: hp[2], rot, w: DOOR_GAP, h: DOOR_H + 0.02, color: C.chocMilk, swing: 1, r: 2.4,
       say: s.home,
     });
   }
+  // porch canopy height (centre, above ground): an enterable house's canopy
+  // clears the door's icing eyebrow AND its keystone with the drips hanging
+  const PH = E ? 4.0 : 2.6;
+  const PW = E ? 3.7 : 3.1;
   for (const sx of [-1, 1]) {
     const pp = F.p(sx * (dw / 2 + 0.68), 0, dz + 1.0);
-    B.stripeCyl(0.15, 0.17, 2.5, { at: [pp[0], y + 1.25, pp[2]], variant: (i + 1) % 3, seg: 8 });
+    B.stripeCyl(0.15, 0.17, PH - 0.1, { at: [pp[0], y + (PH - 0.1) / 2, pp[2]], variant: (i + 1) % 3, seg: 8 });
     A.collide(pp[0], pp[2], 0.3);
   }
-  R.waffleBox(3.1, 0.18, 1.35, { at: F.p(0, 2.6, dz + 0.65), rot: [0, rot, 0], color: roof });
-  icingDrip(R, ...xz(F.p(0, 2.52, dz + 1.3)), rot, 3.1, { color: trim, r: 0.17, drop: 0.26, step: 0.5 });
+  R.waffleBox(PW, 0.18, 1.35, { at: F.p(0, PH, dz + 0.65), rot: [0, rot, 0], color: roof });
+  icingDrip(R, ...xz(F.p(0, PH - 0.08, dz + 1.3)), rot, PW, { color: trim, r: 0.17, drop: 0.26, step: 0.5 });
   // step
-  B.box('matte', 1.7, 0.18, 0.7, { at: F.p(0, 0.18, dz + 0.5), rot: [0, rot, 0], color: C.icing });
-  if (E) B.box('matte', DOOR_GAP, 0.3, 0.5, { at: F.p(0, 0.14, dz - 0.1), rot: [0, rot, 0], color: C.icing });  // threshold
+  B.box('matte', E ? 2.2 : 1.7, 0.18, 0.7, { at: F.p(0, 0.18, dz + 0.5), rot: [0, rot, 0], color: C.icing });
+  if (E) {
+    // threshold: the sill fills the wall gap and runs under both jambs, level
+    // with the floor, and it is WALKABLE (Contract A) — a deck across the wall
+    // thickness at floor height and one on the step, so the visitor walks
+    // ground → step → sill → floor without a lip or a gap between decks
+    B.box('matte', DOOR_GAP + 0.6, 0.3, WALL_T + 0.28, { at: F.p(0, 0.14, dz - WALL_T / 2 + 0.1), rot: [0, rot, 0], color: C.icing });
+    const th = F.p(0, 0, dz - WALL_T / 2 + 0.06);
+    A.deckRRect(th[0], th[2], DOOR_GAP + 0.1, WALL_T + 0.22, rot, floorY);
+    const st = F.p(0, 0, dz + 0.5);
+    A.deckRRect(st[0], st[2], 2.2, 0.7, rot, y + 0.27);
+  }
 
   // Windows: two on the front, one per side, one in each gable.
   // EXACTLY ONE pane per house is left unlit — a village where every window
@@ -262,7 +334,16 @@ function buildHouse(A, s) {
   // "the 'Dip & Ducks' stall sign sits under the clock HUD" — it was a house
   // called Pip & Pucker, with a porch roof through the middle of it). Out here
   // it hangs clear, faces the plaza, and sits half a unit lower in frame.
-  {
+  if (E) {
+    // an enterable house's porch is a unit taller (its door is), so the
+    // nameplate STANDS on the canopy's front edge like a shop fascia: it reads
+    // over the porch from the iso camera and never hangs across the doorway
+    const ny = y + PH + 0.09 + 0.4;
+    const np = F.p(0, 0, dz + 1.18);
+    for (const sx of [-1, 1]) B.box('matte', 0.12, 0.2, 0.14, { at: F.p(sx * 0.6, PH + 0.18, dz + 1.18), rot: [0, rot, 0], color: C.licorice });
+    B.box('matte', 1.52, 0.7, 0.1, { at: [np[0], ny + 0.06, np[2]], rot: [0, rot, 0], color: C.licorice });
+    B.signQuad('name' + (i % HOUSE_NAMES.length), 1.4, 0.64, { at: F.p(0, PH + 0.55, dz + 1.24), rot: [0, rot, 0] });
+  } else {
     const np = F.p(0, 0, dz + 1.30);
     const ny = y + 2.16;
     for (const sx of [-1, 1]) {
@@ -273,7 +354,7 @@ function buildHouse(A, s) {
     B.signQuad('name' + (i % HOUSE_NAMES.length), 1.4, 0.64, { at: F.p(0, 2.16, dz + 1.36), rot: [0, rot, 0] });
   }
 
-  frontGarden(A, F, { x, z, w, d, rot, i, r, dz, trim });
+  frontGarden(A, F, { x, z, w, d, rot, i, r, dz, trim, home: !!s.home, blocked: s.blocked, segClear: s.segClear, keepOut: s.keepOut });
 
   if (E) {
     houseInterior(A, E, IN.frameAt(x, floorY, z, rot), iw, id, h, i, name);
@@ -306,15 +387,25 @@ function frontGarden(A, F, s) {
   const { x, z, w, d, rot, i, r, dz, trim } = s;
   const gy = (px, pz) => world.height(px, pz);
   const GATE = 1.5, DEEP = 3.4;                   // half-width of the gate, depth of the plot
-  const onRoad = (p) => world.onPath(p[0], p[2], 1.2);
+  // on a road — or in another house / on a home's front walk (Contract O)
+  const onRoad = (p) => world.onPath(p[0], p[2], 1.2) || (s.blocked ? s.blocked(p[0], p[2], i) : false);
+  const runOK = (a, b) => !onRoad(a) && !onRoad(b) && (!s.segClear || s.segClear([a[0], a[2]], [b[0], b[2]], i));
 
-  // the picket boundary: two side runs and two front runs with a gate between
-  const corner = (sx) => F.p(sx * (w / 2 + 0.9), 0, dz + DEEP);
+  // the picket boundary: two side runs and two front runs with a gate between.
+  // A plot whose gate would open into the fountain's basin is left OPEN at the
+  // front (side runs only, stopped short of the basin): a sealed garden makes
+  // the door behind it unreachable.
+  const KO = s.keepOut || [];
+  const koClear = (p, m) => KO.every((k) => Math.hypot(p[0] - k.x, p[2] - k.z) >= k.r + m);
+  const openFront = !koClear(F.p(0, 0, dz + DEEP), 1.7) || !koClear(F.p(-(w / 2 + 0.9) / 2 - 0.75, 0, dz + DEEP), 0.8) || !koClear(F.p((w / 2 + 0.9) / 2 + 0.75, 0, dz + DEEP), 0.8);
   for (const sx of [-1, 1]) {
-    const a = F.p(sx * (w / 2 + 0.9), 0, dz - 0.1), b = corner(sx);
-    if (!onRoad(a) && !onRoad(b)) fenceLine(B, [[a[0], a[2]], [b[0], b[2]]], gy, { h: 0.82, gap: 0.92, tipColor: SPRINKLE[(i + (sx > 0 ? 0 : 2)) % SPRINKLE.length], A });
+    let deep = DEEP;
+    while (deep > 1.2 && !koClear(F.p(sx * (w / 2 + 0.9), 0, dz + deep), 0.8)) deep -= 0.2;
+    const a = F.p(sx * (w / 2 + 0.9), 0, dz - 0.1), b = F.p(sx * (w / 2 + 0.9), 0, dz + deep);
+    if (runOK(a, b)) fenceLine(B, [[a[0], a[2]], [b[0], b[2]]], gy, { h: 0.82, gap: 0.92, tipColor: SPRINKLE[(i + (sx > 0 ? 0 : 2)) % SPRINKLE.length], A });
+    if (openFront) continue;
     const c = F.p(sx * GATE, 0, dz + DEEP);
-    if (!onRoad(b) && !onRoad(c)) fenceLine(B, [[b[0], b[2]], [c[0], c[2]]], gy, { h: 0.82, gap: 0.92, tipColor: SPRINKLE[(i + 1) % SPRINKLE.length], A });
+    if (runOK(b, c)) fenceLine(B, [[b[0], b[2]], [c[0], c[2]]], gy, { h: 0.82, gap: 0.92, tipColor: SPRINKLE[(i + 1) % SPRINKLE.length], A });
     // gatepost with a gumdrop finial
     if (!onRoad(c)) {
       B.box('licorice', 0.2, 1.15, 0.2, { at: [c[0], gy(c[0], c[2]) + 0.58, c[2]], rot: [0, rot, 0], color: C.licorice });
@@ -324,7 +415,7 @@ function frontGarden(A, F, s) {
   // stepping stones out of the gate
   for (let k = 0; k < 4; k++) {
     const p = F.p(0, 0, dz + 1.0 + k * 0.85);
-    if (onRoad(p)) continue;
+    if (world.onPath(p[0], p[2], 1.2) || (s.blocked && s.blocked(p[0], p[2], i) && !s.home) || !koClear(p, 0.5)) continue;
     B.waffleCyl(0.44, 0.44, 0.1, 7, { at: [p[0], gy(p[0], p[2]) + 0.06, p[2]], rot: [0, rot + k * 0.4, 0], color: k % 2 ? C.waferPale : C.wafer });
   }
   // gumdrop shrubs — three, different sizes, clustered not scattered
@@ -334,6 +425,7 @@ function frontGarden(A, F, s) {
     if (onRoad(p)) return;
     const sp = A.freeSpot(p[0], p[2], 0.9);
     const gh = gh0 * r.range(0.85, 1.15);
+    if ((s.blocked && s.blocked(sp.x, sp.z, i)) || !koClear([sp.x, 0, sp.z], gh + 0.9)) return;
     B.sph('gloss', gh, 7, 5, { at: [sp.x, gy(sp.x, sp.z) + gh * 0.72, sp.z], scale: [1, 0.86, 1], color: SPRINKLE[(i + k + 1) % SPRINKLE.length] });
     B.ico('icing', gh * 0.5, 0, { at: [sp.x, gy(sp.x, sp.z) + gh * 1.12, sp.z], scale: [1, 0.42, 1], color: trim });
     A.collide(sp.x, sp.z, gh * 0.8);
@@ -351,7 +443,7 @@ function frontGarden(A, F, s) {
     const bp = F.p(-(w / 2 - 0.2), 0, dz + 2.5);
     if (!onRoad(bp)) {
       const sp = A.freeSpot(bp[0], bp[2], 1.5);
-      bench(B, sp.x, gy(sp.x, sp.z), sp.z, rot + Math.PI, { w: 1.8, A });
+      if (!(s.blocked && s.blocked(sp.x, sp.z, i)) && koClear([sp.x, 0, sp.z], 1.9)) bench(B, sp.x, gy(sp.x, sp.z), sp.z, rot + Math.PI, { w: 1.8, A });
     }
   } else {
     // a milk bottle on the step, and a very small pair of boots beside it

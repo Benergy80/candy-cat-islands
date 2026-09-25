@@ -405,8 +405,8 @@ export function createHits(ctx, D) {
         dissolvedTotal++;
         ctx.events.emit('sourpatch:dissolved', { i: k.i, name: k.name, x: k.x, z: k.z, weapon, cause: h.cause });
         ctx.systems.ui?.toast(wet
-          ? 'Sour Patch Kid melted. It\'ll be back. They always come back.'
-          : 'Sour Patch Kid dissolved. It\'ll be back. They always come back.', 4.5);
+          ? `${V.GANG_ONE || 'Sourling'} melted. It'll be back. They always come back.`
+          : `${V.GANG_ONE || 'Sourling'} dissolved. It'll be back. They always come back.`, 4.5);
         // the neighbours scatter
         for (const o2 of kids) {
           if (o2 === k || o2.hurt || D.dist2d(o2.x, o2.z, k.x, k.z) > 7) continue;
@@ -610,7 +610,8 @@ export function createHits(ctx, D) {
   function brain(k, dt, t, p, dp) {
     if (k.bounceCd > 0) k.bounceCd -= dt;
     // a kid that has given up walks home the moment nothing else is happening
-    if (!k.hurt && k.gaveUp && D.phase() === 'hunting') enter(k, 'gohome', 30);
+    // (a raider on Cat Island goes home over the rainbow instead: raid.js goHome)
+    if (!k.hurt && k.gaveUp && D.phase() === 'hunting' && !(k.raid && D.raidHome?.(k))) enter(k, 'gohome', 30);
     // water balloon: fun-size for SHRINK_SEC, whatever else is going on
     if (k.shrinkT > 0) {
       k.shrinkT -= dt;

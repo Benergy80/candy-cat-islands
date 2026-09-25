@@ -22,14 +22,17 @@
 //   bounces. The sea sends you home damp. Low over a town she bumps over
 //   walls and trunks instead of passing through them (colliders + their tops),
 //   and when parked she folds her wings and becomes a solid collider.
-//   Leave her lying about for 60 s and Wingnut tows her back to the field.
+//   Leave her more than 120 u from you for 60 s and Wingnut tows her back to
+//   the field (wave 4: close by, she waits for you; she is the ride home).
 //
 //   route API (ctx.systems.escape.routes.flyer): start() · stop() · active ·
 //   phase ('run'|'air'|'roll'|'sink'|null) · state (the flight state) ·
-//   thermals · spot · debugFly(x, z, y, yaw, hold) · debugRelease() ·
-//   debugPark(x, z, yaw). Exported: FLIGHT (tuning), stepFlight(), bite(),
-//   THERMAL_SITES. Map markers: 'flyer' (glyph plane) always, 'thermal_<id>'
-//   while airborne.
+//   thermals · spot · home {x, z, y, yaw, deck} · contacts {bonk, hard} ·
+//   parked {t, away, dist} · corridor(opts) · debugCorridorShow(on) ·
+//   debugFly(x, z, y, yaw, hold) · debugRelease() · debugPark(x, z, yaw).
+//   Exported: FLIGHT (tuning), RUNWAY, stepFlight(), climbProfile(), bite(),
+//   THERMAL_SITES. Events: 'flyer:contact' {kind:'bonk'|'hard', x, y, z}.
+//   Map markers: 'flyer' (glyph plane) always, 'thermal_<id>' while airborne.
 //
 //   ctx.state.flying = { alt, y, speed, vy, energy, heading, thermal, boost }
 //   while airborne, null otherwise (the camera frames flight from it, the map
@@ -56,16 +59,54 @@
 // fallback chase camera looking down more steeply the higher she flies, and
 // ground chatter dropped while she is more than 20 u up.
 //
+// WAVE 4 — Contract L, THE RUNWAY POINTS AT CANDYLAND. The take-off corridor
+// (a 90 u × 26 u box along the runway whose floor climbs at her REAL climb
+// rate: stepFlight with W held and a flap every 0.35 s) was measured against
+// every collider and world.height for every bearing within ±30° of the true
+// bearing to Sugar Pier (-50, 26), and for pads slid up to 12 u around Wing Nut
+// Field. From the old pad (210.4, 10.1) no bearing was clear without help: a
+// Whisker Heights house (190, 20, roof 15.7) sat 7–12 u off the centreline at
+// 8–15 u out, where she is still on the grass, and Purrliament's teal tower
+// (168.5, -0.5, 35 u) stood dead ahead of anything between -10° and -20°.
+// Starting the roll 4 u further back (east) lifts her 7 u clear over the
+// house, so the runway now points EXACTLY at Sugar Pier (0°) and threads the
+// gap between the house and the tower: no fixed collider comes within 3 u of
+// the climb line anywhere in the box, and nothing tall enough to matter lies
+// within 16 u of the centreline. The field is re-laid for it: the workshop,
+// sign and windsock sit behind the start, the bunting and the marker cones
+// line the box edges (±13.9 u), the plank runway is a walkable deck, a
+// "TAKE-OFF" arrow is painted on it (luminous after dark, with runway lamps),
+// and the clearance claim is the corridor itself (26 u wide, from 10 u behind
+// the start to 36 u out; beyond that she is 40+ u up). route.corridor()
+// re-runs the measurement live; route.debugCorridorShow(true) draws it.
+// Wingnut now tows her home only when she has been left more than 120 u from
+// the visitor for 60 s, so a machine parked on Candyland is the ride back.
+// Both directions fire the shared escape events (see finishLanding).
+//
+// WAVE 4 polish ("a fun game with a scary side"): the plank runway is twice
+// as long (level to 13 u, then down the field's dip to 28.6 u) with a candy-
+// stripe centreline, piano-key thresholds and the lettering moved past the
+// wingtips; a three-cat ground crew with flags and glowing wands; tall grass
+// and wildflowers down both edges (the claim had mown the strip bare); runway
+// lamps that throw warm pools of light after dark with a chase running toward
+// the far end; and at night, from the field only, THE WATCHER: a cat's head
+// the size of a house that rises over Main Street's roofs at the end of the
+// runway and looks at you with amber eyes, and sinks away when you take off
+// or walk toward it. Gliding, the wings now hold out nearly flat.
+//
 // Draw calls: frame · crank · wing×2 · prop · airflow (ribbons + streaks, in
-//   flight only) · field · sock · helmet · cat · signpost · sign · thermal
-//   motes · thermal shells · horizon apron (lens above 45 u only) = 15
+//   flight only) · field · sock · helmet · cat · signpost · sign · runway
+//   paint (lettering, arrow, centreline, lamps) · sway (crew arms + flags,
+//   grass, flowers) · thermal motes · thermal shells · horizon apron (lens
+//   above 45 u only) = 17 by day; + runway glow (after lamps-on) + the
+//   watcher (night, lens at the field) = 19
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CAT, CANDY } from '../../core/palette.js';
-import { clamp, damp, smoothstep } from '../../core/util.js';
+import { clamp, damp, smoothstep, rng, hash } from '../../core/util.js';
 import { B, catGeo, signMesh } from './parts.js';
-import { createRider, vehicleBusy, clearSpot, clearanceClaim } from './ride.js';
+import { createRider, vehicleBusy, clearanceClaim } from './ride.js';
 
 // ── flight tuning (exported so a node script can fly the model headless) ────
 export const FLIGHT = {
@@ -161,6 +202,51 @@ export const THERMAL_SITES = [
   { id: 'cat_park', name: 'Catnip Commons', joke: 'Catnip Commons. Something down there is fermenting.' },
 ];
 
+// ── WAVE 4: the runway (measured; see the header and route.corridor()) ─────
+export const RUNWAY = {
+  PAD: { x: 214.2, z: 6.3 },      // where she rests and the roll starts
+  TARGET: { x: -50, z: 26 },      // Sugar Pier: the runway points straight at it
+  LEN: 90, WIDTH: 26, MARGIN: 3,  // the take-off corridor box, and the clearance it must keep
+  CLAIM: [-10, 36],               // nature cleared (local z) from behind the workshop to 36 u out
+  EDGE: 13.9,                     // bunting + marker cones, just outside the box
+};
+
+/**
+ * Her real climb out of Wing Nut Field, as a pure function of the flight
+ * model: the take-off roll exactly as tick() runs it (1.3 s of pedalling, then
+ * the 0.9 u hop at vy 6.4), then stepFlight() with pitch `inY` held and a flap
+ * every `flapEvery` s (counted from the moment E is pressed). Returns a flat
+ * array [a0, h0, a1, h1, ...]: ground distance along the heading → feet above
+ * the deck.
+ */
+export function climbProfile(flapEvery = 0.35, inY = 1, len = 140, dt = 1 / 30) {
+  const out = [];
+  let t = 0, pt = 0, a = 0;
+  while (pt < 1.3) {
+    pt += dt; t += dt;
+    const k = clamp(pt / 1.3, 0, 1);
+    a += F_.CRUISE * 0.9 * smoothstep(0, 1, k) * dt;
+    out.push(a, 0);
+  }
+  const P = { x: 0, y: 0.9, z: a, yaw: 0, vy: 6.4, speed: F_.CRUISE * 0.9, pitch: 0, turn: 0, bank: 0,
+    energy: 1, boostT: 0, boostCd: 0, flapCd: 0, sinceFlap: 9, flapped: false, boosted: false };
+  let beat = Math.floor(t / flapEvery);
+  for (let i = 0; i < 4000 && P.z < len; i++) {
+    t += dt;
+    const b = Math.floor(t / flapEvery);
+    stepFlight(P, 0, inY, b !== beat, false, 0, dt);
+    beat = b;
+    out.push(P.z, Math.max(0, P.y));
+  }
+  return out;
+}
+/** Feet height (above the deck) at ground distance `a` on a climbProfile(). */
+export function profileAt(prof, a) {
+  if (!(a > 0)) return 0;
+  for (let i = 0; i < prof.length; i += 2) if (prof[i] >= a) return prof[i + 1];
+  return prof[prof.length - 1];
+}
+
 const SEAT = 0.55;          // rider's feet above the machine origin
 
 // CANARY. The machine used to be a dark red frame with rainbow wings, parked
@@ -182,14 +268,11 @@ export function create(ctx, api) {
   // Contract I: the phone tier gets fewer thermal motes and wind streaks
   const MOBILE = !!ctx.state.mobile;
   const MOTES_PER = MOBILE ? 150 : 260;
-  const lm = world.LANDMARKS.flyer_pad;
-  // The clearance claim below opens the ground, so this only has to dodge the
-  // last metre or two — a 7-unit search used to walk the machine off the
-  // landmark entirely and out of its own camera view.
-  const clear = clearSpot(ctx, lm.x, lm.z, { radius: 2.5, step: 0.5, need: 7, minH: 1.2, pull: 0.35, pad: 2.4 });
-  const PAD = { x: clear.x, z: clear.z, y: world.height(clear.x, clear.z) };
-  const HOME_YAW = -Math.PI * 0.72;       // nose WSW: toward Candyland, and broadside
-                                          // to the default iso camera so the wings read as wings
+  // WAVE 4: the pad is a MEASURED spot, not a search (a clearSpot() hunt used
+  // to wander a metre or two with every change to the vegetation), and the
+  // runway points straight at Sugar Pier from it.
+  const PAD = { x: RUNWAY.PAD.x, z: RUNWAY.PAD.z, y: world.height(RUNWAY.PAD.x, RUNWAY.PAD.z) };
+  const HOME_YAW = Math.atan2(RUNWAY.TARGET.x - PAD.x, RUNWAY.TARGET.z - PAD.z);
 
   const rider = createRider(ctx);
   // createRider pushed its seat walkable last; our own ground probe skips it
@@ -198,6 +281,57 @@ export function create(ctx, api) {
   const CY = Math.cos(HOME_YAW), SY = Math.sin(HOME_YAW);
   const locX = (lx, lz) => PAD.x + CY * lx + SY * lz;
   const locZ = (lx, lz) => PAD.z - SY * lx + CY * lz;
+  /** world → pad-local lateral (x) and along-runway (z) */
+  const toLX = (dx, dz) => CY * dx - SY * dz;
+  const toLZ = (dx, dz) => SY * dx + CY * dz;
+  /** terrain under a pad-local point, relative to the pad */
+  const locH = (lx, lz) => world.height(locX(lx, lz), locZ(lx, lz)) - PAD.y;
+
+  // ── the runway deck: planks you (and she) roll on ─────────────────────────
+  // Wave-4 polish: TWICE as long (to 28.6 u, most of the way to Purrliament's
+  // tower), so the field reads as a runway instead of a jetty with grass
+  // after it. The first 16 u (to z = 13, as the old deck + kicker did) are
+  // level at the highest ground under them: she hops at ~7.3 u, so the roll
+  // the corridor was measured for is unchanged, and the lettering lies flat
+  // where the runway camera can read it. Past that the field dips ~2 u and
+  // the planks ramp down it (never steeper than SLOPE) and then follow the
+  // grass to the end. It is a ctx.walkables deck (Contract A): the visitor
+  // walks ON it and the machine's take-off roll follows it.
+  // (the back end stops 1.5 u behind her tail: Not-An-Exit Beach's sign forest
+  // starts just behind it, and THE CURRENT IS BAD should not stand on a plank)
+  const RW0 = -3.4, RW1 = 28.6, RWW = 4.4, Z_LEVEL = 13.0, SLOPE = 0.26, DSTEP = 0.5;
+  let deckTop = 0;
+  for (let lz = RW0; lz <= Z_LEVEL + 1e-6; lz += 0.8) for (let lx = -RWW / 2; lx <= RWW / 2 + 1e-6; lx += RWW / 4) deckTop = Math.max(deckTop, locH(lx, lz));
+  const DECK = deckTop + 0.14;                       // plank top of the level part, above PAD.y
+  const NPROF = Math.round((RW1 - RW0) / DSTEP) + 1;
+  const PROF = new Float32Array(NPROF), GLO = new Float32Array(NPROF);
+  for (let i = 0; i < NPROF; i++) {
+    const z = RW0 + i * DSTEP;
+    let g = -Infinity;
+    for (let lx = -RWW / 2 - 0.2; lx <= RWW / 2 + 0.2 + 1e-6; lx += (RWW + 0.4) / 4) for (let dz = -0.4; dz <= 0.41; dz += 0.4) g = Math.max(g, locH(lx, z + dz));
+    GLO[i] = g + 0.14;
+    PROF[i] = z <= Z_LEVEL ? DECK : Math.max(GLO[i], DECK - (z - Z_LEVEL) * SLOPE);
+  }
+  for (let pass = 0; pass < 3; pass++) {           // ease the ground-following part, never into the grass
+    for (let i = 1; i < NPROF - 1; i++) if (RW0 + i * DSTEP > Z_LEVEL + DSTEP) PROF[i] = Math.max(GLO[i], (PROF[i - 1] + 2 * PROF[i] + PROF[i + 1]) / 4);
+  }
+  /** plank top (above PAD.y) at pad-local z */
+  const deckAt = (lz) => {
+    if (lz <= Z_LEVEL) return DECK;
+    const f = clamp((lz - RW0) / DSTEP, 0, NPROF - 1), i = Math.min(NPROF - 2, Math.floor(f));
+    return PROF[i] + (PROF[i + 1] - PROF[i]) * (f - i);
+  };
+  const slopeAt = (lz) => (deckAt(lz + 0.25) - deckAt(lz - 0.25)) / 0.5;
+  const runwayWalk = {
+    test(x, z) {
+      const dx = x - PAD.x, dz = z - PAD.z;
+      if (dx * dx + dz * dz > 1060) return null;     // cheap reject (the deck is ≤ 32.5 u from the pad)
+      const lx = toLX(dx, dz); if (lx < -RWW / 2 - 0.1 || lx > RWW / 2 + 0.1) return null;
+      const lz = toLZ(dx, dz); if (lz < RW0 - 0.1 || lz > RW1 + 0.1) return null;
+      return PAD.y + deckAt(lz);
+    },
+  };
+  ctx.walkables.push(runwayWalk);
 
   // ── the machine ────────────────────────────────────────────────────────────
   const flyer = new THREE.Group();
@@ -402,78 +536,669 @@ export function create(ctx, api) {
   const aU = airflow.material.uniforms;
   const TIP = new THREE.Vector3();
 
-  // ── the field: windsock, workbench, the one book, the tiny helmet ──────────
+  // ── the field (wave 4 re-lay) ──────────────────────────────────────────────
+  // Pad-local frame: +z runs down the runway toward Sugar Pier, +x is the
+  // Whisker Heights (south) side. Nothing solid lies in the take-off box
+  // (|x| < 13, z > 0) where she is still low: Wingnut's workshop, the sign and
+  // the windsock sit BEHIND the start, the bunting, the marker cones and two
+  // of the ground crew stand just outside the box edges, the grass and the
+  // flowers have no colliders, and the marshaller stands past the end of the
+  // planks (33 u out), where route.corridor() has her 38 u above his hat.
+  const EDGE = RUNWAY.EDGE;
+  const own = (c, tag) => { c.tag = 'flyer:' + tag; ctx.colliders.push(c); return c; };
   const gb = new B();
-  gb.cyl(0.13, 0.16, 4.6, 6, WOOD, 2.8, 2.3, -3.2);                        // windsock pole
-  gb.box(2.4, 0.16, 1.1, WOOD, -3.2, 0.95, 1.6);                           // bench top
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) gb.box(0.16, 0.95, 0.16, 0x6b4126, -3.2 + sx * 1.0, 0.48, 1.6 + sz * 0.42);
-  gb.box(0.9, 0.7, 0.9, WOOD, -3.4, 0.35, -1.4);                           // crate
-  gb.box(0.62, 0.10, 0.46, 0xf3ead8, -3.4, 0.76, -1.4, 0, 0.3);            // THE book
-  gb.box(0.62, 0.06, 0.46, CANDY.gummyBlue, -3.4, 0.70, -1.4, 0, 0.3);
-  gb.cyl(0.34, 0.30, 0.5, 8, STEEL, -1.9, 0.25, 2.2);                      // paint tin
-  for (let i = 0; i < 7; i++) {                                            // scattered wing nuts
-    const a = i * 1.7;
-    gb.torus(0.16, 0.06, 4, 6, CANDY.gummyYellow, Math.cos(a) * (2.2 + i * 0.35), 0.1, Math.sin(a) * (2.4 + i * 0.3), Math.PI / 2);
+  // Wingnut's workshop: behind the start on the south side, the one corner
+  // of the field the beach's sign forest leaves free, and the foreground of
+  // the default camera, so he watches his runway with you
+  const WS = { x: 5.2, z: -6.6 };
+  const wsy = (dx, dz) => locH(WS.x + dx, WS.z + dz);
+  gb.box(2.4, 0.16, 1.1, WOOD, WS.x, wsy(0, 0) + 0.95, WS.z);                              // bench top
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) gb.box(0.16, 1.3, 0.16, 0x6b4126, WS.x + sx * 1.0, wsy(sx, sz * 0.4) + 0.3, WS.z + sz * 0.42);
+  gb.box(0.9, 0.7, 0.9, WOOD, WS.x - 2.1, wsy(-2.1, 0.6) + 0.35, WS.z + 0.6);               // crate
+  gb.box(0.62, 0.10, 0.46, 0xf3ead8, WS.x - 2.1, wsy(-2.1, 0.6) + 0.76, WS.z + 0.6, 0, 0.3); // THE book
+  gb.box(0.62, 0.06, 0.46, CANDY.gummyBlue, WS.x - 2.1, wsy(-2.1, 0.6) + 0.70, WS.z + 0.6, 0, 0.3);
+  gb.cyl(0.34, 0.30, 0.5, 8, STEEL, WS.x + 1.9, wsy(1.9, -1.1) + 0.25, WS.z - 1.1);          // paint tin
+  gb.cyl(0.09, 0.09, 1.9, 6, STEEL, WS.x + 2.4, wsy(2.4, 0.9) + 0.75, WS.z + 0.9);           // helmet peg
+  for (let i = 0; i < 7; i++) {                                                             // scattered wing nuts
+    const a = i * 1.7, wx = WS.x + Math.cos(a) * (1.6 + i * 0.3), wz = WS.z + Math.sin(a) * (1.8 + i * 0.25);
+    gb.torus(0.16, 0.06, 4, 6, CANDY.gummyYellow, wx, locH(wx, wz) + 0.1, wz, Math.PI / 2);
   }
-  gb.cyl(0.09, 0.09, 1.5, 6, STEEL, 2.0, 0.75, 2.4);                       // helmet peg
-  // THE RUNWAY (wave 3 polish). It used to be a plain cream box on the grass.
-  // Now it is a hand-built plank deck: warm boards in two tones laid across
-  // the run, red edge boards, a candy-striped skirt where the slope shows the
-  // side, white centre dashes, a yellow take-off chevron, a little ramp lip at
-  // the end, and bunting strung between painted poles down both sides.
-  const RW0 = -4.8, RW1 = 9.6, RWW = 4.4, RWL = RW1 - RW0, RWC = (RW0 + RW1) / 2;
-  gb.box(RWW - 0.2, 1.8, RWL - 0.2, 0x6e4326, 0, -0.84, RWC);               // bed, sunk into the slope
-  for (let z = RW0 + 0.26, i = 0; z < RW1 - 0.1; z += 0.52, i++) {          // the planks
+  // windsock pole, behind the start on the north side
+  const SOCK = { x: -8.6, z: -1.6 };
+  gb.cyl(0.13, 0.16, 4.6, 6, WOOD, SOCK.x, locH(SOCK.x, SOCK.z) + 2.3, SOCK.z);
+  // THE RUNWAY: a hand-built plank deck (warm boards in three tones laid across
+  // the run, each tilted to the deck's slope; red edge boards; a candy-striped
+  // skirt down into the grass wherever the field falls away), no grass poking
+  // through anywhere along its 32 u.
+  for (let z = RW0 + 0.26, i = 0; z < RW1 - 0.1; z += 0.52, i++) {                          // the planks
     const tone = i % 3 === 0 ? 0xd9a064 : i % 3 === 1 ? 0xc98a4e : 0xe0ae72;
-    gb.box(RWW, 0.16, 0.47, tone, 0, 0.06, z);
+    gb.box(RWW, 0.16, 0.5, tone, 0, deckAt(z) - 0.08, z, -Math.atan(slopeAt(z)));
+  }
+  for (let z0 = RW0; z0 < RW1 - 1e-3; z0 += 2) {                                            // the bed, sunk into the slope
+    const z1 = Math.min(RW1, z0 + 2), zc = (z0 + z1) / 2, top = deckAt(zc) - 0.12;
+    let gmin = Infinity;
+    for (let lz = z0; lz <= z1 + 1e-6; lz += 0.5) for (let lx = -RWW / 2; lx <= RWW / 2 + 1e-6; lx += RWW / 2) gmin = Math.min(gmin, locH(lx, lz));
+    const h = Math.max(0.3, top - gmin + 0.5);
+    gb.box(RWW - 0.2, h, z1 - z0 + 0.05, 0x6e4326, 0, top - h / 2, zc, -Math.atan(slopeAt(zc)));
   }
   for (const s of [-1, 1]) {
-    gb.box(0.22, 0.24, RWL, RIB, s * (RWW / 2 + 0.08), 0.08, RWC);            // red edge boards
-    // candy-striped skirt: vertical slats down the exposed side
-    for (let z = RW0 + 0.35, i = 0; z < RW1; z += 0.7, i++) gb.box(0.08, 1.7, 0.66, i % 2 ? 0xfff3de : RIB, s * (RWW / 2 + 0.2), -0.85, z);
-  }
-  for (const e of [RW0, RW1]) for (let x = -RWW / 2 + 0.35, i = 0; x < RWW / 2; x += 0.7, i++) gb.box(0.66, 1.7, 0.08, i % 2 ? 0xfff3de : RIB, x, -0.85, e + Math.sign(e) * 0.14);
-  for (const z of [-3.4, 2.2, 4.0, 5.8]) gb.box(0.26, 0.03, 1.05, 0xfffaf0, 0, 0.155, z);   // centre dashes
-  for (const s of [-1, 1]) gb.box(1.5, 0.03, 0.34, CANDY.gummyYellow, s * 0.55, 0.16, 7.7, 0, s * 0.62, 0);   // chevron ^
-  gb.box(RWW - 0.4, 0.14, 1.3, 0xc98a4e, 0, 0.28, RW1 + 0.55, -0.3, 0, 0);   // ramp lip
-  gb.box(RWW - 0.4, 0.05, 0.22, CANDY.gummyYellow, 0, 0.47, RW1 + 1.12, -0.3, 0, 0);
-  // bunting: painted poles, sagging strings, candy pennants
-  const FLAGS = [CANDY.gummyRed, CANDY.gummyYellow, CANDY.gummyBlue, CANDY.gummyGreen, CANDY.gummyOrange, CANDY.gummyPurple];
-  // (the flight line sits outside the 11-unit wingspan: a take-off run must
-  // never swipe the pennants off their string)
-  const POLE_Z = [-4.4, 0.4, 5.2, 9.9], POLE_H = 2.5, SAG = 0.5;
-  for (const s of [-1, 1]) {
-    const px = s * 6.4;
-    for (const pz of POLE_Z) {
-      gb.cyl(0.09, 0.11, POLE_H + 0.9, 6, 0xfff3de, px, POLE_H / 2 - 0.45, pz);
-      gb.cyl(0.12, 0.12, 0.3, 6, RIB, px, POLE_H * 0.55, pz);
-      gb.sph(0.16, 6, 5, RIB, px, POLE_H + 0.05, pz);
+    for (let z0 = RW0; z0 < RW1 - 1e-3; z0 += 1) {                                          // red edge boards
+      const zc = (z0 + Math.min(RW1, z0 + 1)) / 2;
+      gb.box(0.22, 0.24, Math.min(RW1, z0 + 1) - z0 + 0.03, RIB, s * (RWW / 2 + 0.08), deckAt(zc) - 0.06, zc, -Math.atan(slopeAt(zc)));
     }
-    for (let k = 0; k < POLE_Z.length - 1; k++) {
-      const z0 = POLE_Z[k], z1 = POLE_Z[k + 1];
-      const yAt = (t) => POLE_H - 0.1 - SAG * 4 * t * (1 - t);
+    for (let z = RW0 + 0.35, i = 0; z < RW1; z += 0.7, i++) {                               // the striped skirt
+      const top = deckAt(z) - 0.1;
+      const g = Math.min(locH(s * (RWW / 2 + 0.2), z - 0.33), locH(s * (RWW / 2 + 0.2), z + 0.33));
+      const h = Math.max(0.16, top - g + 0.35);
+      gb.box(0.08, h, 0.66, i % 2 ? 0xfff3de : RIB, s * (RWW / 2 + 0.2), top - h / 2, z);
+    }
+  }
+  for (const e of [RW0, RW1]) {
+    const top = deckAt(e) - 0.1, ez = e + Math.sign(e) * 0.14;
+    for (let x = -RWW / 2 + 0.35, i = 0; x < RWW / 2; x += 0.7, i++) {
+      const h = Math.max(0.16, top - locH(x, ez) + 0.35);
+      gb.box(0.66, h, 0.08, i % 2 ? 0xfff3de : RIB, x, top - h / 2, ez);
+    }
+  }
+  gb.box(RWW - 0.3, 0.1, 0.22, CANDY.gummyYellow, 0, deckAt(RW1) + 0.01, RW1 - 0.12);       // the yellow nose board
+  gb.box(RWW - 0.3, 0.1, 0.22, CANDY.gummyYellow, 0, DECK + 0.01, RW0 + 0.12);              // …and the tail board
+
+  // Placement guard for everything new on the field: clear of every solid
+  // world collider that will still be standing after the corridor claim mows
+  // the strip (small circles inside the claim are nature it is about to blank).
+  const CLAIM_HALF = RUNWAY.WIDTH / 2 + 1.5;
+  function clearOf(lx, lz, r) {
+    const wx = locX(lx, lz), wz = locZ(lx, lz);
+    const cols = ctx.colliders;
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (!c || c.claim || c.solid === false || (typeof c.tag === 'string' && c.tag.startsWith('flyer:'))) continue;
+      if (typeof c.h === 'number' && c.h < -50) continue;
+      const dx = wx - c.x, dz = wz - c.z;
+      if (c.box) {
+        if (!(c.w > 0 && c.d > 0)) continue;
+        const cr = Math.cos(c.rot || 0), sr = Math.sin(c.rot || 0);
+        if (Math.abs(dx * cr + dz * sr) < c.w / 2 + r && Math.abs(-dx * sr + dz * cr) < c.d / 2 + r) return false;
+      } else if (c.r > 0.05) {
+        if (c.r < 1.2) {
+          const clx = toLX(c.x - PAD.x, c.z - PAD.z), clz = toLZ(c.x - PAD.x, c.z - PAD.z);
+          if (Math.abs(clx) < CLAIM_HALF && clz > RUNWAY.CLAIM[0] - 1.5 && clz < RUNWAY.CLAIM[1] + 1.5) continue;
+        }
+        if (dx * dx + dz * dz < (c.r + r) * (c.r + r)) return false;
+      }
+    }
+    return true;
+  }
+
+  // BUNTING down both edges of the take-off box: painted poles, sagging
+  // strings, candy pennants. It marks the zone the corridor keeps clear. The
+  // north line now runs the length of the new runway; the south line stops
+  // where Whisker Heights' front garden (a tree, then a house) takes over.
+  const FLAGS = [CANDY.gummyRed, CANDY.gummyYellow, CANDY.gummyBlue, CANDY.gummyGreen, CANDY.gummyOrange, CANDY.gummyPurple];
+  const POLE_ALL = [-2.6, 3.4, 9.4, 15.4, 21.4, 27.4], POLE_H = 3.1, SAG = 0.6;
+  const poles = [];
+  for (const s of [-1, 1]) {
+    const px = s * EDGE;
+    const pz = [];
+    for (const z of POLE_ALL) { if (!clearOf(px, z, 0.9)) break; pz.push(z); }
+    const gy = pz.map((z) => locH(px, z));
+    for (let k = 0; k < pz.length; k++) {
+      const y0 = gy[k];
+      gb.cyl(0.10, 0.12, POLE_H + 0.9, 6, 0xfff3de, px, y0 + POLE_H / 2 - 0.45, pz[k]);
+      gb.cyl(0.13, 0.13, 0.34, 6, RIB, px, y0 + POLE_H * 0.55, pz[k]);
+      gb.cyl(0.13, 0.13, 0.34, 6, RIB, px, y0 + POLE_H * 0.25, pz[k]);
+      gb.sph(0.2, 6, 5, RIB, px, y0 + POLE_H + 0.05, pz[k]);
+      poles.push([px, pz[k]]);
+    }
+    for (let k = 0; k < pz.length - 1; k++) {
+      const z0 = pz[k], z1 = pz[k + 1], ya = gy[k], yb = gy[k + 1];
+      const yAt = (t) => ya + (yb - ya) * t + POLE_H - 0.1 - SAG * 4 * t * (1 - t);
       for (let j = 0; j < 4; j++) {
         const ta = j / 4, tb = (j + 1) / 4;
         gb.beam([px, yAt(ta), z0 + (z1 - z0) * ta], [px, yAt(tb), z0 + (z1 - z0) * tb], 0.05, 0x5a3a22);
       }
-      for (let f = 0; f < 6; f++) {
-        const t = (f + 0.5) / 6;
-        gb.add(new THREE.ConeGeometry(0.24, 0.5, 3), FLAGS[(f + k * 2 + (s > 0 ? 3 : 0)) % FLAGS.length],
-          px, yAt(t) - 0.27, z0 + (z1 - z0) * t, Math.PI, 0, 0, [0.22, 1, 1]);
+      for (let f = 0; f < 7; f++) {
+        const t = (f + 0.5) / 7;
+        gb.add(new THREE.ConeGeometry(0.3, 0.62, 3), FLAGS[(f + k * 2 + (s > 0 ? 3 : 0)) % FLAGS.length],
+          px, yAt(t) - 0.33, z0 + (z1 - z0) * t, Math.PI, 0, 0, [0.22, 1, 1]);
       }
     }
   }
-  for (const s of [-1, 1]) gb.cone(0.26, 0.62, 6, CANDY.gummyOrange, s * 1.9, 0.46, RW1 + 1.8);
+  // MARKER CONES carry the edges on past the bunting to the end of the mown
+  // strip: candy-striped, knee-high, the last pair wearing a little flag.
+  const cones = [];
+  for (const s of [-1, 1]) for (const czl of [32.5, RUNWAY.CLAIM[1]]) {
+    const cxl = s * EDGE;
+    if (!clearOf(cxl, czl, 0.8)) continue;
+    const y0 = locH(cxl, czl);
+    gb.cyl(0.46, 0.5, 0.12, 8, 0xfff3de, cxl, y0 + 0.06, czl);
+    gb.cone(0.38, 0.9, 8, CANDY.gummyOrange, cxl, y0 + 0.55, czl);
+    gb.cyl(0.25, 0.3, 0.16, 8, 0xfffaf0, cxl, y0 + 0.5, czl);
+    if (czl === RUNWAY.CLAIM[1]) {
+      gb.cyl(0.05, 0.05, 1.5, 5, 0x5a3a22, cxl, y0 + 1.5, czl);
+      gb.add(new THREE.ConeGeometry(0.34, 0.9, 3), CANDY.gummyRed, cxl, y0 + 2.0, czl + 0.45, Math.PI / 2, 0, 0, [0.22, 1, 1]);
+    }
+    cones.push([cxl, czl]);
+  }
+
+  // THE GROUND CREW: three cats in hi-vis who take the job extremely
+  // seriously. Two flag cats just outside the north edge of the box (the
+  // starter with a chequered flag, then one with a red flag; the south edge
+  // is Whisker Heights' gardens) and a marshaller past the far end with two
+  // wands that glow after dark. Bodies are static (here, in the field mesh);
+  // their arms, poles, flags and wands are in the SWAY mesh below and move.
+  const CREW_S = 1.35;
+  const CREW = [
+    { x: -15.0, z: 9.0, fur: CAT.furOrange, stripe: 0xb05a1c, kind: 'check' },
+    { x: -15.0, z: 21.5, fur: CAT.furGrey, stripe: 0x55565e, kind: 'red' },
+    { x: 0, z: 33.4, fur: CAT.furCalico, stripe: 0x8a5a2a, kind: 'wands' },
+  ];
+  for (const c of CREW) {
+    for (let k = 0; k < 8 && !clearOf(c.x, c.z, 0.8); k++) c.z += c.kind === 'wands' ? -0.8 : 1.0;
+    c.y = locH(c.x, c.z);
+    // face the machine (and the lens behind her), turned a little toward the
+    // runway, so the flags held out over the grass face down the field
+    c.face = c.kind === 'wands' ? Math.PI : Math.PI - 0.35 * Math.sign(-c.x);
+    const cb = catGeo(c.fur, 'sit', { stripe: c.stripe });
+    cb.box(0.62, 0.2, 0.5, 0xffd21e, 0, 0.62, 0.02);                  // hi-vis vest (it is a sash)
+    cb.box(0.64, 0.05, 0.52, 0xeef2f5, 0, 0.62, 0.02);                // reflective band
+    cb.sph(0.2, 7, 4, 0xff8a1e, 0, 1.2, 0.2, [1.05, 0.55, 1.05]);     // a little hard hat
+    cb.box(0.44, 0.04, 0.1, 0xff8a1e, 0, 1.12, 0.42);                 // its brim
+    for (const g of cb.parts) { g.scale(CREW_S, CREW_S, CREW_S); g.rotateY(c.face); g.translate(c.x, c.y, c.z); gb.parts.push(g); }
+  }
+
   const field = gb.build('flyer_field');
   field.position.set(PAD.x, PAD.y, PAD.z);
   field.rotation.y = HOME_YAW;
   scene.add(field);
 
+  // ── RUNWAY PAINT (one mesh, one 512×1024 CanvasTexture atlas) ─────────────
+  // Wave-4 polish: the lettering used to sit under the parked wings (from the
+  // runway camera the spar crossed it: "to Can_land"). It now starts 8.3 u
+  // out, past the wingtips' shadow on the planks, still on the level part of
+  // the deck so it is not foreshortened away: TAKE-OFF / TO THE / CANDY /
+  // KINGDOM, stretched along the run like real runway lettering, then the big
+  // arrow on the ramp, a candy-stripe CENTRELINE from her nose to the end,
+  // piano-key thresholds at both ends, and the runway LAMPS (cream studs on
+  // the edge boards, green at the start, red at the far end). The paint is its
+  // own emissive map: after dark it glows like luminous paint.
+  const LAMPS = [];                                   // pad-local {x, y, z, kind: 0 cream | 1 red | 2 green, ph}
+  const paint = (() => {
+    const CW = 512, CH = 1024;
+    const c = document.createElement('canvas'); c.width = CW; c.height = CH;
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, CW, CH);
+    g.lineJoin = 'round';
+    // ARROW (region 8..248 × 8..504), pointing at the canvas top = the far end
+    const R_ARROW = [8, 8, 248, 504], acx = 128;
+    g.beginPath();
+    g.moveTo(acx, 30); g.lineTo(236, 206); g.lineTo(acx + 48, 184); g.lineTo(acx + 48, 488);
+    g.lineTo(acx - 48, 488); g.lineTo(acx - 48, 184); g.lineTo(20, 206); g.closePath();
+    g.lineWidth = 14; g.strokeStyle = '#4a2a14'; g.stroke();
+    g.fillStyle = '#ffd23a'; g.fill();
+    g.lineWidth = 6; g.strokeStyle = '#fff4c8'; g.beginPath(); g.moveTo(acx, 70); g.lineTo(acx, 470); g.stroke();
+    // LETTERING (region 264..504 × 8..504), stretched ×2.5 along the run, on a
+    // dark painted panel so it reads on sunlit planks as well as after dark
+    const R_TEXT = [264, 8, 504, 504];
+    g.fillStyle = '#3a2748';
+    g.beginPath(); g.roundRect ? g.roundRect(270, 14, 228, 484, 26) : g.rect(270, 14, 228, 484); g.fill();
+    g.lineWidth = 6; g.strokeStyle = '#fff3de'; g.stroke();
+    const word = (txt, px, yc, fill) => {
+      let size = px; const font = (n) => `900 ${n}px "Trebuchet MS", "Segoe UI", system-ui, sans-serif`;
+      g.font = font(size);
+      const w = g.measureText(txt).width; if (w > 216) { size = Math.floor(size * 216 / w); g.font = font(size); }
+      g.save(); g.translate(384, yc); g.scale(1, 2.5);
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.lineWidth = 4.5; g.strokeStyle = '#4a2a14'; g.strokeText(txt, 0, 0);
+      g.fillStyle = fill; g.fillText(txt, 0, 0);
+      g.restore();
+    };
+    word('TAKE-OFF', 60, 72, '#fffaf0');
+    word('TO THE', 30, 184, '#fffaf0');
+    word('CANDY', 50, 296, '#ffd23a');
+    word('KINGDOM', 50, 426, '#ffd23a');
+    // CANDY STRIPE tile (64×64 inside a padded 80×80 block, seamless diagonals)
+    const R_STRIPE = [8, 520, 72, 584];
+    {
+      const im = g.createImageData(80, 80);
+      for (let y = 0; y < 80; y++) for (let x = 0; x < 80; x++) {
+        const k = (y * 80 + x) * 4, red = ((x + y + 128) % 32) < 16;
+        im.data[k] = red ? 228 : 255; im.data[k + 1] = red ? 52 : 243; im.data[k + 2] = red ? 58 : 222; im.data[k + 3] = 255;
+      }
+      g.putImageData(im, 0, 512);
+    }
+    // solid patches: piano keys, and the three lamp colours
+    const patch = (x, col) => { g.fillStyle = col; g.fillRect(x, 520, 32, 32); return [x + 16, 536]; };
+    const P_KEY = patch(96, '#fff3de'), P_LAMP = patch(144, '#fff1c2'), P_RED = patch(184, '#ff5a4a'), P_GRN = patch(224, '#7dffa0');
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+
+    const geos = [];
+    const pushGeo = (pos, nor, uv, idx) => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      geo.setIndex(idx);
+      geos.push(geo);
+    };
+    /** a painted strip lying on the deck from z0 (near) to z1 (far); R = canvas region [x0,y0,x1,y1] */
+    const strip = (z0, z1, xc, w, R, eps = 0.014) => {
+      const n = Math.max(1, Math.ceil((z1 - z0) / 0.4));
+      const pos = [], nor = [], uv = [], idx = [];
+      const u0 = (R[0] + 1) / CW, u1 = (R[2] - 1) / CW, vN = 1 - (R[3] - 1) / CH, vF = 1 - (R[1] + 1) / CH;
+      for (let i = 0; i <= n; i++) {
+        const t = i / n, z = z0 + (z1 - z0) * t, y = deckAt(z) + eps, v = vN + (vF - vN) * t;
+        pos.push(xc + w / 2, y, z, xc - w / 2, y, z);   // the viewer faces +z: his left is +x = texture left
+        nor.push(0, 1, 0, 0, 1, 0);
+        uv.push(u0, v, u1, v);
+        if (i < n) { const a = i * 2; idx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
+      }
+      pushGeo(pos, nor, uv, idx);
+    };
+    const solid = (geo, P) => { const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, P[0] / CW, 1 - P[1] / CH); geos.push(geo); };
+    strip(8.3, 12.95, 0, 3.8, R_TEXT);                            // the lettering: past the wings, still on the level
+    strip(13.9, 22.6, 0, 3.5, R_ARROW);                           // the arrow, long: it lies on the ramp
+    for (let z = -2.9; z < 7.3; z += 1.0) strip(z, z + 0.94, 0, 0.36, R_STRIPE);     // centreline, nose to lettering
+    for (let z = 23.1; z < 27.2; z += 1.0) strip(z, z + 0.94, 0, 0.36, R_STRIPE);    // …arrow to the far threshold
+    for (const [z0, z1] of [[-3.3, -2.35], [27.4, 28.4]]) {       // piano-key thresholds
+      for (let k = 0; k < 6; k++) {
+        const x = -1.75 + k * 0.7;
+        if (Math.abs(x) < 0.3) continue;
+        const pos = [], nor = [], uv = [], idx = [];
+        const u = P_KEY[0] / CW, v = 1 - P_KEY[1] / CH;
+        for (const zz of [z0, z1]) { const y = deckAt(zz) + 0.014; pos.push(x + 0.22, y, zz, x - 0.22, y, zz); nor.push(0, 1, 0, 0, 1, 0); uv.push(u, v, u, v); }
+        idx.push(0, 1, 3, 0, 3, 2);
+        pushGeo(pos, nor, uv, idx);
+      }
+    }
+    // the lamps: cream studs on both edge boards, a green bar behind the
+    // start and a red bar just past the far end (on the grass)
+    const lamp = (lx, ly, lz, kind) => {
+      const gl = new THREE.CylinderGeometry(0.15, 0.2, 0.22, 7);
+      gl.translate(lx, ly + 0.11, lz);
+      solid(gl, kind === 1 ? P_RED : kind === 2 ? P_GRN : P_LAMP);
+      LAMPS.push({ x: lx, y: ly + 0.14, z: lz, kind, ph: clamp((lz - RW0) / (RW1 - RW0), 0, 1) });
+    };
+    for (const s of [-1, 1]) for (let z = RW0 + 0.4; z <= RW1 - 0.2; z += 2.4) lamp(s * (RWW / 2 + 0.08), deckAt(z) + 0.06, z, 0);
+    for (let k = 0; k < 5; k++) { const x = -1.9 + k * 0.95; lamp(x, locH(x, RW1 + 0.7), RW1 + 0.7, 1); }
+    for (let k = 0; k < 5; k++) { const x = -1.9 + k * 0.95; lamp(x, locH(x, RW0 - 0.6), RW0 - 0.6, 2); }
+    const geo = mergeGeometries(geos, false);
+    for (const q of geos) q.dispose();
+    geo.computeBoundingSphere();
+    const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.06,
+      roughness: 0.8, metalness: 0, alphaTest: 0.45,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    }));
+    m.name = 'flyer_runway_paint';
+    m.receiveShadow = true; m.castShadow = false;
+    m.position.set(PAD.x, PAD.y, PAD.z);
+    m.rotation.y = HOME_YAW;
+    scene.add(m);
+    return m;
+  })();
+  let paintGlow = -1;
+
+  // ── SWAY: the ground crew's arms, flags and wands, and the tall grass and
+  // wildflowers along both edges of the runway (ONE draw call, pad frame).
+  // Every vertex carries aSway = (kind, arm/height weight, cloth weight,
+  // phase) and aDir = (sway dir xz, cloth normal xz); the vertex shader waves
+  // them. kind 1 = grass/flower, 2 = arm + pole + flag, 3 = the same, lit
+  // (the marshaller's wands glow after dark).
+  const swayU = { uTime: { value: 0 }, uNight: { value: 0 } };
+  const sway = (() => {
+    const R = rng(hash('flyer-runway-meadow'));
+    const parts = [];
+    const tag = (geo, fn) => {
+      const n = geo.attributes.position.count, p = geo.attributes.position;
+      const a = new Float32Array(n * 4), d = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) fn(p.getX(i), p.getY(i), p.getZ(i), a, d, i * 4);
+      geo.setAttribute('aSway', new THREE.BufferAttribute(a, 4));
+      geo.setAttribute('aDir', new THREE.BufferAttribute(d, 4));
+      return geo;
+    };
+    // ── the crew's arms, poles, flags and wands (built in each cat's own frame)
+    CREW.forEach((c, ci) => {
+      const t = new B(), LIGHT = 0xfff6ea, lit = new Set();
+      // flag cats hold the flag out on the runway side (the arm whose world direction points at the centreline)
+      const sides = c.kind === 'wands' ? [-1, 1] : [c.x < 0 ? -1 : 1];
+      for (const s of sides) {
+        const hi = c.kind === 'wands' ? [s * 0.52, 1.22, 0.26] : [s * 0.40, 1.3, 0.24];
+        t.beam([s * 0.24, 0.66, 0.16], hi, 0.13, c.fur);
+        t.sph(0.1, 5, 4, LIGHT, hi[0] + s * 0.01, hi[1] + 0.05, hi[2] + 0.01);
+        if (c.kind === 'wands') {
+          t.cyl(0.065, 0.075, 0.8, 6, 0xff7a1a, s * 0.68, 1.6, 0.28, 0, 0, -s * 0.45);
+          lit.add(t.parts[t.parts.length - 1]);
+        } else {
+          t.beam([s * 0.42, 1.0, 0.26], [s * 0.44, 2.4, 0.24], 0.055, 0x5a3a22);
+          if (c.kind === 'check') {
+            for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) t.box(0.19, 0.16, 0.03, (i + j) % 2 ? 0x24242a : 0xfaf6ee, s * (0.54 + i * 0.19), 2.26 - j * 0.16, 0.24);
+          } else {
+            t.box(0.76, 0.48, 0.03, CANDY.gummyRed, s * 0.84, 2.1, 0.24);
+            t.box(0.76, 0.1, 0.035, 0xffd23a, s * 0.84, 2.1, 0.24);
+          }
+        }
+      }
+      const cf = Math.cos(c.face), sf = Math.sin(c.face);
+      for (const geo of t.parts) {
+        const kind = lit.has(geo) ? 3 : 2;
+        tag(geo, (x, y, z, a, d, k) => {
+          const s = x < 0 ? -1 : 1;
+          const arm = clamp((y - 0.66) / 1.7, 0, 1.3), cloth = clamp((Math.abs(x) - 0.46) / 0.76, 0, 1) * (y > 1.8 ? 1 : 0);
+          a[k] = kind; a[k + 1] = arm; a[k + 2] = cloth; a[k + 3] = ci * 1.9;
+          // sway along the cat's own x (mirrored per arm for the marshaller), cloth along its z
+          const m = c.kind === 'wands' ? s : 1;
+          d[k] = cf * m; d[k + 1] = -sf * m; d[k + 2] = sf; d[k + 3] = cf;
+        });
+        geo.scale(CREW_S, CREW_S, CREW_S); geo.rotateY(c.face); geo.translate(c.x, c.y, c.z);
+        parts.push(geo);
+      }
+    });
+    // ── tall grass + wildflowers
+    const WIND = [0.8, 0.6];
+    const BLADE_LO = [0x3f6b28, 0x4f7a2e, 0x5b8a34], BLADE_HI = [0xa9cf55, 0xc3dc6a, 0x8fbf4a];
+    const FLOWER = [0xff7fb0, 0xffd84a, 0xfff6ea, 0xb99cff, 0xff9a3c];
+    const cLo = new THREE.Color(), cHi = new THREE.Color();
+    const tuft = (cx, cz, n, hMax) => {
+      const y0 = locH(cx, cz) - 0.04;
+      const pos = [], col = [], uv = [], idx = [];
+      for (let i = 0; i < n; i++) {
+        const bx = cx + R.range(-0.28, 0.28), bz = cz + R.range(-0.28, 0.28), ang = R() * Math.PI;
+        const hw = R.range(0.05, 0.09), h = R.range(0.55, 1.0) * hMax;
+        const lx = Math.cos(ang) * hw, lz = Math.sin(ang) * hw;
+        const tx = bx + R.range(-0.25, 0.25), tz = bz + R.range(-0.25, 0.25);
+        const b = pos.length / 3;
+        pos.push(bx - lx, y0, bz - lz, bx + lx, y0, bz + lz, tx, y0 + h, tz);
+        cLo.setHex(BLADE_LO[i % 3]); cHi.setHex(BLADE_HI[(i + 1) % 3]);
+        col.push(cLo.r, cLo.g, cLo.b, cLo.r, cLo.g, cLo.b, cHi.r, cHi.g, cHi.b);
+        uv.push(0, 0, 0, 0, 0, 0);
+        idx.push(b, b + 1, b + 2);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      geo.setIndex(idx);
+      const ph = R() * 6.28;
+      parts.push(tag(geo, (x, y, z, a, d, k) => { a[k] = 1; a[k + 1] = clamp((y - y0) / 0.9, 0, 1.2); a[k + 2] = 0; a[k + 3] = ph; d[k] = WIND[0]; d[k + 1] = WIND[1]; d[k + 2] = 0; d[k + 3] = 0; }));
+    };
+    const flowers = (cx, cz, n) => {
+      const t = new B();
+      const y0 = locH(cx, cz);
+      for (let i = 0; i < n; i++) {
+        const fx = cx + R.range(-0.5, 0.5), fz = cz + R.range(-0.5, 0.5), h = R.range(0.35, 0.62);
+        t.cyl(0.02, 0.03, h, 3, 0x4f7a2e, fx, y0 + h / 2 - 0.02, fz);
+        t.sph(0.13, 4, 2, FLOWER[R.int(0, FLOWER.length - 1)], fx, y0 + h + 0.02, fz, [1, 0.6, 1]);
+      }
+      const ph = R() * 6.28;
+      for (const geo of t.parts) parts.push(tag(geo, (x, y, z, a, d, k) => { a[k] = 1; a[k + 1] = clamp((y - y0) / 0.6, 0, 1.2); a[k + 2] = 0; a[k + 3] = ph; d[k] = WIND[0]; d[k + 1] = WIND[1]; d[k + 2] = 0; d[k + 3] = 0; }));
+    };
+    const busy = (x, z) => {
+      if (Math.abs(x) < RWW / 2 + 0.55) return true;                         // the deck
+      if (Math.hypot(x - WS.x, z - WS.z) < 3.4 || Math.hypot(x - SOCK.x, z - SOCK.z) < 0.9) return true;
+      if (Math.hypot(x - 10.8, z + 1.2) < 1.6) return true;                  // the sign
+      for (const c of CREW) if (Math.hypot(x - c.x, z - c.z) < 1.1) return true;
+      return !clearOf(x, z, 0.35);
+    };
+    const MOB = MOBILE ? 0.5 : 1;
+    // a dense band hugging both edges of the deck…
+    for (const s of [-1, 1]) {
+      for (let z = -2.4; z < RW1 + 1.2; z += 0.95 / MOB) {
+        const x = s * R.range(2.85, 4.4), zz = z + R.range(-0.3, 0.3);
+        if (busy(x, zz)) continue;
+        tuft(x, zz, R.int(4, 7), R.range(0.8, 1.15));
+        if (R() < 0.45) { const fx = s * R.range(2.9, 4.8), fz = zz + R.range(-0.6, 0.6); if (!busy(fx, fz)) flowers(fx, fz, R.int(2, 5)); }
+      }
+    }
+    // …and meadow patches out across the mown strip, so the field is not bare
+    for (let p = 0; p < 18 * MOB; p++) {
+      const s = p % 2 ? 1 : -1, px = s * R.range(5.2, 12.2), pz = R.range(-1, 34);
+      for (let k = 0; k < 6; k++) {
+        const x = px + R.range(-1.4, 1.4), z = pz + R.range(-1.4, 1.4);
+        if (busy(x, z)) continue;
+        if (k % 3 === 2) flowers(x, z, R.int(3, 6)); else tuft(x, z, R.int(4, 7), R.range(0.7, 1.05));
+      }
+    }
+    const geo = mergeGeometries(parts, false);
+    for (const q of parts) q.dispose();
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0, flatShading: true, side: THREE.DoubleSide });
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = swayU.uTime; sh.uniforms.uNight = swayU.uNight;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute vec4 aSway;\nattribute vec4 aDir;\nuniform float uTime;\nvarying float vGlow;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          vGlow = 0.0;
+          if (aSway.x > 0.5 && aSway.x < 1.5) {
+            float ph = aSway.w + transformed.x * 0.35 + transformed.z * 0.22;
+            float sw = sin(uTime * 1.7 + ph) * 0.7 + sin(uTime * 2.9 + ph * 1.3) * 0.3;
+            transformed.xz += aDir.xy * sw * aSway.y * 0.14;
+          } else if (aSway.x > 1.5) {
+            transformed.xz += aDir.xy * sin(uTime * 2.3 + aSway.w) * aSway.y * 0.32;
+            transformed.xz += aDir.zw * sin(uTime * 7.5 - aSway.z * 5.5 + aSway.w) * aSway.z * 0.13;
+            if (aSway.x > 2.5) vGlow = 1.0;
+          }`);
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uNight;\nvarying float vGlow;')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += vColor.rgb * vGlow * (0.15 + uNight * 2.4);');
+    };
+    mat.customProgramCacheKey = () => 'flyer_sway_v1';
+    const m = new THREE.Mesh(geo, mat);
+    m.name = 'flyer_sway';
+    m.castShadow = false; m.receiveShadow = true;
+    m.position.set(PAD.x, PAD.y, PAD.z);
+    m.rotation.y = HOME_YAW;
+    m.userData.noOcclude = true;
+    scene.add(m);
+    return m;
+  })();
+
+  // ── THE WATCHER (after dark): something at the end of the runway ─────────
+  // Light horror. From Wing Nut Field at night, far down the runway past
+  // Purrliament's roofs, a cat's head the size of a house rises very slowly
+  // over Main Street and looks at you: a black silhouette with a cold moonlit
+  // rim, two amber eyes with slit pupils, big paws hooked over the rooftops.
+  // It blinks. It tilts its head. It watches the visitor. It never comes
+  // closer: walk down the runway toward it, or take off, and it sinks back
+  // down behind the town as if it had never been there. At dusk only its ears
+  // show. One draw call (the eye halos live in the glow mesh below); it only
+  // exists while the lens is at the field after lamps-on.
+  const WATCH = { a: 122, l: 4.5, eyeY: 16.5, s: 1.75, sink: 44 };
+  const WEYE = { L: new THREE.Vector3(-4.3, 0.6, 8.25), R: new THREE.Vector3(4.3, 0.6, 8.25) };
+  const watchU = {
+    uBlink: { value: 1 }, uGlow: { value: 0 }, uEyeL: { value: WEYE.L }, uEyeR: { value: WEYE.R }, uEyeRad: { value: new THREE.Vector2(2.7, 1.55) },
+    uFogC: { value: new THREE.Color(0x32315d) }, uFogN: { value: 60 }, uFogF: { value: 260 }, uRim: { value: new THREE.Vector3(0.10, 0.12, 0.30) },
+  };
+  const watcher = (() => {
+    const wp = [];
+    const add = (geo, part, x, y, z, sx, sy, sz, rx = 0, rz = 0) => {
+      geo.scale(sx, sy, sz); if (rz) geo.rotateZ(rz); if (rx) geo.rotateX(rx); geo.translate(x, y, z);
+      geo.setAttribute('aPart', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count).fill(part), 1));
+      wp.push(geo);
+    };
+    const SPH = (ws, hs) => new THREE.SphereGeometry(1, ws, hs);
+    add(SPH(20, 14), 0, 0, 0, 0, 11.8, 9.4, 9.2);                              // skull
+    add(SPH(12, 8), 0, 0, -3.8, 7.4, 4.6, 3.0, 3.4);                           // muzzle
+    add(SPH(16, 10), 0, 0, -15, -5, 15, 11, 11);                               // shoulders
+    for (const s of [-1, 1]) {
+      add(SPH(12, 8), 0, s * 7.0, -3.4, 1.8, 6.5, 5.0, 5.0);                   // cheek fluff
+      const ear = new THREE.ConeGeometry(1, 1, 4, 1); ear.rotateY(Math.PI / 4);
+      add(ear, 0, s * 6.6, 8.6, -1.0, 4.8, 10.5, 2.6, -0.12, -s * 0.36);       // ears, leaning out
+      add(SPH(14, 10), 1, s * 4.3, 0.6, 8.25, 2.7, 1.55, 0.9, 0, s * 0.2);     // eyes, outer corners up
+      add(SPH(10, 8), 2, s * 4.3, 0.6, 8.95, 0.42, 1.45, 0.5);                 // slit pupils
+      add(SPH(12, 8), 0, s * 12.5, -4.8, 6.0, 4.2, 2.4, 4.8);                  // paws on the rooftops
+      for (let k = -1; k <= 1; k++) {
+        add(SPH(8, 6), 0, s * 12.5 + k * 1.8, -5.4, 10.0, 1.4, 1.2, 1.4);      // toes
+        add(new THREE.ConeGeometry(1, 1, 5), 3, s * 12.5 + k * 1.8, -6.5, 11.0, 0.28, 1.3, 0.28, Math.PI * 0.85);  // claws
+      }
+    }
+    const geo = mergeGeometries(wp, false);
+    for (const q of wp) q.dispose();
+    geo.computeBoundingSphere();
+    const mat = new THREE.ShaderMaterial({
+      uniforms: watchU,
+      vertexShader: /* glsl */`
+        attribute float aPart;
+        uniform float uBlink; uniform vec3 uEyeL; uniform vec3 uEyeR; uniform vec2 uEyeRad;
+        varying float vPart; varying vec3 vN; varying vec3 vW; varying float vDepth; varying float vEyeD;
+        void main(){
+          vec3 p = position; vPart = aPart; vEyeD = 0.0;
+          if (aPart > 0.5 && aPart < 2.5) {
+            vec3 c = p.x < 0.0 ? uEyeL : uEyeR;
+            vEyeD = length((p.xy - c.xy) / uEyeRad);
+            p.y = c.y + (p.y - c.y) * uBlink;
+          }
+          vec4 w = modelMatrix * vec4(p, 1.0);
+          vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal);
+          vec4 mv = viewMatrix * w; vDepth = -mv.z;
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */`
+        uniform float uGlow; uniform vec3 uFogC; uniform float uFogN; uniform float uFogF; uniform vec3 uRim;
+        varying float vPart; varying vec3 vN; varying vec3 vW; varying float vDepth; varying float vEyeD;
+        void main(){
+          vec3 V = normalize(cameraPosition - vW);
+          float ndv = abs(dot(normalize(vN), V));
+          float rim = pow(1.0 - ndv, 2.6);
+          float f = smoothstep(uFogN, uFogF, vDepth);
+          vec3 col;
+          if (vPart < 0.5) {
+            col = vec3(0.006, 0.005, 0.012) + uRim * rim;
+            col = mix(col, uFogC, f * 0.45);
+          } else if (vPart < 1.5) {
+            col = mix(vec3(1.0, 0.86, 0.36) * 2.6, vec3(1.0, 0.42, 0.05) * 1.3, smoothstep(0.15, 1.0, vEyeD)) * uGlow;
+            col = max(col, vec3(0.012, 0.008, 0.004));
+          } else if (vPart < 2.5) {
+            col = vec3(0.02, 0.006, 0.0);
+          } else {
+            col = vec3(0.30, 0.29, 0.36) * (0.35 + rim);
+            col = mix(col, uFogC, f * 0.45);
+          }
+          gl_FragColor = vec4(col, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }`,
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.name = 'flyer_watcher';
+    m.rotation.order = 'YXZ';
+    m.scale.setScalar(WATCH.s);
+    m.castShadow = false; m.receiveShadow = false;
+    m.userData.noOcclude = true; m.userData.noFade = true;
+    m.raycast = () => {};
+    m.visible = false;
+    scene.add(m);
+    return m;
+  })();
+  const WBASE = { x: locX(WATCH.l, WATCH.a), z: locZ(WATCH.l, WATCH.a) };
+  let watchRise = 0, watchForce = -1, watchNight = 0, blinkT = 0, blinkNext = 3.5, blinkN = 0;
+  const RB = rng(hash('flyer-watcher-blink'));
+
+  // ── GLOW: runway lamp halos + warm light pools on the planks and the grass,
+  // and the watcher's eye halos (ONE additive draw call, after lamps-on only).
+  // A slow "rabbit" chase of light runs down the lamps toward the far end
+  // every 2.6 s: the one lit strip on the field, pointing at the dark.
+  const glowU = { uTime: { value: 0 }, uLamp: { value: 0 }, uEye: { value: 0 }, uWatch: { value: watcher.matrixWorld } };
+  const glow = (() => {
+    const pos = [], aC = [], aP = [], col = [], idx = [];
+    const COL = [[1.0, 0.80, 0.50], [1.0, 0.25, 0.18], [0.45, 1.0, 0.55]];
+    const PCOL = [[1.0, 0.62, 0.30], [0.95, 0.16, 0.10], [0.22, 0.75, 0.32]];
+    const surf = (lx, lz) => {
+      let h = locH(lx, lz);
+      if (Math.abs(lx) <= RWW / 2 + 0.3 && lz >= RW0 - 0.05 && lz <= RW1 + 0.05) h = Math.max(h, deckAt(lz));
+      return h;
+    };
+    const quad = (x, y, z, size, kind, ph, c) => {
+      const b = pos.length / 3;
+      for (const [cx, cy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { pos.push(x, y, z); aC.push(cx, cy, kind, size); aP.push(ph, 0); col.push(c[0], c[1], c[2]); }
+      idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    };
+    for (const L of LAMPS) {
+      // halo (billboard) at the bulb
+      quad(locX(L.x, L.z), PAD.y + L.y + 0.1, locZ(L.x, L.z), L.kind ? 0.62 : 0.55, 0, L.ph, COL[L.kind]);
+      // the pool: a 7×7 patch draped over the planks and the grass
+      const PR = L.kind ? 1.5 : 2.1, N = 6, b = pos.length / 3;
+      for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+        const u = i / N * 2 - 1, v = j / N * 2 - 1, lx = L.x + u * PR, lz = L.z + v * PR;
+        pos.push(locX(lx, lz), PAD.y + surf(lx, lz) + 0.05, locZ(lx, lz));
+        aC.push(u, v, 1, PR); aP.push(L.ph, 0); col.push(...PCOL[L.kind]);
+      }
+      for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+        const a = b + j * (N + 1) + i;
+        idx.push(a, a + N + 1, a + 1, a + 1, a + N + 1, a + N + 2);
+      }
+    }
+    // the watcher's two eye halos (positions in ITS frame; uWatch carries them)
+    for (const e of [WEYE.L, WEYE.R]) quad(e.x, e.y, e.z + 0.8, 5.2 * WATCH.s, 2, 0, [1.0, 0.55, 0.12]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('aC', new THREE.Float32BufferAttribute(aC, 4));
+    geo.setAttribute('aP', new THREE.Float32BufferAttribute(aP, 2));
+    geo.setAttribute('aCol', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: glowU,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+      vertexShader: /* glsl */`
+        uniform float uTime; uniform float uLamp; uniform float uEye; uniform mat4 uWatch;
+        attribute vec4 aC; attribute vec2 aP; attribute vec3 aCol;
+        varying vec3 vCol; varying float vA; varying vec2 vUv; varying float vKind;
+        void main(){
+          float kind = aC.z;
+          vKind = kind; vUv = aC.xy; vCol = aCol;
+          float w = fract(uTime * 0.385) * 1.4 - 0.2;
+          float chase = exp(-pow((w - aP.x) * 9.0, 2.0));
+          float flick = 0.93 + 0.07 * sin(uTime * 13.0 + aP.x * 40.0);
+          if (kind < 0.5) {
+            vec4 mv = viewMatrix * vec4(position, 1.0);
+            float s = aC.w * (1.0 + chase * 0.6);
+            mv.xy += aC.xy * s; mv.z += s * 0.9;
+            gl_Position = projectionMatrix * mv;
+            vA = uLamp * (0.6 + 1.0 * chase) * flick;
+          } else if (kind < 1.5) {
+            gl_Position = projectionMatrix * viewMatrix * vec4(position, 1.0);
+            vA = uLamp * (0.5 + 0.45 * chase) * flick;
+          } else {
+            vec4 mv = viewMatrix * (uWatch * vec4(position, 1.0));
+            mv.xy += aC.xy * aC.w;
+            gl_Position = projectionMatrix * mv;
+            vA = uEye;
+          }
+        }`,
+      fragmentShader: /* glsl */`
+        varying vec3 vCol; varying float vA; varying vec2 vUv; varying float vKind;
+        void main(){
+          float r2 = dot(vUv, vUv);
+          if (r2 > 1.0) discard;
+          float a;
+          if (vKind < 0.5) a = pow(1.0 - r2, 2.4) * 0.8 + exp(-r2 * 26.0) * 1.3;
+          else if (vKind < 1.5) a = (1.0 - r2) * (1.0 - r2) * 0.75;
+          else a = pow(1.0 - r2, 3.0) * 0.55 + exp(-r2 * 14.0) * 0.5;
+          a *= vA;
+          if (a < 0.004) discard;
+          gl_FragColor = vec4(vCol, a);
+        }`,
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.name = 'flyer_runway_glow';
+    m.frustumCulled = false;            // the eye halos ride the watcher's matrix
+    m.renderOrder = 6;
+    m.castShadow = false; m.receiveShadow = false;
+    m.userData.noOcclude = true; m.userData.noFade = true;
+    m.raycast = () => {};
+    m.visible = false;
+    scene.add(m);
+    return m;
+  })();
+
   // windsock (a flapping cone of stripes)
   const wb = new B();
   for (let i = 0; i < 4; i++) wb.add(new THREE.CylinderGeometry(0.42 - i * 0.06, 0.48 - i * 0.06, 0.42, 8, 1, true), i % 2 ? CANDY.gummyOrange : 0xffffff, 0, 0, -0.25 - i * 0.42, Math.PI / 2);
   const sock = wb.build('flyer_sock', { side: THREE.DoubleSide });
-  sock.position.set(locX(2.8, -3.2), PAD.y + 4.3, locZ(2.8, -3.2));
+  sock.position.set(locX(SOCK.x, SOCK.z), PAD.y + locH(SOCK.x, SOCK.z) + 4.3, locZ(SOCK.x, SOCK.z));
   scene.add(sock);
 
   // the helmet (cat-sized, hanging on its peg)
@@ -482,32 +1207,42 @@ export function create(ctx, api) {
   hb.box(0.34, 0.06, 0.24, 0xffffff, 0, 0.06, 0.26);
   for (const s of [-1, 1]) hb.cone(0.12, 0.2, 4, CANDY.gummyRed, s * 0.17, 0.24, -0.02, 0, 0, s * 0.3);
   const helmet = hb.build('flyer_helmet');
-  const hx = locX(2.0, 2.4), hz = locZ(2.0, 2.4);
-  helmet.position.set(hx, PAD.y + 1.55, hz);
+  const hx = locX(WS.x + 2.4, WS.z + 0.9), hz = locZ(WS.x + 2.4, WS.z + 0.9);
+  helmet.position.set(hx, world.height(hx, hz) + 1.75, hz);
   scene.add(helmet);
 
-  // the cat who read one book, sitting on the bench, waiting to be proved right
+  // the cat who read one book, sitting on his bench, watching his runway,
+  // waiting to be proved right
   const cat = catGeo(CAT.furCalico, 'sit', { stripe: 0xa06a30 }).build('flyer_wingnut');
-  const cx = locX(-3.3, -2.6), cz = locZ(-3.3, -2.6);
-  cat.position.set(cx, world.height(cx, cz), cz);
-  cat.rotation.y = HOME_YAW + 2.5;
+  const cx = locX(WS.x + 0.3, WS.z), cz = locZ(WS.x + 0.3, WS.z);
+  cat.position.set(cx, PAD.y + wsy(0.3, 0) + 1.03, cz);
+  cat.rotation.y = HOME_YAW - 0.46;        // looking down the runway
   cat.scale.setScalar(1.25);
   scene.add(cat);
 
   // ── sign ───────────────────────────────────────────────────────────────────
+  const SIGN_POST_X = 1.47;
   const sp = new B();
-  for (const s of [-1, 1]) sp.cyl(0.10, 0.12, 3.5, 6, 0x6b4126, s * 1.0, 1.75, 0);
+  // the posts FLANK the board (±1.47, just outside its ±1.39 timber edge):
+  // at ±1.0 they crossed the double-faced board and ate the ends of every line.
+  // (sunk 0.45 u: the field falls 0.28 u across the board; tops tucked under
+  // the cap rail at 3.6)
+  for (const s of [-1, 1]) sp.cyl(0.10, 0.12, 4.07, 6, 0x6b4126, s * SIGN_POST_X, 1.585, 0);
   sp.box(2.78, 1.43, 0.07, 0x6b4126, 0, 2.9, 0);                        // the board's timber edge
-  sp.box(2.9, 0.12, 0.2, RIB, 0, 3.66, 0);                              // a red cap rail
+  sp.box(2 * SIGN_POST_X + 0.3, 0.12, 0.2, RIB, 0, 3.66, 0);            // a red cap rail over both posts
   const signPost = sp.build('flyer_signpost');
-  const sgx = locX(8.2, 1.2), sgz = locZ(8.2, 1.2);
+  // local x 17.8, not 10.8: at 10.8 a post stood at lateral 11.5 u, inside the take-off corridor
+  // (WIDTH/2 + MARGIN = 16 u) and route.corridor() reported it as a blocker (WAVE 4 integration).
+  const sgx = locX(17.8, -1.2), sgz = locZ(17.8, -1.2);
   const sgy = world.height(sgx, sgz);
   signPost.position.set(sgx, sgy, sgz);
   signPost.rotation.y = 0.85;
   scene.add(signPost);
   const sign = signMesh(2.6, 1.25, [
     { text: 'WING NUT FIELD', size: 50, color: '#3b2415' },
-    { text: 'flight school · 1 lesson', size: 34, color: '#b0202e' },
+    // Contract P: the candy island is the Candy Kingdom on anything painted.
+    { text: 'runway → the Candy Kingdom', size: 30, color: '#b0202e' },
+    { text: 'flight school · 1 lesson', size: 24, color: '#6b4126' },
   ], { bg: '#f2e6c4' });
   // DOUBLE-FACED. A single DoubleSide plane showed its back as mirror
   // writing ('DJEIF TUN'); now the same painted face is glued back to back
@@ -523,18 +1258,31 @@ export function create(ctx, api) {
   sign.position.set(sgx, sgy + 2.9, sgz);
   sign.rotation.y = 0.85;              // square-on to the default iso camera
   scene.add(sign);
-  for (const s of [-1, 1]) ctx.colliders.push({ x: sgx + s * Math.cos(0.85), z: sgz - s * Math.sin(0.85), r: 0.35 });
+  for (const s of [-1, 1]) own({ x: sgx + s * SIGN_POST_X * Math.cos(0.85), z: sgz - s * SIGN_POST_X * Math.sin(0.85), r: 0.35 }, 'signpost');
 
   // the machine is solid where she stands (moved when she is parked elsewhere)
-  let machineCol = { x: PAD.x, z: PAD.z, r: 1.5 };
-  ctx.colliders.push(machineCol);
-  // CLEARANCE CLAIM. cat/nature runs before us and re-tests every instance
-  // against the oriented BOX colliders in ctx.colliders on world:ready, so a
-  // box published here clears the field. h is absolute and below the ground, so
-  // player.js drops it instantly — it is a claim, never a wall.
-  clearanceClaim(ctx, PAD.x, PAD.z, 22, 26, HOME_YAW, 'flyer_pad');
-  ctx.colliders.push({ x: locX(-3.2, 1.6), z: locZ(-3.2, 1.6), r: 1.3 });
-  for (const s of [-1, 1]) for (const pz of POLE_Z) ctx.colliders.push({ x: locX(s * 6.4, pz), z: locZ(s * 6.4, pz), r: 0.32 });
+  let machineCol = own({ x: PAD.x, z: PAD.z, r: 1.5 }, 'machine');
+  // CLEARANCE CLAIM = THE CORRIDOR. cat/nature runs before us and re-tests
+  // every instance against the oriented BOX colliders in ctx.colliders on
+  // world:ready (blanking anything within its 1.5 u pad of the box), so this
+  // box mows the take-off strip: 26 u wide (everything centred within ±14.8
+  // goes, bunting line included), from 10 u behind the start (the workshop) to
+  // 36 u out, where even a lazy climb is above the treetops. h is absolute
+  // and below the ground, so player.js drops it instantly and ride.js retires
+  // it after world:ready: it is a claim, never a wall.
+  // (box convention: lx = dx·cos(rot) + dz·sin(rot), so the pad frame is rot = -HOME_YAW)
+  {
+    const z0 = RUNWAY.CLAIM[0], z1 = RUNWAY.CLAIM[1], zc = (z0 + z1) / 2;
+    clearanceClaim(ctx, locX(0, zc), locZ(0, zc), RUNWAY.WIDTH, z1 - z0, -HOME_YAW, 'flyer_corridor');
+  }
+  // workshop: the bench and the crate are low props you can stand on (Contract A)
+  own({ x: locX(WS.x, WS.z), z: locZ(WS.x, WS.z), w: 2.5, d: 1.2, rot: -HOME_YAW, box: true, h: 1.03 }, 'bench');
+  own({ x: locX(WS.x - 2.1, WS.z + 0.6), z: locZ(WS.x - 2.1, WS.z + 0.6), w: 0.95, d: 0.95, rot: -HOME_YAW, box: true, h: 0.8 }, 'crate');
+  own({ x: locX(WS.x + 2.4, WS.z + 0.9), z: locZ(WS.x + 2.4, WS.z + 0.9), r: 0.2 }, 'helmet_peg');
+  own({ x: locX(SOCK.x, SOCK.z), z: locZ(SOCK.x, SOCK.z), r: 0.22 }, 'windsock');
+  for (const [lx, lz] of poles) own({ x: locX(lx, lz), z: locZ(lx, lz), r: 0.32 }, 'bunting_pole');
+  for (const [lx, lz] of cones) own({ x: locX(lx, lz), z: locZ(lx, lz), r: 0.45 }, 'marker_cone');
+  for (const c of CREW) own({ x: locX(c.x, c.z), z: locZ(c.x, c.z), r: 0.55 }, 'ground_crew');
 
   // ── THERMALS: six columns of rising warm-air motes (one Points draw call) ──
   const thermals = [];
@@ -847,10 +1595,20 @@ export function create(ctx, api) {
   };
   const FLY = { alt: 0, y: 0, speed: 0, vy: 0, energy: 1, heading: 0, thermal: 0, boost: false };
   let phase = null, pt = 0, airT = 0;
-  let flapPhase = 0, propSpin = 0, wingBeat = 0, tuck = 0, fold = 0;
+  let flapPhase = 0, propSpin = 0, wingBeat = 0, tuck = 0, fold = 0, glide = 0;
   let milestone = 0, feather = 0, fromCat = false, bonkCd = 0, warned = 0;
   let gate = null, worldCols = null, parkedT = 0;
-  let fogSaved = undefined, fogOn = false, camSaved = null, camChecked = false;
+  const TOW_DIST = 120, TOW_T = 60;                 // wave 4: Wingnut's rope has a long memory
+  const PARK = { t: 0, away: false, dist: 0 };
+  const CONTACTS = { bonk: 0, hard: 0 };
+  const CONTACT_EV = { kind: '', x: 0, y: 0, z: 0 };
+  let fromIsland = null;                            // where this flight took off ('cat' | 'candy' | null)
+  const contact = (kind) => {
+    CONTACTS[kind]++;
+    CONTACT_EV.kind = kind; CONTACT_EV.x = S.x; CONTACT_EV.y = S.y; CONTACT_EV.z = S.z;
+    ctx.events.emit('flyer:contact', CONTACT_EV);
+  };
+  let fogSaved = undefined, fogOn = false, camSaved = null, camChecked = false, flyElevBase = null, flyElevSet = -1;
   const CAMP = { azimuth: 0, elevation: 0.38 }, GP = { x: 0, z: 0 };
   ctx.state.flying = null;
   let shiftWas = false, hold = false, warmT = 0;
@@ -883,9 +1641,17 @@ export function create(ctx, api) {
   function setFlyer() {
     flyer.position.set(S.x, S.y - SEAT, S.z);
     // nose up on W and while climbing; roll into turns
-    const attitude = -(S.pitch * 0.75 + clamp(S.vy / 34, -0.28, 0.32));
+    // (+ a glider's slight nose-down while gliding, which also tips the
+    // canvas toward the chase camera behind and above her)
+    const attitude = -(S.pitch * 0.75 + clamp(S.vy / 34, -0.28, 0.32)) + glide * 0.1;
     flyer.rotation.set(phase === 'air' ? attitude : S.pitch, S.yaw, S.bank);
-    const flap = Math.sin(flapPhase) * (0.42 + wingBeat * 0.55) * (1 - tuck * 0.8) + wingBeat * 0.18;
+    // Wave-4 polish: a GLIDE is a glide. The wings used to keep a ±26° idle
+    // beat in the air, so a chase-cam frame caught a steep V seen edge-on (two
+    // red sticks, the pink canvas gone). Gliding she now holds them out nearly
+    // flat (the dihedral eased ~15°) with a small flutter; flapping and the
+    // take-off roll beat as before.
+    const amp = (phase ? 0.12 : 0.42) + wingBeat * 0.8;
+    const flap = Math.sin(flapPhase) * amp * (1 - tuck * 0.8) + wingBeat * 0.18 + glide * 0.32;
     // parked away from the field she folds her wings up like a resting moth,
     // so an 11-unit span never spears the lollipops around her
     wingL.rotation.z = (flap - tuck * 0.25) * (1 - fold) - 1.12 * fold;
@@ -917,7 +1683,53 @@ export function create(ctx, api) {
   /** flight state only — leaves the machine where it is parked */
   function resetFlight() {
     S.vy = 0; S.pitch = 0; S.bank = 0; S.turn = 0; S.speed = 0; S.boostT = 0; S.flapCd = 0; S.sinceFlap = 9;
-    flapPhase = 0; wingBeat = 0; tuck = 0;
+    flapPhase = 0; wingBeat = 0; tuck = 0; glide = 0;
+  }
+
+  /**
+   * The watcher: rises only after lamps-on, only while the LENS is at the
+   * field and the visitor is on it, never while she flies. Slow up (≈ 4.5 s),
+   * quicker down; blinks (now and then twice), tilts its head, turns a little
+   * to keep the visitor in view. No allocations.
+   */
+  function watcherUpdate(dt, t, lamp) {
+    const nightK = smoothstep(0.35, 0.95, lamp);
+    watchNight = nightK;
+    let want = 0;
+    if (nightK > 0.001 && !phase) {
+      const cp = ctx.camera.position, p = ctx.systems.player?.position;
+      const camD = Math.hypot(cp.x - PAD.x, cp.z - PAD.z);
+      const pD = p ? Math.hypot(p.x - PAD.x, p.z - PAD.z) : 999;
+      if (camD < 90 && pD < 38) want = 1;
+    }
+    if (watchForce >= 0) watchRise = watchForce;
+    else if (want > watchRise) watchRise = Math.min(want, watchRise + dt * 0.22);
+    else watchRise = Math.max(want, watchRise - dt * (phase ? 1.4 : 0.45));
+    const e = smoothstep(0, 1, watchRise) * nightK;
+    const on = e > 0.004;
+    watcher.visible = on;
+    if (!on) { glowU.uEye.value = 0; return; }
+    blinkT += dt;
+    let lid = 1;
+    if (blinkT > blinkNext) {
+      const bt = blinkT - blinkNext;
+      lid = 1 - Math.sin(clamp(bt / 0.22, 0, 1) * Math.PI);
+      if (bt > 0.22) { blinkT = 0; blinkN++; blinkNext = blinkN % 4 === 3 ? 0.3 : RB.range(2.6, 6.0); }
+    }
+    watchU.uBlink.value = Math.max(0.06, lid);
+    watchU.uGlow.value = nightK * (0.85 + 0.15 * Math.sin(t * 0.9)) * smoothstep(0.3, 0.8, watchRise);
+    glowU.uEye.value = watchU.uGlow.value * lid;
+    watcher.position.set(WBASE.x, WATCH.eyeY - WEYE.L.y * WATCH.s - (1 - e) * WATCH.sink, WBASE.z);
+    let track = 0;
+    const p = ctx.systems.player?.position;
+    if (p) {
+      let d = Math.atan2(p.x - WBASE.x, p.z - WBASE.z) - (HOME_YAW + Math.PI);
+      d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;
+      track = clamp(d, -0.25, 0.25);
+    }
+    watcher.rotation.set(0.1 + Math.sin(t * 0.21) * 0.03, HOME_YAW + Math.PI + track + Math.sin(t * 0.13) * 0.04, Math.sin(t * 0.33) * 0.12);
+    const fog = scene.fog;
+    if (fog) { watchU.uFogC.value.copy(fog.color); watchU.uFogN.value = fog.near; watchU.uFogF.value = fog.far; }
   }
 
   function moveCollider(px, pz) {
@@ -929,7 +1741,7 @@ export function create(ctx, api) {
 
   /** wheel her back to Wing Nut Field */
   function goHome() {
-    S.x = PAD.x; S.z = PAD.z; S.y = PAD.y + SEAT; S.yaw = HOME_YAW;
+    S.x = PAD.x; S.z = PAD.z; S.y = groundAt(PAD.x, PAD.z) + SEAT; S.yaw = HOME_YAW;   // on the planks
     resetFlight(); setFlyer();
     moveCollider(PAD.x, PAD.z);
     parkedT = 0;
@@ -965,12 +1777,36 @@ export function create(ctx, api) {
         parts()?.hearts(hx, PAD.y + 2.1, hz, CANDY.gummyRed, 3);
       },
     });
+    const bx = locX(WS.x - 2.1, WS.z + 0.6), bz = locZ(WS.x - 2.1, WS.z + 0.6);
     ctx.systems.interaction?.register({
       id: 'escape_flyer_book',
-      x: cx, z: cz, r: 2.6,
+      x: bx, z: bz, r: 1.9,
       label: 'Read the book',
       onInteract() {
-        ui()?.say('Chapter One: Birds. Warm air rises. Land anywhere. That is the whole book.', { speaker: 'Wingnut', duration: 4.6 });
+        ui()?.say('Chapter One: Birds. Warm air rises. Point it where you want to go. Land anywhere. That is the whole book.', { speaker: 'Wingnut', duration: 5 });
+      },
+    });
+    // Wingnut himself: runway talk by day, something less cheerful after dark
+    let chat = 0;
+    const DAY = [
+      'I pointed the runway at the Candy Kingdom. The book says: point it where you want to go.',
+      'Hold W, flap hard off the end. That house is shorter than it looks. Mostly.',
+      'My ground crew have flags. They do not know what the flags mean. Neither do I. Very professional.',
+      'Leave her anywhere. If you wander off for good, I come and fetch her. I have a rope.',
+    ];
+    const NIGHT = [
+      'The runway lamps are for you. The two lights at the end of the runway are not mine.',
+      'Do not wave at it. It waves back.',
+      'Fly at night if you like. It never follows the machine. It only ever watches the field.',
+      'Just do not land where the grass is giggling.',
+    ];
+    ctx.systems.interaction?.register({
+      id: 'escape_flyer_wingnut',
+      x: cx, z: cz, r: 2.4,
+      label: 'Talk to Wingnut',
+      onInteract() {
+        const lines = ctx.state.isNight ? NIGHT : DAY;
+        ui()?.say(lines[chat++ % lines.length], { speaker: 'Wingnut', duration: 4.8 });
       },
     });
     markMap();
@@ -984,8 +1820,10 @@ export function create(ctx, api) {
   // from anyone but Wingnut is dropped the moment it is said (queued → removed
   // from the queue; shown → the box is cleared). Speaker-less narration and
   // toasts are untouched.
+  let quietUntil = -1;                            // debugQuiet(): screenshot hush, see the route API
   ctx.events.on('ui:say', (e) => {
-    if (phase !== 'air' || !(FLY.alt > 20) || !e || !e.speaker || e.speaker === 'Wingnut') return;
+    const hush = (phase === 'air' && FLY.alt > 20) || ctx.state.elapsed < quietUntil;
+    if (!hush || !e || !e.speaker || e.speaker === 'Wingnut') return;
     const u = ui(); if (!u) return;
     try {
       const q = u.sayQueue, txt = String(e.text);
@@ -1055,9 +1893,19 @@ export function create(ctx, api) {
    * 0.38 rad lens stares at haze 850 u away; 0.62 keeps the islands under you
    * in the frame.
    */
-  function cameraFollow(dt) {
+  function cameraFollow(dt, alt = 0) {
     const cam = ctx.systems.camera;
-    if (!camSaved || !cam?.setParams) return;
+    if (!cam?.setParams) return;
+    if (!camSaved) {
+      // The camera honours the flight (Contract E: 44 / 0.38 / 40). At cruise
+      // height (70 → 150 u) its flyElev eases up to 0.46, so the chase lens
+      // looks down onto the canvas instead of along it (edge-on wings read as
+      // two red sticks); restored on landing. Below 70 u it is the contract's 0.38.
+      if (flyElevBase === null) { const b = cam.params?.flyElev; if (typeof b !== 'number') return; flyElevBase = b; }
+      const want = flyElevBase + 0.08 * smoothstep(70, 150, alt);
+      if (Math.abs(want - flyElevSet) > 0.002) { flyElevSet = want; cam.setParams({ flyElev: want }); }
+      return;
+    }
     let d = (S.yaw + Math.PI - 0.3) - CAMP.azimuth;
     d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;
     CAMP.azimuth += d * (1 - Math.exp(-1.6 * dt));
@@ -1068,6 +1916,7 @@ export function create(ctx, api) {
   function cameraRestore() {
     camChecked = false;
     if (camSaved) { try { ctx.systems.camera?.setParams?.(camSaved); } catch (e) {} camSaved = null; }
+    if (flyElevBase !== null) { try { ctx.systems.camera?.setParams?.({ flyElev: flyElevBase }); } catch (e) {} flyElevBase = null; flyElevSet = -1; }
   }
 
   function endFlight() {
@@ -1152,6 +2001,7 @@ export function create(ctx, api) {
       }
       if (!hit) continue;
       if (feet > top) continue;                                 // cleared the roof
+      contact('bonk');
       // BUMP OVER IT: push out, slide along the wall (never a U-turn), and hop
       // up toward the roofline — the machine scrambles over a house like a
       // startled hen instead of passing through it or ping-ponging off it
@@ -1228,13 +2078,30 @@ export function create(ctx, api) {
     parkedT = 0;
     markMap();
     if (gate) { gate.enabled = true; gate.label = 'Fly the machine again'; }
-    if (isl === 'candy' && fromCat) {
+    const from = fromIsland;
+    fromIsland = null;
+    if (isl === 'candy' && from === 'cat') {
       fromCat = false;
       ui()?.card?.({ title: 'ESCAPED', body: 'You escaped Cat Island. For now.', buttons: [{ label: 'For now.' }] });
-      ui()?.toast('The ornithopter lands on frosting. The book was right.', 5);
-      api.success('flyer', { landing: { x: off.x, z: off.z } });
+      ui()?.toast('The ornithopter lands on frosting. The book was right. (She will wait here for you.)', 5);
+      api.success('flyer', { to: 'candy', from: 'cat', landing: { x: off.x, z: off.z } });
+    } else if (isl === 'cat' && from === 'candy') {
+      // Contract L: the ride home counts too. The shared event goes out when
+      // the round-trip counter can read it as a RETURN: cat/containment (as of
+      // wave 3) books every escape:success as a new ESCAPE unless it is the
+      // same route it is already waiting on, so a return by air after leaving
+      // by canoe would lose the round trip. Until containment says it reads
+      // {to:'cat'} (acceptsReturnSuccess), its own island watch closes the
+      // trip and we only send the event when it is harmless.
+      ui()?.toast('Back on Cat Island. The cats left the porch light on for you.', 5);
+      const cc = ctx.systems.catContainment;
+      let away = null;
+      try { away = cc?.state?.away ?? null; } catch (e) { away = null; }
+      if (!cc || cc.acceptsReturnSuccess === true || away === 'flyer') {
+        api.success('flyer', { to: 'cat', from: 'candy', landing: { x: off.x, z: off.z } });
+      }
     } else if (isl === 'candy') {
-      ui()?.toast('Landed on Candyland. E to take off again.', 4);
+      ui()?.toast('Landed in the Candy Kingdom. E to take off again.', 4);
     } else {
       ui()?.toast('You landed. Technically. (E to fly again)', 4);
     }
@@ -1243,6 +2110,7 @@ export function create(ctx, api) {
   function touchdown(g) {
     // hard contact bounces; gentle contact rolls to a stop
     if (S.vy < -7.5 && S.speed > 0) {
+      contact('hard');
       S.y = g + SEAT + 0.05;
       S.vy = Math.min(-S.vy * 0.38, 5.5);
       S.speed *= 0.7; S.energy = Math.max(0, S.energy - 0.08);
@@ -1260,6 +2128,164 @@ export function create(ctx, api) {
     parts()?.burst(P_DUST);
   }
 
+  // ── THE TAKE-OFF CORRIDOR (measurement + a debug overlay) ─────────────────
+  // A LEN × WIDTH box from the start of the roll along the runway, its floor
+  // climbing at her real climb rate (climbProfile: the roll, the hop, W held, a
+  // flap every 0.35 s). A collider is a BLOCKER when its footprint enters the
+  // box and its top comes within MARGIN of her feet over it; the terrain is a
+  // blocker past the runway the same way. Tops: h ≤ 1.6 is Contract A's
+  // height above the ground, 1.6 < h < 1e4 the absolute top, and anything
+  // else is read off the drawn geometry with a downward ray (the same rays
+  // name what they hit, so a report says WHAT is in the way).
+  const CORR_DENY = /^(sky|clouds|seaMist|planes|terrain|particles|sourpatch|sugarfin|candy|underseaCave|cave_|inventory|powerups|weapons|cat_citizens|escape_item_beams|world_lamp|flyer_(thermal|horizon|airflow|corridor|watcher|runway_glow|sway)|containment-(cats|glow|ring|paw|raft|rope|fish))/;
+  function corridor(o = {}) {
+    const yaw = o.yaw ?? HOME_YAW;
+    const px = o.pad?.x ?? PAD.x, pz = o.pad?.z ?? PAD.z;
+    const LEN = o.len ?? RUNWAY.LEN, HALF = (o.width ?? RUNWAY.WIDTH) / 2, M = o.margin ?? RUNWAY.MARGIN;
+    const prof = climbProfile(o.flapEvery ?? 0.35, o.pitch ?? 1, LEN + 12);
+    const base = o.pad ? world.height(px, pz) + 0.14 : PAD.y + DECK;
+    const fx = Math.sin(yaw), fz = Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
+    const cols = worldCols || ctx.colliders;
+    // meshes the rays may hit: everything solid-looking near the corridor
+    const cand = [], sph = new THREE.Sphere(), R = LEN + HALF + 10;
+    const mx = px + fx * LEN / 2, mz = pz + fz * LEN / 2;
+    scene.updateMatrixWorld();
+    for (const top of scene.children) {
+      if (CORR_DENY.test(top.name || '')) continue;
+      top.traverse((k) => {
+        if (!k.isMesh || !k.visible || !k.geometry || CORR_DENY.test(k.name || '')) return;
+        if (k.isInstancedMesh) { if (!k.boundingSphere) k.computeBoundingSphere(); sph.copy(k.boundingSphere); }
+        else { if (!k.geometry.boundingSphere) k.geometry.computeBoundingSphere(); sph.copy(k.geometry.boundingSphere); }
+        sph.applyMatrix4(k.matrixWorld);
+        if (Math.hypot(sph.center.x - mx, sph.center.z - mz) - sph.radius > R) return;
+        cand.push(k);
+      });
+    }
+    const rc = new THREE.Raycaster(), O = new THREE.Vector3(), D = new THREE.Vector3(0, -1, 0);
+    const nameOf = (ob) => { let n = ob.name || ob.type; for (let q = ob.parent; q && q !== scene; q = q.parent) if (q.name) n = q.name + '/' + n; return n; };
+    const drawn = (x, z) => {
+      O.set(x, 500, z); rc.set(O, D);
+      const g0 = world.height(x, z);
+      for (const h of rc.intersectObjects(cand, false)) if (h.point.y > g0 + 0.15) return { y: h.point.y, name: nameOf(h.object) };
+      return null;
+    };
+    const blockers = [];
+    let checked = 0, minGap = Infinity;
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (!c || c.claim || c === machineCol) continue;
+      if (typeof c.h === 'number' && c.h < -50) continue;
+      let a0 = Infinity, a1 = -Infinity, l0 = Infinity, l1 = -Infinity;
+      const ca = (c.x - px) * fx + (c.z - pz) * fz, cl = (c.x - px) * rx + (c.z - pz) * rz;
+      if (c.box) {
+        if (!(c.w > 0 && c.d > 0)) continue;
+        const cr = Math.cos(c.rot || 0), sr = Math.sin(c.rot || 0);
+        for (let sx = -1; sx <= 1; sx += 2) for (let sz = -1; sz <= 1; sz += 2) {
+          const lx = sx * c.w / 2, lz = sz * c.d / 2;
+          const wx = c.x + lx * cr - lz * sr - px, wz = c.z + lx * sr + lz * cr - pz;
+          const a = wx * fx + wz * fz, l = wx * rx + wz * rz;
+          if (a < a0) a0 = a; if (a > a1) a1 = a; if (l < l0) l0 = l; if (l > l1) l1 = l;
+        }
+      } else {
+        if (!(c.r > 0)) continue;
+        a0 = ca - c.r; a1 = ca + c.r; l0 = cl - c.r; l1 = cl + c.r;
+      }
+      if (!(a1 > 0 && a0 < LEN && l1 > -HALF && l0 < HALF)) continue;
+      checked++;
+      const g0 = world.height(c.x, c.z);
+      let top, kind, name = c.tag || null;
+      if (typeof c.h === 'number' && c.h <= 1.6) { top = g0 + c.h; kind = 'low'; }
+      else if (typeof c.h === 'number' && c.h < 1e4) { top = c.h; kind = 'abs'; }
+      else {
+        kind = 'solid'; top = -Infinity;
+        const k = 0.35;
+        const probe = c.box
+          ? [[0, 0], [k, k], [k, -k], [-k, k], [-k, -k]].map(([u, v]) => { const cr = Math.cos(c.rot || 0), sr = Math.sin(c.rot || 0); const lx = u * c.w, lz = v * c.d; return [c.x + lx * cr - lz * sr, c.z + lx * sr + lz * cr]; })
+          : [[c.x, c.z], [c.x + c.r * 0.7, c.z], [c.x - c.r * 0.7, c.z], [c.x, c.z + c.r * 0.7], [c.x, c.z - c.r * 0.7]];
+        if (o.drawn === false) top = Infinity;
+        else for (const [qx, qz] of probe) { const q = drawn(qx, qz); if (q && q.y > top) { top = q.y; if (!c.tag) name = q.name; } }
+        if (top === -Infinity) { top = g0 + 2; kind = 'solid-undrawn'; }
+      }
+      const feet = base + profileAt(prof, Math.max(0, a0));
+      const gap = feet - top;
+      if (gap < minGap) minGap = gap;
+      if (gap < M) {
+        if (!name && o.names !== false) { const q = drawn(c.x, c.z); if (q) name = q.name; }
+        const lat = l0 <= 0 && l1 >= 0 ? 0 : Math.min(Math.abs(l0), Math.abs(l1));
+        blockers.push({ kind, name, x: +c.x.toFixed(2), z: +c.z.toFixed(2), shape: c.box ? `box ${c.w.toFixed(1)}×${c.d.toFixed(1)}` : `r ${c.r.toFixed(2)}`,
+          a: +Math.max(0, a0).toFixed(1), lat: +lat.toFixed(1), top: +top.toFixed(2), feet: +feet.toFixed(2), gap: +gap.toFixed(2) });
+      }
+    }
+    // the ground itself, past the end of the deck. Level or falling ground
+    // just past the lip is where every take-off happens (she is only a hop
+    // up), so only ground that RISES above the deck can block: a hill, a bluff.
+    let terrainGap = Infinity, terrainAt = null, terrainRise = -Infinity;
+    for (let a = Z_LEVEL; a <= LEN; a += 1) {
+      const feet = base + profileAt(prof, a);
+      for (let l = -HALF; l <= HALF + 1e-6; l += 2) {
+        const h = world.height(px + fx * a + rx * l, pz + fz * a + rz * l);
+        if (h - base > terrainRise) terrainRise = h - base;
+        if (h <= base + 0.5) continue;
+        if (feet - h < terrainGap) { terrainGap = feet - h; terrainAt = [a, l]; }
+      }
+    }
+    if (terrainGap < M) blockers.push({ kind: 'terrain', name: 'world.height', a: terrainAt[0], lat: Math.abs(terrainAt[1]), gap: +terrainGap.toFixed(2) });
+    blockers.sort((p, q) => p.a - q.a);
+    const samples = [];
+    for (let a = 0; a <= LEN; a += 10) samples.push([a, +(profileAt(prof, a)).toFixed(1)]);
+    return {
+      yaw: +yaw.toFixed(4), bearingDeg: +(yaw * 180 / Math.PI).toFixed(2),
+      toTarget: +((yaw - Math.atan2(RUNWAY.TARGET.x - px, RUNWAY.TARGET.z - pz)) * 180 / Math.PI).toFixed(2),
+      pad: { x: +px.toFixed(2), z: +pz.toFixed(2), deck: +base.toFixed(2) }, len: LEN, width: HALF * 2, margin: M,
+      climb: samples, checked, blockers, minGap: +minGap.toFixed(2), terrainGap: Number.isFinite(terrainGap) ? +terrainGap.toFixed(2) : null, terrainRise: +terrainRise.toFixed(2),
+      clear: blockers.length === 0,
+    };
+  }
+  let corrGroup = null;
+  function corridorShow(on) {
+    if (!on) { if (corrGroup) corrGroup.visible = false; return false; }
+    if (corrGroup) { scene.remove(corrGroup); corrGroup.traverse((k) => { k.geometry?.dispose?.(); k.material?.dispose?.(); }); }
+    const res = corridor();
+    const LEN = RUNWAY.LEN, HALF = RUNWAY.WIDTH / 2;
+    const prof = climbProfile(0.35, 1, LEN + 12);
+    const base = PAD.y + DECK;
+    const W = (lx, lz, y) => [locX(lx, lz), y, locZ(lx, lz)];
+    const grp = new THREE.Group(); grp.name = 'flyer_corridor_debug';
+    // the climb floor: a translucent ribbon HALF either side of her line
+    const pos = [], idx = [];
+    for (let a = 0, i = 0; a <= LEN; a += 2, i++) {
+      const y = base + profileAt(prof, a);
+      pos.push(...W(-HALF, a, y), ...W(HALF, a, y));
+      if (a > 0) { const k = i * 2; idx.push(k - 2, k - 1, k, k - 1, k + 1, k); }
+    }
+    const fg = new THREE.BufferGeometry(); fg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); fg.setIndex(idx);
+    const floor = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: 0x5fe0ff, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false, fog: false }));
+    floor.renderOrder = 6; grp.add(floor);
+    // the box outline on the ground, posts up to the floor, and her flight line
+    const lp = [];
+    const gnd = (lx, lz) => world.height(locX(lx, lz), locZ(lx, lz)) + 0.25;
+    for (const s of [-1, 1]) for (let a = 0; a < LEN; a += 3) { const b = Math.min(LEN, a + 3); lp.push(...W(s * HALF, a, gnd(s * HALF, a)), ...W(s * HALF, b, gnd(s * HALF, b))); }
+    for (const a of [0, LEN]) lp.push(...W(-HALF, a, gnd(-HALF, a)), ...W(HALF, a, gnd(HALF, a)));
+    for (let a = 0; a <= LEN; a += 15) for (const s of [-1, 1]) lp.push(...W(s * HALF, a, gnd(s * HALF, a)), ...W(s * HALF, a, base + profileAt(prof, a)));
+    for (const s of [-1, 1]) for (let a = 0; a < LEN; a += 2) lp.push(...W(s * HALF, a, base + profileAt(prof, a)), ...W(s * HALF, a + 2, base + profileAt(prof, a + 2)));
+    const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
+    grp.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x1b8fb8, fog: false })));
+    const fl = [];
+    for (let a = 0; a < LEN; a += 1) fl.push(...W(0, a, base + profileAt(prof, a) + 1.2), ...W(0, a + 1, base + profileAt(prof, a + 1) + 1.2));
+    const flg = new THREE.BufferGeometry(); flg.setAttribute('position', new THREE.Float32BufferAttribute(fl, 3));
+    grp.add(new THREE.LineSegments(flg, new THREE.LineBasicMaterial({ color: 0xffd23a, fog: false })));
+    // anything in the way: a red column
+    for (const b of res.blockers) {
+      if (b.x === undefined) continue;
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, Math.max(2, b.top - world.height(b.x, b.z)), 8), new THREE.MeshBasicMaterial({ color: 0xff2a3a, transparent: true, opacity: 0.6, fog: false }));
+      m.position.set(b.x, (b.top + world.height(b.x, b.z)) / 2, b.z); grp.add(m);
+    }
+    grp.traverse((k) => { k.userData.noOcclude = true; k.userData.noFade = true; k.frustumCulled = false; });
+    scene.add(grp);
+    corrGroup = grp;
+    return res;
+  }
+
   const route = {
     id: 'flyer',
     label: 'The Flying Machine',
@@ -1269,6 +2295,25 @@ export function create(ctx, api) {
     get state() { return S; },
     thermals,
     spot: PAD,
+    /** Wing Nut Field: where she rests, which way the runway points, the deck height. */
+    home: { x: PAD.x, z: PAD.z, y: PAD.y, yaw: HOME_YAW, deck: PAD.y + DECK, runway: { from: RW0, to: RW1, level: Z_LEVEL, width: RWW } },
+    /** 'bonk' (low over a roof or a trunk) and 'hard' (a bounced touchdown) since load */
+    contacts: CONTACTS,
+    /** abandonment clock: seconds she has been > 120 u from the visitor, and how far */
+    parked: PARK,
+    corridor: (o) => corridor(o),
+    debugCorridorShow: (on = true) => corridorShow(on),
+    /** The thing at the end of the runway: rise 0..1, night 0..1, where it stands. */
+    watcher: { get rise() { return watchRise; }, get night() { return watchNight; }, get visible() { return watcher.visible; }, x: WBASE.x, z: WBASE.z, eyeY: WATCH.eyeY },
+    /** Screenshot hook: pin the watcher's rise (0..1; null/-1 hands it back to the field logic). Night still gates it. */
+    debugWatcher(v = 1) { watchForce = (v === null || v < 0) ? -1 : clamp(+v, 0, 1); return { rise: watchRise, night: watchNight }; },
+    /**
+     * Screenshot hook: for `sec` seconds drop every spoken line but Wingnut's
+     * (the airborne hush). A view that teleports straight onto Cat Island
+     * triggers containment's first-arrival greeters ("A human!") — a line
+     * nobody hears in play, where you arrive by ferry at the pier.
+     */
+    debugQuiet(sec = 8) { quietUntil = ctx.state.elapsed + sec; try { ui()?.clear?.(); } catch (e) { /* optional */ } return true; },
 
     /** Board. `quiet` (screenshot hooks only) skips the take-off fanfare. */
     start(quiet = false) {
@@ -1278,8 +2323,13 @@ export function create(ctx, api) {
       S.y = groundAt(S.x, S.z) + SEAT;          // she stays wherever she last landed
       setFlyer();
       phase = 'run'; pt = 0; airT = 0; milestone = 0; hold = false;
-      fromCat = world.islandAt(S.x, S.z) === 'cat';
-      if (fromCat && !quiet) api.start('flyer', { label: 'The Flying Machine' });
+      fromIsland = world.islandAt(S.x, S.z);
+      fromCat = fromIsland === 'cat';
+      // Contract L: boarding fires escape:start in both directions. From
+      // Candyland it carries arrived:'cat' (the cave's return-trip convention),
+      // so containment reads it as a homecoming, not an escape to shout about.
+      if (!quiet && fromIsland === 'cat') api.start('flyer', { label: 'The Flying Machine', from: 'cat', to: 'candy' });
+      else if (!quiet && fromIsland === 'candy') api.start('flyer', { label: 'The Flying Machine', from: 'candy', to: 'cat', arrived: 'cat' });
       if (!quiet) ui()?.banner('The Flying Machine', 'built by a cat who read one book');
       if (!quiet) ui()?.toast(touchUI
         ? 'A flaps · stick steers + pitches · B boosts · ride the warm air'
@@ -1309,8 +2359,20 @@ export function create(ctx, api) {
       tU.uFly.value = damp(tU.uFly.value, phase === 'air' || phase === 'run' ? 1 : 0, 2, dt);
       const ch = ctx.renderer.domElement.height || 800;
       tU.uPx.value = ch * 0.5 / Math.tan(ctx.camera.fov * Math.PI / 360);
+      // runway paint + lamps: luminous after dark, on the town's lamp schedule;
+      // the lamp pools, the crew's wands, the meadow's sway and the watcher
+      {
+        const lamp = ctx.systems.sky?.lampMix ?? clamp((1 - (ctx.state.daylight ?? 1)) * 1.25, 0, 1);
+        const gI = 0.06 + lamp * 1.25;
+        if (Math.abs(gI - paintGlow) > 0.004) { paintGlow = gI; paint.material.emissiveIntensity = gI; }
+        swayU.uTime.value = t; swayU.uNight.value = lamp;
+        glowU.uTime.value = t; glowU.uLamp.value = clamp(lamp * 1.25, 0, 1);
+        watcherUpdate(dt, t, lamp);
+        glow.visible = glowU.uLamp.value > 0.01 || glowU.uEye.value > 0.005;
+      }
 
       if (!phase) {
+        glide = damp(glide, 0, 3, dt);
         propSpin += dt * 0.35;
         flapPhase = Math.sin(t * 0.45) * 0.25;
         wingBeat = damp(wingBeat, 0, 3, dt);
@@ -1320,17 +2382,22 @@ export function create(ctx, api) {
         sock.rotation.y = HOME_YAW + Math.sin(t * 0.5) * 0.35;
         sock.rotation.x = Math.sin(t * 1.9) * 0.14;
         helmet.rotation.z = Math.sin(t * 1.1) * 0.09;
-        // abandoned away from the field → Wingnut tows her home after 60 s
+        // ABANDONED → Wingnut tows her home. Wave 4: only when she has been left
+        // more than TOW_DIST from the visitor for TOW_T seconds straight. Parked
+        // on Candyland near you, she waits: she is your ride back.
         const away = Math.hypot(S.x - PAD.x, S.z - PAD.z) > 8;
         const p = ctx.systems.player?.position;
+        PARK.away = away;
         if (away && p) {
-          if (Math.hypot(p.x - S.x, p.z - S.z) > 18) parkedT += dt; else parkedT = 0;
-          if (parkedT > 60) {
+          PARK.dist = Math.hypot(p.x - S.x, p.z - S.z);
+          if (PARK.dist > TOW_DIST) parkedT += dt; else parkedT = 0;
+          if (parkedT > TOW_T) {
             goHome();
             if (gate) gate.label = 'Board the flying machine';
-            ui()?.toast('Wingnut towed the flying machine back to Wing Nut Field.', 4);
+            ui()?.toast('Wingnut towed the flying machine back to Wing Nut Field. (He has a rope.)', 4);
           }
-        }
+        } else parkedT = 0;
+        PARK.t = parkedT;
         return;
       }
       pt += dt;
@@ -1349,6 +2416,7 @@ export function create(ctx, api) {
       if (phase === 'run') {
         // pedal down the field: prop spins up, wings start beating; A/D steer
         const k = clamp(pt / 1.3, 0, 1);
+        glide = 0;
         fold = damp(fold, 0, 6, dt);                 // wings open as she rolls
         propSpin += dt * (6 + k * 46);
         flapPhase += dt * (3 + k * 9);
@@ -1379,6 +2447,7 @@ export function create(ctx, api) {
         // gentle landing: roll to a stop along the ground, wings settling —
         // and stop dead against anything solid rather than roll through it
         S.speed = damp(S.speed, 0, 2.6, dt);
+        glide = damp(glide, 0, 4, dt);
         const px = S.x, pz = S.z;
         S.x += Math.sin(S.yaw) * S.speed * dt; S.z += Math.cos(S.yaw) * S.speed * dt;
         if (world.height(S.x, S.z) < 0.35) { S.x = px; S.z = pz; S.speed = 0; }   // never roll off the beach
@@ -1402,7 +2471,7 @@ export function create(ctx, api) {
         setFlyer();
         rider.place(S.x, Math.max(S.y, -0.6), S.z, S.yaw);
         if (pt > 1.0 && milestone >= 0) {
-          milestone = -1;
+          milestone = -1; fromIsland = null;
           goHome();
           const off = stepOff();                 // on the lens's side of the pad, as on landing
           rider.unmount(off.x, off.z);
@@ -1419,11 +2488,12 @@ export function create(ctx, api) {
       // ── airborne ────────────────────────────────────────────────────────
       airT += dt;
       fold = 0;
+      glide = damp(glide, hold || S.sinceFlap > 0.7 ? 1 : 0, 3, dt);
       let thNow = 0;
       if (hold) {
         // screenshot autopilot: hold position, keep everything else alive
         S.vy = 0; S.speed = F_.CRUISE; S.bank = damp(S.bank, 0, 3, dt);
-        flapPhase += dt * 9; propSpin += dt * 34; wingBeat = damp(wingBeat, 0.45, 3, dt);
+        flapPhase += dt * 6; propSpin += dt * 34; wingBeat = damp(wingBeat, 0.12, 3, dt);
       } else {
         const th = thNow = thermalAt(S.x, S.z);
         stepFlight(S, ix, iy, flapReq, boostReq, th, dt);
@@ -1478,7 +2548,7 @@ export function create(ctx, api) {
       ctx.state.flying = FLY;
       fogUpdate();
       if (!camChecked && airT > 0.6) cameraCheck();
-      cameraFollow(dt);
+      cameraFollow(dt, alt);
       hud.update(S, alt, FLY.thermal);
 
       // trailing sparkle so you can read the flight path from a distance
@@ -1490,7 +2560,9 @@ export function create(ctx, api) {
       }
       // hints when you cross the strait
       if (!hold && fromCat && milestone === 0 && S.x < 40) { milestone = 1; ui()?.toast('Open sea. Keep flapping, or glide.'); }
-      if (!hold && fromCat && milestone === 1 && S.x < -30) { milestone = 2; ui()?.toast('Candyland below. Glide down and land anywhere.', 5); }
+      if (!hold && fromCat && milestone === 1 && S.x < -30) { milestone = 2; ui()?.toast('The Candy Kingdom below. Glide down and land anywhere.', 5); }
+      if (!hold && fromIsland === 'candy' && milestone === 0 && S.x > -30) { milestone = 1; ui()?.toast('Open sea. Cat Island is the one with the lights on.'); }
+      if (!hold && fromIsland === 'candy' && milestone === 1 && S.x > 40) { milestone = 2; ui()?.toast('Cat Island below. Wing Nut Field is the striped runway, east of the square.', 5); }
 
       if (hold || airT < 0.4) return;             // clearance window: no landing on take-off
       if (g <= 0.25 && S.y - SEAT <= 0.35) {       // the sea
@@ -1506,7 +2578,7 @@ export function create(ctx, api) {
 
     stop() {
       if (!phase) return;
-      phase = null;
+      phase = null; fromIsland = null;
       endFlight();
       if (rider.riding) rider.unmount(PAD.x, PAD.z);
       worldCols = null;
@@ -1523,10 +2595,10 @@ export function create(ctx, api) {
       // no escape bookkeeping, no take-off chatter still on screen, and the
       // wings caught at a beat that depends on where she is (so two views
       // never show the identical pose)
-      fromCat = false; milestone = 0;
+      fromCat = false; fromIsland = null; milestone = 0;
       try { ui()?.clear?.(); } catch (e) { /* optional */ }
       flapPhase = ((x * 0.37 + z * 0.23 + y * 0.051) % 6.2832 + 6.2832) % 6.2832;
-      wingBeat = 0.45;
+      wingBeat = 0.12; glide = 1;
       S.x = x; S.z = z; S.y = y; S.yaw = yaw; S.vy = 0; S.speed = F_.CRUISE; S.energy = 0.72;
       setFlyer(); rider.place(S.x, S.y, S.z, S.yaw);
       // publish the flight BEFORE snapping, so the camera snaps to flight framing
@@ -1553,8 +2625,10 @@ export function create(ctx, api) {
 
   api.register('flyer', route);
   console.warn('[escape/flyer]', JSON.stringify({
-    pad: [+PAD.x.toFixed(1), +PAD.z.toFixed(1)], clear: +(clear.clear ?? 0).toFixed(2),
-    span: 11.2, ceiling: F_.CEIL, cruise: F_.CRUISE, thermals: thermals.map((t) => [t.id, t.x, t.z]), meshes: 15, apron: !!domeU,
+    pad: [+PAD.x.toFixed(1), +PAD.z.toFixed(1)], yaw: +HOME_YAW.toFixed(4), deck: +(PAD.y + DECK).toFixed(2), claim: [RUNWAY.WIDTH, RUNWAY.CLAIM[1] - RUNWAY.CLAIM[0]],
+    span: 11.2, ceiling: F_.CEIL, cruise: F_.CRUISE, thermals: thermals.map((t) => [t.id, t.x, t.z]), meshes: 17, night: 19, apron: !!domeU,
+    runway: [RW0, RW1, +(PAD.y + deckAt(RW1)).toFixed(2)], lamps: LAMPS.length, crew: CREW.map((c) => [+c.x.toFixed(1), +c.z.toFixed(1)]),
+    tris: { field: Math.round(field.geometry.index ? field.geometry.index.count / 3 : 0), sway: Math.round(sway.geometry.index.count / 3), glow: Math.round(glow.geometry.index.count / 3), watcher: Math.round(watcher.geometry.index.count / 3) },
   }));
   return route;
 }

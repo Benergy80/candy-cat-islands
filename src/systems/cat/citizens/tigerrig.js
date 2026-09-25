@@ -148,6 +148,8 @@ function legGeo() {
 /** TAIL segment — pivot at its base, rings round it. */
 function tailGeo() { const g = ringCyl(0.084, 0.096, TP.tailSeg, 4, false); g.translate(0, TP.tailSeg / 2, 0); return solo(g); }
 
+export { torsoGeo, headGeo, earGeo, muzzleGeo, jawGeo, legGeo, tailGeo };
+
 // ── pools ────────────────────────────────────────────────────────────────────
 /**
  * Extend an existing rig library with the tiger's own parts. 7 extra draw calls;
@@ -193,9 +195,11 @@ export function goHome(o) {
 
 const HATS = ['copCap', 'cap', 'visor', 'topHat', 'sunHat'];
 
-/** Eye (and eye-glow) colour of the tiger a given day coat turns into. */
-const TIGER_EYE = { tiger_orange: 0xffb02c, tiger_white: 0x86e0ff, tiger_grey: 0xcaf46a, tiger_shadow: 0x96ff4a };
-export function tigerEyeHex(pattern) { return TIGER_EYE[TIGER_OF[pattern] || 'tiger_orange'] ?? 0xffb02c; }
+/** Eye (and eye-glow) colour of the tiger a given day coat turns into. Eyeshine,
+ *  not lamplight: every one of them cold (green, ice, white-green) — an amber
+ *  pair vanished into the amber lanterns of Main Street and the Candy Kingdom. */
+const TIGER_EYE = { tiger_orange: 0xe4ffa0, tiger_white: 0x86e0ff, tiger_grey: 0xcaf46a, tiger_shadow: 0x96ff4a };
+export function tigerEyeHex(pattern) { return TIGER_EYE[TIGER_OF[pattern] || 'tiger_orange'] ?? 0xe4ffa0; }
 
 /**
  * Build one citizen's tiger. Eyes, pupils, whiskers and the hat are BORROWED

@@ -117,10 +117,49 @@
 //    melts, gives up, dissolves, goes to sleep off a meal, or its slot frees.
 //    stats().hunting / .watching / .cap.
 //
+// 2026-09-24 WAVE 4 (Contract M, "kids into Cat Island" — sourpatch/raid.js,
+// sourpatch/catsalt.js): once story `rainbow_bridge` is set, every night a PACK
+// of ≤ 8 kids (raid.PACK; their hunting slots come out of the same HUNT_CAP)
+// comes up out of the dark at the foot of the rainbow just past Sugar Pier's
+// salt line at dusk ("…They're on the bridge": audio.play('sourpatch_giggle')
+// if present + a toast), skips over escape.routes.bridge.path, steps off at
+// the Arrivals Pier and hunts on Cat Island by the ordinary night rules — the
+// per-kid island context (k.isl → islCat / SZ) makes landOK, the water, the
+// shore lunges, salt and keepOutOfSalt read Cat Island for a raider. The cats'
+// salt ring round Welcome Plaza (raid.ring) is their Sugar Pier: a refuge they
+// pace outside; the rest of the island is theirs (moveTo walks round the ring
+// and asks a Cat Island nav for a way round anything it is stuck on). Eaten
+// on Cat Island, the visitor wakes in the refuge. The deck is a truce (they
+// walk round a visitor standing on it; hit one there and it goes over the
+// rail and melts in the sea). Both crossings are timed in game hours (kids
+// fixer r2, raid.js THE CLOCK): ashore by ≈ 20:45; in the small hours they
+// slink back to the foot of the rainbow and file home over it from ≈ 04:30,
+// the sunrise turning them back into day kids up on the arc, and out of their
+// own front doors — the deck clear by ≈ 07:00 (a clock jump into the morning —
+// the guest bed at 06:00 — finds them where that clock puts them: raid.js
+// placeMorning, via setPhase's timeJump). No bridge:
+// they come ashore at the Arrivals Pier. A 'threat' map dot follows the pack;
+// its eyes are pinpricks across the strait. +4 draw calls (salt 3, eyes 1),
+// ≈ 5k tris. Debug: api.debug.raid('cross'|'home'|'hunt', f, {frame}),
+// raidPath(), raidProbe(i, tx, tz), raidWhy(x, z, r, mode), eaten('cat'|'candy')
+// (plays the "you were a snack" card now); stats().raid.
+// Kids fixer r1 (WAVE 4): TIGERS are solid to a kid — every tiger's three
+// circles (torso, head, haunches, as citizens.js debugPositions draws them)
+// are read once a frame from catCitizens.cats without allocating; a kid's
+// steps never enter one (+ TIG_PAD) and separate() eases it out to a berth of
+// TIG_BERTH (a hard push when a tiger walks INTO it). A raider walking home at
+// dawn is a day kid: near the pier (or once inside the plaza) the cats' ring
+// does not stop it (ringFree — moveTo, stepOK and the Cat Island A* all let it
+// cross), so nobody is wedged at the pier head between the ring's west edge
+// and the pier-side props; from further off it goes by the roads and round the
+// ring (raid.js returnBrain). The ring is a LIVE test in that A* now (not
+// cached), so the same grid serves hunters and walkers; walled in by keep-off
+// marks alone (the plaza's ammo cache) a raider's A* steps through them once.
 // Measured (A/B with the rig AND props hidden, at the game camera): 9 draw
 // calls / 32.0k tris by day, 13 / 35.3k at night, 14 / 37.3k during the dusk
 // beat. Budget is 40 calls / 60k tris.
-// Kids never leave Candyland: every position test goes through onCandy().
+// Kids never leave Candyland — except the raiding pack (k.raid, above): every
+// position test goes through onHome() (onCandy() for everyone else).
 // Exposes: api.kids [{pos, color, name, state}], api.getMood(), api.phase,
 //          api.hit(kidRef, opts) → result|false, api.stomp(x,z,r), api.stats()
 //          (…hunting, watching, cap, water, dawn), api.puddles.list(),
@@ -146,6 +185,7 @@ import * as V from './sourpatch/lines.js';
 import { createWater } from './sourpatch/water.js';
 import { createPuddles } from './sourpatch/puddles.js';
 import { createNav } from './sourpatch/nav.js';
+import { createRaid } from './sourpatch/raid.js';
 
 // At most this many kids are ever coming after the visitor at once; the rest
 // watch from the edge of the light and step in as slots free up.
@@ -294,23 +334,116 @@ export function create(ctx) {
   // Island — they used to spawn around the player at night and steal Cat
   // Island's interaction prompt. Every position test goes through onCandy().
   const onCandy = (x, z) => x < 0 && world.islandAt(x, z) === 'candy';
+  // WAVE 4 — THE RAID (sourpatch/raid.js): after the rainbow bridge a pack of
+  // kids hunts on CAT ISLAND at night. Every per-kid movement test below reads
+  // the island of the kid being updated (islCat / SZ, switched per kid in
+  // update() from k.isl, exactly like wetOK), so a Candyland kid sees exactly
+  // what it always saw, and a raider's walls are Cat Island's shore, its water
+  // and the cats' salt ring round Welcome Plaza (raid.ring).
+  let raid = null;
+  const onCatI = (x, z) => x > 0 && world.islandAt(x, z) === 'cat';
+  let islCat = false;
+  const CANDY_SZ = { x: DOCK.x, z: DOCK.z, r: SAFE_R };
+  let SZ = CANDY_SZ;                           // the kid's salt refuge: Sugar Pier's, or the cats' ring
+  const ringIn = (x, z, pad = 0) => (raid ? raid.ringIn(x, z, pad) : false);
+  // (a raider walking home in the morning is a day kid: the ring is only
+  // salt to a hunter — ringFree lets it cross the salt near the pier, where
+  // the ring's west edge meets the pier-side props, and out of the plaza if
+  // it is already in it. From further off it walks ROUND the ring as the
+  // night's hunters do: the plaza's fountain, planters and the ammo cache's
+  // halos are a maze to a gummy in a hurry — raid.ringFree())
+  let ringFree = false;
+  const ringOK = (x, z) => !islCat || ringFree || !ringIn(x, z, 0.3);
+  const onHome = (x, z) => (islCat ? onCatI(x, z) : onCandy(x, z));
+  function setIsl(k) {
+    islCat = !!k && k.isl === 'cat';
+    ringFree = islCat && k.raid === 'return' && !!raid && raid.ringFree(k);
+    SZ = islCat && raid && !ringFree ? raid.ring : CANDY_SZ;
+    // (the near-tiger list is built once per kid per frame: TIG_NEAR is far
+    // more than a kid moves in one, and only where tigers are — Candyland's
+    // kids skip it unless the raiding party is on their side of the strait)
+    if (!k) { tlN = 0; tlKid = null; return; }
+    if (tlKid === k && tlFrame === frame) return;
+    tlN = 0; tlKid = k; tlFrame = frame;
+    if (tgN && !k.scripted && k.vis > 0.02 && (k.x > 0 ? tgCat : tgCandy) > 0) nearTigers(k);
+  }
+  // ── TIGERS are solid to a kid (kids fixer r1) ──────────────────────────────
+  // At night some 45 citizens are tigers on the streets the pack hunts (and a
+  // raiding party of them on Candyland's). Once a frame every tiger's three
+  // circles — torso, head, haunches: citizens.js TORSO_R 0.62, HEAD 0.95
+  // ahead r 0.45, REAR 0.6 behind r 0.42, all × tigerScale — are copied into
+  // TG (no allocation); per kid, the ones within TIG_NEAR go into TL, which
+  // stepOK treats as walls (+ TIG_PAD) and separate() eases it out of with a
+  // berth (a hard push, ≤ TIG_STEP a frame, if one walked INTO it).
+  const TIG_MAX = 160, TL_MAX = 36;
+  const TIG_PAD = 0.2, TIG_BERTH = 0.9, TIG_STEP = 0.45, TIG_RATE = 3.4, TIG_NEAR = 7;
+  const TG = new Float32Array(TIG_MAX * 3 * 3), TL = new Float32Array(TL_MAX * 3);
+  let tgN = 0, tlN = 0, tigOff = false, tigPushes = 0, tigFrames = 0, tigEscapes = 0;
+  let tgCat = 0, tgCandy = 0, tlKid = null, tlFrame = -1;
+  function tigCircle(x, z, r) {
+    if (tgN >= TIG_MAX * 3 || !Number.isFinite(x) || !Number.isFinite(z)) return;
+    TG[tgN * 3] = x; TG[tgN * 3 + 1] = z; TG[tgN * 3 + 2] = r; tgN++;
+    if (x > 0) tgCat++; else tgCandy++;
+  }
+  function gatherTigers() {
+    tgN = 0; tgCat = 0; tgCandy = 0; tlKid = null;
+    let cats = null;
+    try { cats = ctx.systems.catCitizens?.cats; } catch (e) { cats = null; }
+    if (!Array.isArray(cats)) return;
+    for (let i = 0; i < cats.length; i++) {
+      const c = cats[i];
+      if (!c || !(c.tigerK > 0.5) || (c.hideK || 0) >= 0.5 || (typeof c.vis === 'number' && c.vis < 0.5)) continue;
+      const sp = c.spec, s = sp && Number.isFinite(sp.size) ? sp.size : 1;
+      const T = (0.56 + 0.62 * s) * (sp && sp.build === 'buff' ? 1.09 : 1);
+      const yw = Number.isFinite(c.yaw) ? c.yaw : 0, sy = Math.sin(yw), cy = Math.cos(yw);
+      tigCircle(c.x, c.z, 0.62 * T);
+      tigCircle(c.x + sy * 0.95 * T, c.z + cy * 0.95 * T, 0.45 * T);
+      tigCircle(c.x - sy * 0.6 * T, c.z - cy * 0.6 * T, 0.42 * T);
+    }
+    if (tgN) tigFrames++;
+  }
+  function nearTigers(k) {
+    const R = TIG_NEAR;
+    for (let j = 0; j < tgN && tlN < TL_MAX; j++) {
+      const dx = TG[j * 3] - k.x, dz = TG[j * 3 + 1] - k.z;
+      if (dx > R || dx < -R || dz > R || dz < -R) continue;
+      TL[tlN * 3] = TG[j * 3]; TL[tlN * 3 + 1] = TG[j * 3 + 1]; TL[tlN * 3 + 2] = TG[j * 3 + 2]; tlN++;
+    }
+  }
+  /** A kid-sized circle here overlaps a tiger near the kid being updated (+ pad). */
+  function inTiger(x, z, r, pad = TIG_PAD) {
+    for (let j = 0; j < tlN; j++) {
+      const dx = x - TL[j * 3], dz = z - TL[j * 3 + 1], m = r + TL[j * 3 + 2] + pad;
+      if (dx * dx + dz * dz < m * m) return true;
+    }
+    return false;
+  }
   // WATER: every walking test goes through landOK, so for a walker the sea,
   // the lake and the river are walls exactly like the shore always was. Only
   // a kid fleeing in a panic, or one that has over-committed at the shore,
   // runs with wetOK set (for the length of its own brain) — and melts.
   let wetOK = false;
   const walkable = (x, z) => world.height(x, z) > 0.35 && lakeOK(x, z);
+  // (a raider on Cat Island may walk the Arrivals Pier's deck too — the pack
+  // comes ashore over it — or it would be stranded there by the first step)
+  const _gd = { h: 0, deck: false, prop: null };
+  const catDeck = (x, z) => { const pl = ctx.systems.player; if (!pl || typeof pl.groundInfo !== 'function') return false; const g = pl.groundInfo(x, z, _gd); return !!(g && g.deck && g.h > 0.35); };
+  const catWalk = (x, z) => world.height(x, z) > 0.35 || catDeck(x, z);
+  const walkHere = (x, z) => (islCat ? catWalk(x, z) : walkable(x, z));
   // wet ground a kid may blunder into: Candyland's own water — the river, the
   // lake, and the sea on this side of the strait (it melts on the first step
   // in, so it never gets further than the shallows)
   const candyWater = (x, z) => x < -18 && water.wet(x, z);
   // (…and across the wet sand of the tideline strip on the way in, which is
   // neither dry enough to walk on nor deep enough to melt in)
+  // (a raider: Cat Island's own sea, this side of the strait)
+  const homeWater = (x, z) => (islCat ? x > 18 && water.wet(x, z) : candyWater(x, z));
   const landOK = (x, z) => wetOK
-    ? (onCandy(x, z) || candyWater(x, z))
-    : (onCandy(x, z) && walkable(x, z) && !water.wet(x, z));
-  // a punt may come down in the water (and melt there), not bounce off it
-  const landFly = (x, z) => (onCandy(x, z) && walkable(x, z)) || candyWater(x, z);
+    ? (onHome(x, z) || homeWater(x, z))
+    : (onHome(x, z) && walkHere(x, z) && !water.wet(x, z));
+  // a punt may come down in the water (and melt there), not bounce off it —
+  // nor inside the cats' salt ring
+  const landFly = (x, z) => ((onHome(x, z) && walkHere(x, z)) || homeWater(x, z)) && ringOK(x, z);
   const dist2d = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
   const angDamp = (cur, tgt, l, dt) => {
     let d = tgt - cur; d = Math.atan2(Math.sin(d), Math.cos(d));
@@ -387,7 +520,7 @@ export function create(ctx) {
       for (let a = 0; a < 12; a++) {
         const ang = (a / 12) * Math.PI * 2 + rr;
         const x = k.x + Math.cos(ang) * rr, z = k.z + Math.sin(ang) * rr;
-        if (!landOK(x, z) || salt.blocked(x, z) || pl.pushOut(x, z, k.r, _po2).hit) continue;
+        if (!landOK(x, z) || !ringOK(x, z) || salt.blocked(x, z) || pl.pushOut(x, z, k.r, _po2).hit) continue;
         k.x = x; k.z = z; return true;
       }
     }
@@ -409,14 +542,20 @@ export function create(ctx) {
   const lowCells = new Map();
   let lowN = 0, lowGhosts = 0, lowSeenLen = -1, lowSeenAudit = null, lowAge = 0, frame = 0;
   const lowStats = { on: 0, off: 0, unstick: 0, fail: 0 };
+  let xMax = 0;                               // low props / keep-off marks binned west of this (Infinity once the raids begin)
   const lowKey = (cx, cz) => (cx + 4096) * 8192 + (cz + 4096);
   function rebuildLow() {
+    const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+    rebuildLow0();
+    if (t0) { const ms = performance.now() - t0; lowStats.ms = +ms.toFixed(2); if (ms > (lowStats.maxMs || 0)) lowStats.maxMs = +ms.toFixed(2); }
+  }
+  function rebuildLow0() {
     const pl = ctx.systems.player, G = pl?.ground;
     lowCells.clear(); lowN = 0; lowGhosts = 0; lowAge = 0;
     lowSeenLen = (ctx.colliders || []).length; lowSeenAudit = pl?.colliderAudit || null;
     if (!G || typeof G.forEachLow !== 'function') return;
     G.forEachLow((i, c, top, base) => {
-      if (!(c.x < 0) || !(top - base > STEP_SEEN)) return;           // Candyland, taller than a kerb
+      if (!(c.x < xMax) || !(top - base > STEP_SEEN)) return;        // Candyland (+ Cat Island: the raid), taller than a kerb
       const br = (c.box ? 0.5 * Math.hypot(c.w || 0, c.d || 0) : (c.r || 0));
       if (!(br > 0)) return;
       const e = { c, top }, R = br + 0.75;                          // + the widest kid + tolerance
@@ -436,7 +575,7 @@ export function create(ctx) {
     // lowClash (and to a punt), and costs one bin entry.
     if (typeof G.kindOf === 'function') {
       for (const c of ctx.colliders || []) {
-        if (!c || !(c.x < 0) || c.solid === false || !(typeof c.h === 'number' && c.h > 1.6 && c.h < 1e4)) continue;
+        if (!c || !(c.x < xMax) || c.solid === false || !(typeof c.h === 'number' && c.h > 1.6 && c.h < 1e4)) continue;
         if (G.kindOf(c) !== 'none') continue;
         const br = c.box ? 0.5 * Math.hypot(c.w || 0, c.d || 0) : (c.r || 0);
         if (!(br > 0)) continue;
@@ -666,6 +805,12 @@ export function create(ctx) {
       const nx = k.x + ux * push, nz = k.z + uz * push;
       if (stepOK(nx, nz, k.r)) { k.x = nx; k.z = nz; }
     }
+    // …never inside a TIGER either (kids fixer r1: on Cat Island at night the
+    // pack sat in tigers' bodies 43% of frames). A tiger walking into a kid
+    // shoves it (hard, ≤ TIG_STEP a frame); inside TIG_BERTH of one it edges
+    // away. The shove may not go into a prop, the water or the salt — then
+    // it slides round the tiger (±50°, ±90°) instead.
+    if (tlN) tigerSep(k, dt);
     // …and never INSIDE the visitor (critic: a hunter 0.76 u from him, half in
     // his jumper). Three of them touching him is still dinner: touching counts
     // at 1.85 u and this keeps them at ~1 u.
@@ -679,6 +824,52 @@ export function create(ctx) {
     const push = Math.min(min - d, SEP_STEP);
     const nx = k.x + ux * push, nz = k.z + uz * push;
     if (stepOK(nx, nz, k.r)) { k.x = nx; k.z = nz; }
+  }
+
+  const TIG_TURN = [0, 0.87, -0.87, 1.57, -1.57];
+  const TIG_ESC = [0.4, 0.7, 1.0, 1.4, 1.9, 2.5, 3.2];
+  function tigerSep(k, dt) {
+    tigOff = true;
+    try {
+      for (let j = 0; j < tlN; j++) {
+        const cx = TL[j * 3], cz = TL[j * 3 + 1], hard = k.r + TL[j * 3 + 2], min = hard + TIG_BERTH;
+        const dx = k.x - cx, dz = k.z - cz;
+        if (dx > min || dx < -min || dz > min || dz < -min) continue;
+        const d2 = dx * dx + dz * dz;
+        if (d2 >= min * min) continue;
+        const d = Math.sqrt(d2);
+        const ux = d > 1e-4 ? dx / d : Math.sin(k.ph * 6.28), uz = d > 1e-4 ? dz / d : Math.cos(k.ph * 6.28);
+        const push = d < hard + 0.05 ? Math.min(hard + 0.08 - d, TIG_STEP) : Math.min(min - d, TIG_RATE * dt);
+        if (push <= 1e-5) continue;
+        for (let q = 0; q < TIG_TURN.length; q++) {
+          const a = TIG_TURN[q], ca = Math.cos(a), sa = Math.sin(a);
+          const vx = ux * ca - uz * sa, vz = ux * sa + uz * ca;
+          const nx = k.x + vx * push, nz = k.z + vz * push;
+          // (a sideways slide must still get it further from this tiger)
+          if (q > 0 && (nx - cx) * (nx - cx) + (nz - cz) * (nz - cz) <= d2) continue;
+          if (stepOK(nx, nz, k.r)) { k.x = nx; k.z = nz; tigPushes++; break; }
+        }
+      }
+      // still inside one (wedged in a knot of them round the visitor, or
+      // between one and a wall: every shove above lands in the next tiger):
+      // it squeezes out toward the nearest spot clear of all of them
+      if (inTiger(k.x, k.z, k.r, -0.05)) {
+        tigOff = false;
+        const a0 = k.ph * 6.28;
+        search: for (let q = 0; q < TIG_ESC.length; q++) {
+          const rr = TIG_ESC[q];
+          for (let a = 0; a < 12; a++) {
+            const ang = a0 + a * 0.5236, ex = Math.cos(ang), ez = Math.sin(ang);
+            if (!stepOK(k.x + ex * rr, k.z + ez * rr, k.r)) continue;          // clear of props AND tigers
+            const st = Math.min(rr, TIG_STEP);
+            tigOff = true;
+            if (st < rr && !stepOK(k.x + ex * st, k.z + ez * st, k.r)) { tigOff = false; continue; }
+            k.x += ex * st; k.z += ez * st; tigEscapes++;
+            break search;
+          }
+        }
+      }
+    } finally { tigOff = false; }
   }
 
   // ── keep-off marks: things with NO collider a kid must still not stand in ─
@@ -708,7 +899,7 @@ export function create(ctx) {
     try {
       const pk = ctx.systems.inventory?.pickups;
       if (Array.isArray(pk)) for (const q of pk) {
-        if (!q || q.taken || !(q.x < 0) || !Number.isFinite(q.z)) continue;
+        if (!q || q.taken || !(q.x < xMax) || !Number.isFinite(q.z)) continue;
         const g = Number.isFinite(q.ground) ? q.ground : world.height(q.x, q.z);
         if (Number.isFinite(q.baseY) && q.baseY - g > 2.4) continue;        // on a roof / a counter: nobody's way
         // the hovering sweet/weapon AND the halo rings round it at head height
@@ -717,7 +908,7 @@ export function create(ctx) {
       }
       const st = ctx.systems.powerups?.stars;
       if (Array.isArray(st)) for (const s of st) {
-        if (!s || s.taken || !(s.x < 0) || !Number.isFinite(s.z)) continue;
+        if (!s || s.taken || !(s.x < xMax) || !Number.isFinite(s.z)) continue;
         if (Number.isFinite(s.y) && s.y - world.height(s.x, s.z) > 2.6) continue;   // airborne: walk under it
         // the collect ring AND the billboard halo round the star (at the game
         // camera a kid 2 u behind the star still sat inside its rainbow ring)
@@ -856,6 +1047,23 @@ export function create(ctx) {
     dynBlocked: (x, z, r, marks) => salt.blocked(x, z) || (marks && markHit(x, z, r)),
     inMark: (x, z, r) => markHit(x, z, r),
     wetAt: (x, z) => !dryLand(x, z),
+    version: () => (ctx.colliders || []).length,
+  });
+  // …and a second one over Cat Island for the raid (sourpatch/raid.js walkCat:
+  // round the houses on the way back to the rainbow in the morning)
+  const catDry = (x, z) => onCatI(x, z) && catWalk(x, z) && !water.wet(x, z);
+  const catNav = createNav(ctx, {
+    island: 'cat', grid: { x0: 12, z0: -132, nx: 400, nz: 378 },
+    // (the ring is read LIVE, not cached: a raider walking home at dawn is let
+    // through it — ringFree — by the same grid the night's hunters are not)
+    okAt: (x, z, r, marks) => (!catDry(x, z) ? 2 : ((!ringFree && ringIn(x, z, 0.4)) || salt.blocked(x, z) || blocked(x, z, r) || (marks && markHit(x, z, r)) ? 1 : 0)),
+    staticAt: (x, z) => (!catDry(x, z) ? 3 : (blocked(x, z, NAV_R) ? 2 : 1)),
+    // (every road node is kept, the plaza's too: only the dawn walkers use
+    // route() — the roads home to the pier, through the plaza — and a
+    // hunter's A* reads the ring live)
+    dynBlocked: (x, z, r, marks) => (!ringFree && ringIn(x, z, 0.4)) || salt.blocked(x, z) || (marks && markHit(x, z, r)),
+    inMark: (x, z, r) => markHit(x, z, r),
+    wetAt: (x, z) => !catDry(x, z),
     version: () => (ctx.colliders || []).length,
   });
 
@@ -1088,6 +1296,9 @@ export function create(ctx) {
     },
     playerPos: () => ctx.systems.player?.position || null,
     respawnSpot,
+    // a raider on Cat Island that has given up (full, or hit once too often)
+    // huffs home over the rainbow, not into the sea (raid.js goHome)
+    raidHome: (k) => !!(raid && raid.goHome(k)),
   };
   const hits = createHits(ctx, hitsD);
 
@@ -1116,19 +1327,38 @@ export function create(ctx) {
   const dunkAt = [];                           // debug: scheduled dunks [{t, i, x, z}]
   const _wp = { x: 0, z: 0 };
   events.on('time:set', () => { timeJump = true; });
-  let hatCd = 24, hatKid = null, photoCd = 6;
+  let hatCd = 24, hatKid = null, photoCd = 6, pounceToastT = -99;
   let starOn = false, starSayCd = 0;
   const lastPlayer = new THREE.Vector3(9999, 0, 9999);
   const _pp = new THREE.Vector3();
+  // WAVE 4: the pack that crosses the rainbow (see sourpatch/raid.js)
+  const rinfo = { playerOnCat: false, playerOnBridge: false, playerOnCandy: false, playerSafeCat: false };
+  raid = createRaid(ctx, {
+    kids, V, rand, hits, water, rig, DOCK, SAFE_R,
+    phase: () => phase, duskStage: () => duskStage,
+    groundY, blocked: (x, z, r) => !!blocked(x, z, r), saltBlocked: (x, z) => !!salt.blocked(x, z),
+    moveTo, faceThing, hopTick, say, puff, homeSpot, damp,
+    meltInWater: (k, why) => meltInWater(k, why),
+    inView: (x, y, z) => inView(x, y, z),
+    catNav,
+    // (Cat Island's low props and keep-off marks join the bins on the next
+    // frames — lowSync / the mark clock — not in the frame the salt is poured)
+    onEnable: () => { xMax = Infinity; lowAge = 99; markAge = MARK_AGE; },
+    // (a debug/render pose starts the night's dread over: no carried-over
+    // grace, pounce or full bellies from the view before)
+    freshNight: () => { night.timer = 0; night.ready = 0; night.pounce = 0; night.sated = 0; },
+  });
 
   function say(k, text, force = false) {
     if (sayCd > 0 && !force) return false;
-    ctx.systems.ui?.say(text, { speaker: k ? k.name : 'Sour Patch Kids' });
+    // (the portrait is always a gummy's: ui.say guesses the family from the
+    // island, and on Cat Island a raider used to get a cat's face)
+    ctx.systems.ui?.say(text, { speaker: k ? k.name : V.GANG, portrait: { family: 'sour', color: k ? k.color : 0x7fdc3a } });
     sayCd = force ? 2.6 : 5.0;
     return true;
   }
   function nextLine(k) {
-    const pool = phase === 'hunting' ? V.NIGHT : (V.DAY[k.archetype] || V.DAY.giggler);
+    const pool = phase === 'hunting' ? (k.isl === 'cat' && V.RAID ? V.RAID : V.NIGHT) : (V.DAY[k.archetype] || V.DAY.giggler);
     const t = pool[k.lineIdx % pool.length]; k.lineIdx++;
     return t;
   }
@@ -1166,9 +1396,63 @@ export function create(ctx) {
   // A kid may stand here: real Candyland ground, no prop, and — wave 2 — not one
   // grain inside a salt patch. Every single movement call goes through this, so
   // salt is a wall for walking, fleeing, dancing, hunting and being punted alike.
-  function stepOK(x, z, r = BODY_R) { return landOK(x, z) && !blocked(x, z, r) && !salt.blocked(x, z); }
+  function stepOK(x, z, r = BODY_R) { return landOK(x, z) && ringOK(x, z) && !blocked(x, z, r) && !salt.blocked(x, z) && !(tlN && !tigOff && inTiger(x, z, r)); }
   const SLIDE_SIGNS_POS = [1, -1], SLIDE_SIGNS_NEG = [-1, 1];
+  /** WAVE 4: on Cat Island the cats' salt ring stands between the pier the
+   *  pack came ashore at and everything else — a straight line through it is
+   *  walked ROUND it (raid.wayTo: the tangent, then along its rim). The
+   *  distance returned is still to the real goal. */
+  //  Cat Island is not the raiders' home ground either: a hunter that has got
+  //  nowhere for CAT_STALL s of trying (a harbour wall, a garden fence, the
+  //  pier's rail) asks the Cat Island nav for a way round (catNav.wayRound,
+  //  the same A* the Candyland strollers use) and follows it for ≤ 3 s.
+  const _rw = { x: 0, z: 0 }, _rd = { x: 0, z: 0, n: 0 };
+  const CAT_STALL = 1.4;
   function moveTo(k, tx, tz, speed, dt) {
+    if (!(islCat && raid && !k.scripted)) return moveTo0(k, tx, tz, speed, dt);
+    const dT = dist2d(k.x, k.z, tx, tz);
+    if (k.rDetOn) {
+      k.rDetT -= dt;
+      const dd = moveTo0(k, k.rDetX, k.rDetZ, speed, dt);
+      if (dd < 0.7 || k.rDetT <= 0) {
+        k.rDetOn = false; k.markFree = false;
+        // (kids fixer r1: at the waypoint the goal can still be round the
+        // corner — the pier-head office at dawn. Walking straight at it again
+        // led it back into the pocket it came out of, and it shuttled there
+        // until the 60 s warp. The next leg is planned at once instead.)
+        if (dd < 0.7 && dT > 2.2) k.rReplan = true;
+      }
+      return dT;
+    }
+    if (ringFree) { _rw.x = tx; _rw.z = tz; } else raid.wayTo(k, tx, tz, _rw);
+    moveTo0(k, _rw.x, _rw.z, speed, dt);
+    // the stall watch: only while it is actually trying to get somewhere
+    if (dT > 2.2) {
+      if (k.rProgT <= 0) { k.rProgX = k.x; k.rProgZ = k.z; }
+      k.rProgT += dt;
+      let ask = k.rReplan;
+      if (!ask && k.rProgT >= CAT_STALL) {
+        if (dist2d(k.x, k.z, k.rProgX, k.rProgZ) >= 0.8) k.rProgT = 0;
+        else ask = true;
+      }
+      if (ask && catNavFrame !== frame) {
+        // one A* a frame across the pack; out of budget (−1: the static
+        // cache is still filling) = ask again on its next move
+        catNavFrame = frame;
+        let r = catNav.wayRound(k.x, k.z, _rw.x, _rw.z, k.r || BODY_R, _rd);
+        k.markFree = false;
+        // (walled in by keep-off marks alone — the plaza's ammo cache and its
+        // halos across the one gap round the arrivals office: step through
+        // them, carefully, this once, as the Candyland strollers do)
+        if (r === 0) { r = catNav.wayRound(k.x, k.z, _rw.x, _rw.z, k.r || BODY_R, _rd, true); if (r === 1) k.markFree = true; }
+        if (r === 1) { k.rDetOn = true; k.rDetX = _rd.x; k.rDetZ = _rd.z; k.rDetT = 3; catDetours++; k.rProgT = 0; k.rReplan = false; }
+        else if (r === 0) { k.rProgT = 0; k.rReplan = false; k.rBoxed = true; }     // (boxed in: raid.js returnBrain gives a dawn walker up sooner)
+      }
+    } else { k.rProgT = 0; k.rReplan = false; }
+    return dT;
+  }
+  let catDetours = 0, catNavFrame = -1;
+  function moveTo0(k, tx, tz, speed, dt) {
     k.goalX = tx; k.goalZ = tz; k.goalF = frame;        // resolveLow: on the bench, or round it?
     speed *= k.visc;                                    // treading (fixer r2): the jitter is cut to a shuffle
     const dx = tx - k.x, dz = tz - k.z, d = Math.hypot(dx, dz);
@@ -1188,7 +1472,8 @@ export function create(ctx) {
       if (q.hit) {
         const mx = q.x - k.x, mz = q.z - k.z, len = Math.hypot(mx, mz);
         if (len > step * 0.3 && len < step * 1.8 && mx * ux + mz * uz > step * 0.05 &&
-            landOK(q.x, q.z) && !salt.blocked(q.x, q.z) && !pl.pushOut(q.x, q.z, r, _po2).hit && !markInto(k, q.x, q.z)) {
+            landOK(q.x, q.z) && ringOK(q.x, q.z) && !salt.blocked(q.x, q.z) && !pl.pushOut(q.x, q.z, r, _po2).hit && !markInto(k, q.x, q.z) &&
+            !(tlN && !tigOff && inTiger(q.x, q.z, r))) {
           k.x = q.x; k.z = q.z; k.moving = speed * Math.min(1, Math.max(0.45, len / step));
           k.desYaw = Math.atan2(mx, mz); return d;
         }
@@ -1212,10 +1497,11 @@ export function create(ctx) {
   // dragged in and melted as a 'walk'). Then along the line, else it stays.
   const SALT_OUT = [0.3, -0.3, 0.6, -0.6];
   function keepOutOfSalt(k, dt) {
-    const d = dist2d(k.x, k.z, DOCK.x, DOCK.z);
-    if (d < SAFE_R) {
-      const ux = (k.x - DOCK.x) / (d || 1), uz = (k.z - DOCK.z) / (d || 1);
-      const tx = DOCK.x + ux * (SAFE_R + 0.6), tz = DOCK.z + uz * (SAFE_R + 0.6);
+    if (k.scripted) return;                     // on the rainbow's deck (raid.js)
+    const d = dist2d(k.x, k.z, SZ.x, SZ.z);
+    if (d < SZ.r) {
+      const ux = (k.x - SZ.x) / (d || 1), uz = (k.z - SZ.z) / (d || 1);
+      const tx = SZ.x + ux * (SZ.r + 0.6), tz = SZ.z + uz * (SZ.r + 0.6);
       const f = Math.min(1, dt * 4);
       let nx = lerp(k.x, tx, f), nz = lerp(k.z, tz, f);
       if (!landOK(nx, nz)) {
@@ -1223,7 +1509,7 @@ export function create(ctx) {
         const a0 = Math.atan2(uz, ux);
         for (let j = 0; j < SALT_OUT.length && !ok; j++) {
           const a = a0 + SALT_OUT[j];
-          nx = lerp(k.x, DOCK.x + Math.cos(a) * (SAFE_R + 0.6), f); nz = lerp(k.z, DOCK.z + Math.sin(a) * (SAFE_R + 0.6), f);
+          nx = lerp(k.x, SZ.x + Math.cos(a) * (SZ.r + 0.6), f); nz = lerp(k.z, SZ.z + Math.sin(a) * (SZ.r + 0.6), f);
           ok = landOK(nx, nz);
         }
         if (!ok) return;
@@ -1530,6 +1816,8 @@ export function create(ctx) {
     if (k.dawnT >= k.dawnDelay + DAWN_SEC + 0.1) {
       k.eyesShut = 0; k.armMode = 'free'; k.crouch = 0; k.slit = 0; k.browOut = 0;
       if (k.sayCd <= 0 && dp < 26 && rand() < 0.5 && say(k, V.DAWN[k.lineIdx++ % V.DAWN.length])) k.sayCd = 20;
+      // a raider on Cat Island: home over the rainbow (raid.js 'return')
+      if (k.raid && raid.afterDawn(k)) return;
       // wanderers and followers just pick their day up from here; everyone
       // with a spot walks back to it
       const far = (k.x - k.anchor.x) ** 2 + (k.z - k.anchor.z) ** 2 > 2.25;
@@ -2121,15 +2409,16 @@ export function create(ctx) {
       for (const k of kids) { k.slot = false; k.lunge = 0; k.sated = false; k.lungeCd = 0; }
       for (let j = 0; j < N && given < HUNT_CAP; j++) {
         const k = kids[(j + nightNo * 7) % N];
-        if (hits.absent(k) || hits.melting(k) || k.gaveUp) continue;
+        if (k.raid || hits.absent(k) || hits.melting(k) || k.gaveUp) continue;
         k.slot = true; given++;
       }
       lunger = null; night.lungeCd = LUNGE_EVERY[0] + rand() * (LUNGE_EVERY[1] - LUNGE_EVERY[0]);
     }
     for (const k of kids) {
       // a puddle of sugar does not report for the night shift, and neither does
-      // one that has already been hit twice and gone home in a huff
-      if (hits.absent(k) || hits.melting(k) || k.gaveUp) continue;
+      // one that has already been hit twice and gone home in a huff (and the
+      // raiding pack is out on the rainbow / Cat Island: raid.js places it)
+      if (k.raid || hits.absent(k) || hits.melting(k) || k.gaveUp) continue;
       if (k.hurt) hits.clear(k);
       let x = k.home.x, z = k.home.z, ok = false;
       // a ring of shapes at the edge of the lamplight — never on top of you;
@@ -2164,16 +2453,31 @@ export function create(ctx) {
   /** Release the slots of hunters that are out of it; hand free slots to the
    *  watchers nearest the visitor (nearest the pier while he is safe or off
    *  the island). Zero allocation: N is 24. */
-  function assignSlots(p, focusX, focusZ) {
+  function assignSlots(p, focusX, focusZ, raidN = 0) {
     let n = 0, w = 0;
+    // WAVE 4: raiders hunting on Cat Island hold their own slots (set in
+    // update()); Candyland gets what is left of the ten
+    const cap = HUNT_CAP - raidN;
     for (const k of kids) {
+      if (k.raid) continue;
       if (k.slot && !slotEligible(k)) { k.slot = false; k.lunge = 0; released++; if (lunger === k) lunger = null; }
       if (k.slot) n++;
     }
-    while (n < HUNT_CAP) {
+    while (n > cap) {
+      // the pack just came ashore: the Candyland slots furthest from the focus go back to watching
+      let worst = null, wd = -1;
+      for (const k of kids) {
+        if (k.raid || !k.slot) continue;
+        const d = (k.x - focusX) ** 2 + (k.z - focusZ) ** 2;
+        if (d > wd) { wd = d; worst = k; }
+      }
+      if (!worst) break;
+      worst.slot = false; worst.lunge = 0; if (lunger === worst) lunger = null; n--; released++;
+    }
+    while (n < cap) {
       let best = null, bd = Infinity;
       for (const k of kids) {
-        if (k.slot || k.hurt || !slotEligible(k) || k.vis < 0.3) continue;
+        if (k.raid || k.slot || k.hurt || !slotEligible(k) || k.vis < 0.3) continue;
         const d = (k.x - focusX) ** 2 + (k.z - focusZ) ** 2;
         if (d < bd) { bd = d; best = k; }
       }
@@ -2184,8 +2488,8 @@ export function create(ctx) {
       best.orbit = Math.atan2(best.z - p.z, best.x - p.x);
       if (night.timer > 2 && best.sayCd <= 0 && rand() < 0.5 && say(best, V.STEPIN[best.lineIdx++ % V.STEPIN.length])) best.sayCd = 16;
     }
-    for (const k of kids) if (!k.slot && slotEligible(k)) w++;
-    huntN = n; watchN = w;
+    for (const k of kids) if (!k.raid && !k.slot && slotEligible(k)) w++;
+    huntN = n + raidN; watchN = w;
   }
 
   /**
@@ -2196,8 +2500,8 @@ export function create(ctx) {
    */
   function watchBrain(k, dt, t, p, dp, playerSafe, reachable) {
     const atDock = playerSafe || !reachable;
-    const fx = atDock ? DOCK.x : p.x, fz = atDock ? DOCK.z : p.z;
-    const R = (atDock ? SAFE_R + WATCH_DOCK : WATCH_R) + k.watchJit;
+    const fx = atDock ? SZ.x : p.x, fz = atDock ? SZ.z : p.z;
+    const R = (atDock ? SZ.r + WATCH_DOCK : WATCH_R) + k.watchJit;
     const cur = Math.atan2(k.z - fz, k.x - fx);
     k.watchA = angDamp(k.watchA, cur, 0.6, dt) + k.orbitDir * 0.07 * dt;
     if ((k.bumped || k.wasBumped) && k.turnCd <= 0) { k.orbitDir *= -1; k.turnCd = TURN_CD; }
@@ -2365,7 +2669,7 @@ export function create(ctx) {
     for (let sg = -1; sg <= 1; sg += 2) {                 // sg +1: toward increasing angle
       for (let n = 1; n <= RIM_N; n++) {
         const a = a0 + sg * n * RIM_STEP, x = p.x + Math.cos(a) * R, z = p.z + Math.sin(a) * R;
-        if (dist2d(x, z, DOCK.x, DOCK.z) < SAFE_R || salt.blocked(x, z) || blocked(x, z, k.r * 0.8)) break;
+        if (dist2d(x, z, SZ.x, SZ.z) < SZ.r || salt.blocked(x, z) || blocked(x, z, k.r * 0.8)) break;
         if (water.wet(x, z)) { if (n < bestN) { bestN = n; best = sg; } break; }
       }
       const a = a0 + sg * Math.PI * 0.5;
@@ -2383,10 +2687,10 @@ export function create(ctx) {
       const a = b + LEAP_FAN[i], sx = Math.sin(a), sz = Math.cos(a);
       for (let j = 0; j < LEAP_R.length; j++) {
         const r = LEAP_R[j], x = k.x + sx * r, z = k.z + sz * r;
-        if (!candyWater(x, z)) continue;
+        if (!homeWater(x, z)) continue;
         water.depth(x, z);
         if (!(k.groundY - water.surf >= LEAP_DROP)) break;          // a wade, not a drop: no hop this way
-        if (dist2d(x, z, DOCK.x, DOCK.z) < SAFE_R) break;             // never over the pier's salt line
+        if (dist2d(x, z, SZ.x, SZ.z) < SZ.r) break;                   // never over the pier's salt line
         // not into him, nor over him
         const t = clamp(((p.x - k.x) * sx + (p.z - k.z) * sz) / r, 0, 1);
         if (dist2d(p.x, p.z, k.x + sx * r * t, k.z + sz * r * t) < VISITOR_R + k.r * 0.6) break;
@@ -2405,16 +2709,19 @@ export function create(ctx) {
 
   /** Pressed up against the salt, pacing sideways, pawing at the line. */
   function saltLine(k, dt, t, p, dp) {
-    const pa = Math.atan2(p.z - DOCK.z, p.x - DOCK.x);
-    const want = pa + k.saltSlot + Math.sin(t * 0.5 + k.ph * 6.28) * 0.055 * k.orbitDir;
+    const pa = Math.atan2(p.z - SZ.z, p.x - SZ.x);
+    // (the cats' ring is wider than the pier's: the same body-width apart)
+    // (the pack at the cats' ring spreads along it in column order: a siege, not a queue)
+    const slotA = islCat ? ((k.rord + 0.5) / Math.max(1, raid.pack.length) - 0.5) * 1.7 : k.saltSlot;
+    const want = pa + slotA + Math.sin(t * 0.5 + k.ph * 6.28) * 0.055 * k.orbitDir;
     k.saltA = angDamp(k.saltA, want, 1.5, dt);
-    const rr = SAFE_R + 0.85;
-    let tx = DOCK.x + Math.cos(k.saltA) * rr, tz = DOCK.z + Math.sin(k.saltA) * rr;
+    const rr = SZ.r + 0.85;
+    let tx = SZ.x + Math.cos(k.saltA) * rr, tz = SZ.z + Math.sin(k.saltA) * rr;
     if (!landOK(tx, tz)) {
       // that stretch of the line is out over the water: shuffle along it
       for (let s = 1; s <= 16; s++) {
         const a2 = k.saltA + s * 0.19 * (s % 2 ? 1 : -1);
-        const x2 = DOCK.x + Math.cos(a2) * rr, z2 = DOCK.z + Math.sin(a2) * rr;
+        const x2 = SZ.x + Math.cos(a2) * rr, z2 = SZ.z + Math.sin(a2) * rr;
         if (landOK(x2, z2)) { k.saltA = a2; tx = x2; tz = z2; break; }
       }
     }
@@ -2427,7 +2734,8 @@ export function create(ctx) {
     k.mouthOpen = damp(k.mouthOpen, 0.18, 4, dt);
     if (rand() < dt * 0.5) { k.hopT = 0; hopTick(k, dt, 9, 0.06); }
     if (dp < 26 && night.saltCd <= 0 && k.sayCd <= 0) {
-      if (say(k, V.SALTY[k.lineIdx++ % V.SALTY.length])) { night.saltCd = 14; k.sayCd = 20; }
+      const pool = islCat && V.CATSALT ? V.CATSALT : V.SALTY;
+      if (say(k, pool[k.lineIdx++ % pool.length])) { night.saltCd = 14; k.sayCd = 20; }
     }
   }
 
@@ -2531,8 +2839,8 @@ export function create(ctx) {
     } else if (!reachable) {
       // player is off the island (ferry, sea, Cat Island): they cannot follow,
       // so they crowd the salt line at Sugar Pier and watch the water.
-      const dDock = dist2d(k.x, k.z, DOCK.x, DOCK.z);
-      if (dDock > SAFE_R + 2.0) { if (k.bursting) moveTo(k, DOCK.x, DOCK.z, 2.8, dt); else k.moving = 0; }
+      const dDock = dist2d(k.x, k.z, SZ.x, SZ.z);
+      if (dDock > SZ.r + 2.0) { if (k.bursting) moveTo(k, SZ.x, SZ.z, 2.8, dt); else k.moving = 0; }
       else { k.moving = 0; keepOutOfSalt(k, dt); }
       faceThing(k, p.x, p.z, 3, dt);
       k.armMode = 'paw';
@@ -2549,7 +2857,10 @@ export function create(ctx) {
       if (stalled(k, dt)) { k.orbit += k.orbitDir * 1.0; k.swingT = 2.5; if (k.stalls % 2 === 0) k.orbitDir *= -1; }
       spaceSlot(k, p, dp, ring, dt);
       const tx = p.x + Math.cos(k.orbit) * ring, tz = p.z + Math.sin(k.orbit) * ring;
-      if (k.bursting) moveTo(k, tx, tz, dp < 12 ? 5.4 : 3.8, dt);
+      // (a raider still streets away on Cat Island scurries — it came a long
+      // way for this; the twitching starts when it is close)
+      const scurry = islCat && dp > 26;
+      if (k.bursting || scurry) moveTo(k, tx, tz, dp < 12 || scurry ? 5.4 : 3.8, dt);
       else k.moving = 0;
       faceThing(k, p.x, p.z, 6, dt);
     } else {
@@ -2629,6 +2940,7 @@ export function create(ctx) {
     if (next === 'watching') { duskStage = 0; duskToast = false; duskTilt = 0; for (const k of kids) { if (hits.melting(k)) continue; k.state = 'idle'; k.vis = Math.max(k.vis, 1); } }
     props.hat.visible = false;
     if (next === 'hunting') { spawnHunters(p); night.sated = 0; }
+    raid.onPhase(next, prev, p, dawn, timeJump);   // (a jump into the morning: the pack is placed by raid.js THE CLOCK)
     if (prev) {
       ctx.events.emit('sourpatch:phase', { phase: next, prev });
       // at night they still have names; you are just less sure they will answer to them
@@ -2642,6 +2954,7 @@ export function create(ctx) {
     let n = 0;
     for (const k of kids) {
       if (hits.melting(k)) continue;
+      if (k.raid && raid.dawn(k)) continue;                   // on the rainbow: it just turns round (raid.js)
       k.state = 'dawn'; k.dawnT = 0;
       k.dawnDelay = ((k.i * 7) % N) / N * DAWN_SPREAD;         // the light reaches each a moment apart
       k.dawnSlit = k.slit; k.dawnBrow = k.browOut; k.dawnCrouch = k.crouch; k.dawnLean = k.lean;
@@ -2659,7 +2972,7 @@ export function create(ctx) {
     dawnHold = 1; dawnCount = n; dawns++;
     ctx.events.emit('sourpatch:dawn', { count: n });
     const pl = ctx.systems.player?.position;
-    if (n && pl && onCandy(pl.x, pl.z)) ctx.systems.ui?.toast('The sun comes up. The Sour Patch Kids remember their manners.', 4);
+    if (n && pl && onCandy(pl.x, pl.z)) ctx.systems.ui?.toast(`The sun comes up. The ${V.GANG} remember their manners.`, 4);
   }
 
   /** Its feet are in the water: melt (hits.waterMelt) and leave a pool of its
@@ -2681,7 +2994,7 @@ export function create(ctx) {
     const pl = ctx.systems.player?.position;
     if (!meltToast && pl && dist2d(pl.x, pl.z, wx, wz) < 40) {
       meltToast = true;
-      ctx.systems.ui?.toast('Sour Patch Kids can\'t swim. Noted.', 3.5);
+      ctx.systems.ui?.toast(`${V.GANG} can't swim. Noted.`, 3.5);
     }
     return true;
   }
@@ -2928,7 +3241,8 @@ export function create(ctx) {
           i: k.i, color: k.color, slot: k.slot, lunge: k.lunge > 0, cause: k.hurt?.cause || null,
           night: phase !== 'hunting' ? null : (k.slot ? 'hunting' : (slotEligible(k) ? 'watching' : 'out')),
           nav: k.state === 'stroll' ? NAV_NAMES[k.navMode] : null, moving: k.moving,
-          gaitAmp: k.gaitAmp, tread: k.tread, out: k.wayOn ? 'way' : k.holdT > 0 ? 'hold' : k.wayAsk ? 'ask' : null });
+          gaitAmp: k.gaitAmp, tread: k.tread, out: k.wayOn ? 'way' : k.holdT > 0 ? 'hold' : k.wayAsk ? 'ask' : null,
+          raid: k.raid || null, isl: k.isl });
       }
       return out;
     },
@@ -2957,7 +3271,7 @@ export function create(ctx) {
         saltPatches: salt.count, playerWalled,
         reacting: { hurting, dizzy, fleeing, stunned, dissolving, puddles, gaveUpAtHome: home, stuck, spinning, staggering, panicking, shrunk },
         ground: { onProp, bumps, unsticks, unstickLog: unstickLog.slice(), api: typeof ctx.systems.player?.pushOut === 'function',
-          low: { props: lowN - lowGhosts, ghosts: lowGhosts, hopOn: lowStats.on, keptOff: lowStats.off, unstick: lowStats.unstick, fail: lowStats.fail },
+          low: { props: lowN - lowGhosts, ghosts: lowGhosts, hopOn: lowStats.on, keptOff: lowStats.off, unstick: lowStats.unstick, fail: lowStats.fail, ms: lowStats.ms, maxMs: lowStats.maxMs },
           marks: { n: markN, pushes: markPushes } },
         star: starOn,
         hunt: { pounce: night.pounce > 0, ready: +night.ready.toFixed(2), sated: night.sated > 0 },
@@ -2971,12 +3285,60 @@ export function create(ctx) {
           turning: kids.reduce((a, k) => a + (k.state === 'dawn' ? 1 : 0), 0),
           strolling: kids.reduce((a, k) => a + (k.state === 'stroll' ? 1 : 0), 0) },
         ...hits.counters(),
+        // WAVE 4: the pack over the rainbow (sourpatch/raid.js)
+        raid: { ...raid.stats(), catDetours, tigers: { circles: tgN, pushes: tigPushes, escapes: tigEscapes, frames: tigFrames } },
       };
     },
     /** The pools of liquid on the water: api.puddles.list() / .active / .mesh */
     puddles,
     /** Verifier / render hooks. None of these run unless called. */
+    /** WAVE 4: the raid (sourpatch/raid.js) — ring, landfall, pack, respawn. */
+    raid,
     debug: {
+      /** WAVE 4: pose the raiding pack — 'cross' (on the rainbow at fraction f),
+       *  'home' (the dawn walk home over it at f), 'hunt' (round the visitor on
+       *  Cat Island). Sets story rainbow_bridge / bridge.debugRaise() itself. */
+      raid(mode = 'cross', f = 0.5, opts = null) { return raid.debug.raid(mode, f, opts); },
+      raidPath() { return raid.debug.path(); },
+      /** Play the "you were a snack" card now: where 'cat' wakes him in the
+       *  cats' refuge (the raid's respawn), anything else at Sugar Pier. */
+      eaten(where = 'candy') { eaten.cancel(); eaten.trigger(where === 'cat' ? raid.respawn : undefined); return true; },
+      /** A dawn walker's roads home: its planned catNav.route nodes [[x, z]…] and where it is along them. */
+      raidRoute(i) {
+        const k = kids[i]; if (!k || !k.rRoute) return null;
+        const pts = [];
+        for (let j = 0; j < Math.max(0, k.rRouteN); j++) { const n = k.rRoute[j]; pts.push([+catNav.X[n].toFixed(1), +catNav.Z[n].toFixed(1)]); }
+        return { n: k.rRouteN, at: k.rRouteI, pts, stuck: +(k.rStuckT || 0).toFixed(1), nodes: catNav.nodes };
+      },
+      /** What stops a raider-sized body (r) at (x, z) on Cat Island? '' = open;
+       *  L land/water · R the cats' ring · S salt · B solid · M mark · W wet ·
+       *  H not walkable · T a tiger (within 7 u of (x, z)) · P the side of a
+       *  low prop (a bench, a planter). mode 'return': the
+       *  dawn walker (the ring does not stop it). */
+      raidWhy(x, z, r = KID_R, mode = 'hunt') {
+        const fake = { isl: 'cat', raid: mode, x, z, scripted: false };
+        setIsl(fake);
+        try {
+          return `${landOK(x, z) ? '' : 'L'}${ringOK(x, z) ? '' : 'R'}${salt.blocked(x, z) ? 'S' : ''}${blocked(x, z, r) ? 'B' : ''}${markHit(x, z, r) ? 'M' : ''}${water.wet(x, z) ? 'W' : ''}${walkHere(x, z) ? '' : 'H'}${tlN && inTiger(x, z, r, 0) ? 'T' : ''}${lowNear(x, z, r) && lowClash(x, z, r, groundY(x, z)) ? 'P' : ''}`;
+        } finally { setIsl(null); }
+      },
+      /** Why can't raider i move (on its own island's terms)? 16 steps round it,
+       *  its ring-detour waypoint toward (tx, tz) and the Cat Island A* result. */
+      raidProbe(i, tx, tz, step = 0.6) {
+        const k = kids[i]; if (!k) return null;
+        setIsl(k);
+        try {
+          const why = (x, z) => `${landOK(x, z) ? '' : 'L'}${ringOK(x, z) ? '' : 'R'}${salt.blocked(x, z) ? 'S' : ''}${blocked(x, z, k.r) ? 'B' : ''}${markHit(x, z, k.r) ? 'M' : ''}${water.wet(x, z) ? 'W' : ''}${walkHere(x, z) ? '' : 'H'}` || 'ok';
+          const ring = [];
+          for (let a = 0; a < 16; a++) { const ang = a / 16 * Math.PI * 2; ring.push(why(k.x + Math.cos(ang) * step, k.z + Math.sin(ang) * step)); }
+          const w = { x: tx ?? k.x, z: tz ?? k.z }; if (!ringFree) raid.wayTo(k, tx ?? k.x, tz ?? k.z, w);
+          const o = { x: 0, z: 0, n: 0 };
+          let res = islCat ? catNav.wayRound(k.x, k.z, w.x, w.z, k.r, o) : null;
+          if (res === 0) res = catNav.wayRound(k.x, k.z, w.x, w.z, k.r, o, true) === 1 ? 'marks' : 0;
+          return { i, name: k.name, x: +k.x.toFixed(2), z: +k.z.toFixed(2), isl: k.isl, raid: k.raid, state: k.state, slot: k.slot, here: why(k.x, k.z), ring: ring.join(' '),
+            way: [+w.x.toFixed(1), +w.z.toFixed(1)], astar: res, det: [+o.x.toFixed(1), +o.z.toFixed(1), o.n], detOn: k.rDetOn, moving: k.moving, bursting: k.bursting, hurt: k.hurt?.mode || null };
+        } finally { setIsl(null); }
+      },
       /** Put kid i (−1: the visible hunting-slot kid nearest (x, z)) at (x, z)
        *  — in the water, say — after `delay` s. */
       dunk(i, x, z, delay = 0) {
@@ -3069,7 +3431,7 @@ export function create(ctx) {
       if (jumped) {
         if (phase === 'hunting') spawnHunters(p, false);
         else for (const k of kids) {
-          if (k.role !== 'follow') continue;
+          if (k.role !== 'follow' || k.raid) continue;
           const a = k.ph * 6.28;
           const x = p.x + Math.sin(a) * k.standoff, z = p.z + Math.cos(a) * k.standoff;
           if (landOK(x, z)) { k.x = x; k.z = z; k.y = k.groundY = groundY(x, z); k.vis = 1; }
@@ -3079,16 +3441,29 @@ export function create(ctx) {
       if (phase === 'hunting') night.timer += dt;
       if (night.sated > 0) night.sated -= dt;
 
-      const playerOnCandy = p.x < -18 && !pl.onFerry;
+      // WAVE 4: where the visitor is, for the raid — on the rainbow's deck he is
+      // on neither island (the truce); on Cat Island the cats' ring is a refuge
+      const onDeck = raid.on && raid.onDeck(p);
+      const playerOnCandy = p.x < -18 && !pl.onFerry && !onDeck;
       const playerSafe = dist2d(p.x, p.z, DOCK.x, DOCK.z) < SAFE_R;
+      // (not flying over it, not in a canoe off its beach: on his feet, near the ground)
+      const playerOnCat = raid.on && !pl.onFerry && !pl.onVehicle && !onDeck && p.x > 18 && world.islandAt(p.x, p.z) === 'cat' && (p.y ?? 0) - world.height(p.x, p.z) < 4.5;
+      const playerSafeCat = playerOnCat && raid.ringIn(p.x, p.z);
+      rinfo.playerOnCat = playerOnCat; rinfo.playerOnBridge = onDeck; rinfo.playerOnCandy = playerOnCandy; rinfo.playerSafeCat = playerSafeCat;
+      raid.update(dt, t, p, rinfo);
+      gatherTigers();                 // (kids fixer r1: tigers are solid to a kid — setIsl picks the near ones)
       let ringCount = 0, touching = 0;
 
       // ── ten at a time; the visitor in the water; the over-commit ───────────
       if (phase === 'hunting') {
         const atDock = playerSafe || !playerOnCandy;
-        assignSlots(p, atDock ? DOCK.x : p.x, atDock ? DOCK.z : p.z);
+        // the pack on Cat Island hunts him there: its slots first (≤ PACK ≤ HUNT_CAP)
+        let raidN = 0;
+        const raidHunt = playerOnCat && raid.pack.length > 0;
+        for (const k of raid.pack) { k.slot = raidHunt && k.raid === 'hunt' && k.vis > 0.3 && slotEligible(k); if (k.slot) raidN++; }
+        assignSlots(p, atDock ? DOCK.x : p.x, atDock ? DOCK.z : p.z, raidN);
         const wasWet = visitorWet;
-        visitorWet = playerOnCandy && !playerSafe && !starOn && !eaten.active && water.wet(p.x, p.z);
+        visitorWet = (playerOnCandy ? !playerSafe : (playerOnCat && !playerSafeCat)) && !starOn && !eaten.active && water.wet(p.x, p.z);
         if (visitorWet && !wasWet) night.lungeCd = Math.max(night.lungeCd, LUNGE_EVERY[0] + rand() * (LUNGE_EVERY[1] - LUNGE_EVERY[0]));
         if (lungeAt.length) {
           // debug/render: over-commits on a schedule (s after the call)
@@ -3113,7 +3488,7 @@ export function create(ctx) {
                 if (d < cd) { cd = d; cand = k; }
               }
               if (!cand) break;
-              if (nav.lineClear(cand.x, cand.z, p.x, p.z, cand.r * 0.8, true) === 1) { cand.lungeSkip = frame; lungeStat.walled++; }   // a wall first: the next one
+              if ((cand.isl === 'cat' ? catNav : nav).lineClear(cand.x, cand.z, p.x, p.z, cand.r * 0.8, true) === 1) { cand.lungeSkip = frame; lungeStat.walled++; }   // a wall first: the next one
               else best = cand;
             }
             if (best) {
@@ -3148,7 +3523,7 @@ export function create(ctx) {
         if (!duskToast && phaseT > 0.7) {
           duskToast = true;
           if (playerOnCandy) {
-            ctx.systems.ui?.toast('Every Sour Patch Kid stops and turns to look at you.', 4);
+            ctx.systems.ui?.toast(`Every ${V.GANG_ONE} stops and turns to look at you.`, 4);
             const near = kids.reduce((a, b) => (dist2d(b.x, b.z, p.x, p.z) < dist2d(a.x, a.z, p.x, p.z) ? b : a));
             say(near, V.DUSK[near.lineIdx++ % V.DUSK.length], true);
           }
@@ -3173,6 +3548,9 @@ export function create(ctx) {
 
       // ── per-kid brains ──────────────────────────────────────────────────────
       for (const k of kids) {
+        // WAVE 4: this kid's island (a raider's walls are Cat Island's)
+        if (k.raid) raid.pre(k);
+        setIsl(k);
         k.sayCd = Math.max(0, k.sayCd - dt);
         k.turnCd = Math.max(0, k.turnCd - dt);
         if (k.lungeCd > 0) k.lungeCd -= dt;              // fixer r4: benched from over-committing (a balk)
@@ -3188,21 +3566,31 @@ export function create(ctx) {
         // its last frame has already counted its lunge down to 0 by the melt)
         const wasLunge = k.lunge > 0;
         wetOK = wasLunge || hm === 'flee' || hm === 'panic';
+        // the visitor, as this kid's island sees him
+        const catKid = k.isl === 'cat';
+        const kidSafe = catKid ? playerSafeCat : playerSafe, kidReach = catKid ? playerOnCat : playerOnCandy;
+        // hit up on the rainbow's deck: over the rail, or a flinch (raid.js)
+        if (k.scripted && k.hurt) raid.knock(k);
+        // on the deck the raid owns it outright (the reaction machine does not run up there)
+        if (k.scripted) raid.brain(k, dt, t, p, dp, rinfo);
         // being hit outranks having a job: the reaction owns the kid while it runs
-        if (hits.brain(k, dt, t, p, dp)) {
+        else if (hits.brain(k, dt, t, p, dp)) {
           if (k.hurt && k.hurt.mode !== 'gone' && k.hurt.mode !== 'sulk') keepOutOfSalt(k, dt);
         }
         // Contract B outranks the schedule: a glowing tourist is everyone's problem
-        else if (starOn && k.vis > 0.3 && playerOnCandy) {
+        else if (starOn && k.vis > 0.3 && kidReach) {
           starBrain(k, dt, t, p, dp);
           if (dp < STAR_FLEE_R && starSayCd <= 0 && k.sayCd <= 0 && rand() < dt * 0.6) {
             if (say(k, V.STAR[k.lineIdx++ % V.STAR.length])) { starSayCd = 5 + rand() * 4; k.sayCd = 12; }
           }
         }
+        // the raid: on the deck, prowling Cat Island, the walk home (raid.js);
+        // false = the ordinary brains below (the night hunt on Cat Island too)
+        else if (k.raid && k.state !== 'dawn' && raid.brain(k, dt, t, p, dp, rinfo)) { /* raid.js */ }
         else if (phase === 'playful') { k.vis = Math.min(1, k.vis + dt * 3); dayBrain(k, dt, t, p, dp); }
         else if (phase === 'watching') duskBrain(k, dt, t, p, dp);
         else {
-          nightBrain(k, dt, t, p, dp, playerSafe, playerOnCandy);
+          nightBrain(k, dt, t, p, dp, kidSafe, kidReach);
           // salt between us doesn't count: you cannot be surrounded through a
           // wall — and only the ones holding a hunting slot are closing in
           const seen = k.slot && k.vis > 0.5 && !salt.segment(k.x, k.z, p.x, p.z);
@@ -3211,18 +3599,22 @@ export function create(ctx) {
         }
 
         // ── shared animation layer ───────────────────────────────────────────
+        setIsl(k);              // (a brain may have moved it: off the deck, home to Candyland)
+        const deck = k.scripted; // up on the rainbow (raid.js): its feet are the deck, nothing to collide with
         // salt thrown at their feet shoves them out with a squeak
-        if (salt.count && k.vis > 0.2 && salt.push(k) && !k.hurt && rand() < 0.35) {
+        if (!deck && salt.count && k.vis > 0.2 && salt.push(k) && !k.hurt && rand() < 0.35) {
           k.hopT = 0; k.squash = -0.16; puff(k, 5, 0.5);
           if (k.sayCd <= 0 && patchCd <= 0 && say(k, V.SALT_PATCH[k.lineIdx++ % V.SALT_PATCH.length])) { patchCd = 9; k.sayCd = 14; }
         }
         // Contract A: nothing solid may be inside a kid, whatever moved it
         // (other kids first, then the props — the props always win)
-        separate(k, p, dt);
-        keepOffMarks(k);        // pickups, low stars, flower beds: no collider, still not a place to stand
-        resolveProps(k);
-        resolveLow(k);          // …and never half inside a bench: fully on it, or fully off
-        lowMargin(k, dt);       // …and never parked flush against its back
+        if (!deck) {
+          separate(k, p, dt);
+          keepOffMarks(k);      // pickups, low stars, flower beds: no collider, still not a place to stand
+          resolveProps(k);
+          resolveLow(k);        // …and never half inside a bench: fully on it, or fully off
+          lowMargin(k, dt);     // …and never parked flush against its back
+        }
         // a stroller (or a day kid) shoved back every frame — a crowd, the
         // visitor, the bank of the syrup — is STANDING, not walking on the
         // spot: its gait follows where it really went. Two measures: a
@@ -3276,21 +3668,25 @@ export function create(ctx) {
           k.wedgeT = 0; k.wantT = 0; k.wedgeN = 0; k.wedgeX = k.x; k.wedgeZ = k.z;
           if (phase !== 'playful' || k.hurt || starOn || k.state !== 'idle') { k.wayOn = false; k.wayAsk = false; k.holdT = 0; }
         }
-        if (k.state !== 'stroll') k.markFree = false;   // stepping through a flower bed was for that one walk
+        if (k.state !== 'stroll' && !k.rDetOn) k.markFree = false;   // stepping through a flower bed was for that one walk (or a raider's one way round)
         // Contract B: touch the invincible visitor and you go flying
-        if (starOn && k.vis > 0.5 && playerOnCandy && dist2d(k.x, k.z, p.x, p.z) < 0.95 + k.r) {
+        if (starOn && k.vis > 0.5 && !deck && kidReach && dist2d(k.x, k.z, p.x, p.z) < 0.95 + k.r) {
           if (hits.bounce(k, p.x, p.z, STAR_BOUNCE) && k.sayCd <= 0 && rand() < 0.5) {
             say(k, V.BONK[k.lineIdx++ % V.BONK.length]); k.sayCd = 6;
           }
         }
         // WATER: feet in the sea, the lake or the river — it melts, and a pool
         // of its own colour floats where it went in
-        if (k.vis > 0.3 && !hits.melting(k) && !(k.air > 0.05) && water.wet(k.x, k.z)) meltInWater(k, wasLunge ? 'lunge' : undefined);
+        if (!deck && k.vis > 0.3 && !hits.melting(k) && !(k.air > 0.05) && water.wet(k.x, k.z)) meltInWater(k, wasLunge ? 'lunge' : undefined);
         wetOK = false;
         // hard containment net: whatever any brain did, a kid that is no longer
         // standing on Candyland goes straight back to its own front door
-        // (never one melting into the shallows it walked into).
-        if (!onCandy(k.x, k.z) && !hits.inWater(k)) {
+        // (never one melting into the shallows it walked into). A raider on
+        // Cat Island: back to where the pack came ashore; on the deck: none.
+        if (deck || hits.inWater(k)) { /* the deck / a pool on the water */ }
+        else if (k.isl === 'cat') {
+          if (!onCatI(k.x, k.z)) { k.x = raid.landfall.x; k.z = raid.landfall.z; k.moving = 0; }
+        } else if (!onCandy(k.x, k.z)) {
           k.x = k.home.x; k.z = k.home.z; k.moving = 0;
           if (!onCandy(k.x, k.z)) { k.x = VILLAGE.x; k.z = VILLAGE.z; }
         }
@@ -3299,8 +3695,8 @@ export function create(ctx) {
         // the sink when they dissolve).
         // Contract A: groundInfo(x, z).h — up onto low props, down off them.
         // A step of more than a hand's height gets a little jelly landing.
-        const g = groundY(k.x, k.z);
-        k.onProp = !!_gi.prop; k.lowOn = _gi.prop || null;
+        const g = deck ? k.ry : groundY(k.x, k.z);
+        k.onProp = !deck && !!_gi.prop; k.lowOn = deck ? null : (_gi.prop || null);
         // mid-punt, `air` is height above the ground UNDER the kid: keep the
         // arc continuous when that ground steps (off a bench = a longer fall)
         if (k.air > 0.001 && k.hurt && k.hurt.mode === 'fly') k.air = Math.max(0, k.air + k.groundY - g);
@@ -3316,7 +3712,9 @@ export function create(ctx) {
         k.squash = clamp(k.squash + k.squashV * dt, -0.28, 0.22);
         // hunch: at night they fold forward and drop, which is most of the scare
         // (the dawn turn and the water melt pose it themselves)
-        if (k.state !== 'dawn' && !hits.inWater(k)) k.crouch = damp(k.crouch, phase === 'hunting' ? 0.82 : 0, 3.5, dt);
+        // — except up on the rainbow, where the night column marches upright
+        // (kids polisher r1: the hero shot needs their faces, not their crowns)
+        if (k.state !== 'dawn' && !hits.inWater(k)) k.crouch = damp(k.crouch, phase === 'hunting' ? (deck ? 0.08 : 0.82) : 0, 3.5, dt);
         // head look-at (the dusk beat owns the head during the freeze)
         const lookR = phase === 'hunting' ? 40 : 17;
         if (k.hurtHead) {
@@ -3336,7 +3734,9 @@ export function create(ctx) {
         if (phase !== 'watching' && !k.hurtHead && k.state !== 'dawn') {
           if (k.role !== 'lick' || phase !== 'playful') k.headPitch = damp(k.headPitch, k.lie > 0.5 ? 0.2 : (phase === 'hunting' ? -0.05 : 0), 5, dt);
           if (k.role !== 'dance' && k.role !== 'sit' || phase !== 'playful') {
-            k.headRoll = damp(k.headRoll, phase === 'hunting' ? Math.sin(t * 1.7 + k.ph * 6.28) * 0.12 : 0, 4, dt);
+            // (on the deck every head tilts the same way at the same time:
+            // one slow metronome for the whole column)
+            k.headRoll = damp(k.headRoll, phase === 'hunting' ? (deck ? Math.sin(t * 0.85) * 0.3 : Math.sin(t * 1.7 + k.ph * 6.28) * 0.12) : 0, 4, dt);
           }
         }
         if (k.role !== 'lick' && k.role !== 'tag' && k.role !== 'follow' && k.state === 'idle' && phase !== 'hunting' && !k.hurt && !starOn) {
@@ -3355,19 +3755,25 @@ export function create(ctx) {
         }
       }
 
+      setIsl(null);
       // ── the pounce ──────────────────────────────────────────────────────────
       if (starOn) { night.ready = 0; night.pounce = 0; }
       else if (phase === 'hunting' && !eaten.active && night.sated <= 0) {
-        if (ringCount >= 3 && night.timer > HUNT_GRACE && !playerSafe && playerOnCandy && !visitorWet) night.ready += dt;
+        const open = (playerOnCandy && !playerSafe) || (playerOnCat && !playerSafeCat);   // (Cat Island: the pack)
+        if (ringCount >= 3 && night.timer > HUNT_GRACE && open && !visitorWet) night.ready += dt;
         else night.ready = Math.max(0, night.ready - dt * 1.5);
         if (night.ready > 2.2 && night.pounce <= 0) {
           night.pounce = 6;
-          ctx.systems.ui?.toast('They stop circling.', 2);
+          // (once in a while: a pounce that does not land — three of them
+          // cannot reach him through a street's props — is tried again six
+          // seconds later, and the toast every six seconds read as a stutter)
+          if (t - pounceToastT > 25) { pounceToastT = t; ctx.systems.ui?.toast('They stop circling.', 2); }
         }
         if (night.pounce > 0) {
           night.pounce -= dt;
           if (touching >= 3 && !pl.invulnerable) {
-            eaten.trigger();
+            // eaten on Cat Island he wakes in the cats' refuge, not at Sugar Pier
+            eaten.trigger(playerOnCat ? raid.respawn : undefined);
             night.sated = 22; night.pounce = 0; night.ready = 0;
             for (const k of kids) {
               k.burstT = 0.3; k.mouthOpen = 0;
@@ -3412,9 +3818,14 @@ export function create(ctx) {
         rig.pose(k.i, k, t);
       }
       rig.commit();
-      // never own the interaction prompt off Candyland: on Cat Island a kid
-      // across the water used to out-bid the cats' own interactables.
-      for (const e of entries) e.enabled = playerOnCandy && kids[e.ki].vis > 0.5;
+      raid.post(nightMix, dt);    // the pack's eyes, pinpricks across the strait (+ the night column's shade)
+      // never own the interaction prompt off the kid's own island: on Cat Island
+      // a kid across the water used to out-bid the cats' own interactables
+      // (a raider on Cat Island may be pleaded with there; nobody on the deck)
+      for (const e of entries) {
+        const kk = kids[e.ki];
+        e.enabled = kk.vis > 0.5 && !kk.scripted && (kk.isl === 'cat' ? playerOnCat : playerOnCandy);
+      }
     },
   };
   return api;

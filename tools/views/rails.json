@@ -1,0 +1,255 @@
+{
+ "rails_pier": {
+  "pos": [
+   -33,
+   24.5
+  ],
+  "time": 12,
+  "frames": 45
+ },
+ "rails_pier_side": {
+  "free": [
+   -36,
+   22
+  ],
+  "y": 5.5,
+  "az": 0.35,
+  "el": 0.42,
+  "dist": 30,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_cupcake": {
+  "free": [
+   -89,
+   -7.5
+  ],
+  "y": 5.5,
+  "az": 0.2,
+  "el": 0.5,
+  "dist": 26,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_cupcake_nw": {
+  "free": [
+   -97,
+   -27
+  ],
+  "y": 10,
+  "az": 4.1,
+  "el": 0.5,
+  "dist": 44,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_cupcake_top": {
+  "free": [
+   -79.5,
+   -25
+  ],
+  "y": 15.6,
+  "az": 2.1,
+  "el": 0.55,
+  "dist": 26,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_lookout": {
+  "free": [
+   -176,
+   -52
+  ],
+  "y": 33.5,
+  "az": 0.78,
+  "el": 0.55,
+  "dist": 26,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_lookout_in": {
+  "pos": [
+   -180.5,
+   -55.5
+  ],
+  "el": 1.15,
+  "dist": 24,
+  "time": 12,
+  "frames": 45
+ },
+ "rails_monument": {
+  "pos": [
+   -170,
+   -58
+  ],
+  "time": 12,
+  "frames": 45
+ },
+ "rails_peak_bridge": {
+  "free": [
+   -170.4,
+   -50.2
+  ],
+  "y": 17.0,
+  "az": 0.4,
+  "el": 0.6,
+  "dist": 22,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_bridge_main": {
+  "pos": [
+   -113,
+   41.5
+  ],
+  "time": 12,
+  "frames": 45
+ },
+ "rails_bridge_north": {
+  "pos": [
+   -128.5,
+   19
+  ],
+  "time": 12,
+  "frames": 45
+ },
+ "rails_lake": {
+  "pos": [
+   -209,
+   51
+  ],
+  "time": 12,
+  "frames": 45
+ },
+ "rails_lake_terrace": {
+  "pos": [
+   -185,
+   41
+  ],
+  "time": 12,
+  "frames": 45
+ },
+ "rails_cave_cat": {
+  "pos": [
+   1400,
+   -123.5
+  ],
+  "time": 12,
+  "frames": 70
+ },
+ "rails_cave_palace": {
+  "pos": [
+   1401,
+   122
+  ],
+  "time": 12,
+  "frames": 70
+ },
+ "rails_cupcake_mezz": {
+  "pos": [
+   -86.08,
+   -13.06
+  ],
+  "posY": 14.97,
+  "el": 1.05,
+  "dist": 22,
+  "time": 12,
+  "frames": 45
+ },
+ "rails_shrine": {
+  "free": [
+   -224.5,
+   -45.5
+  ],
+  "y": 7.6,
+  "az": 4.5,
+  "el": 0.55,
+  "dist": 22,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_viewpoint": {
+  "free": [
+   -148.5,
+   -62.8
+  ],
+  "y": 11.0,
+  "az": 0.9,
+  "el": 0.6,
+  "dist": 20,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_lookout_head": {
+  "free": [
+   -183.65,
+   -58.97
+  ],
+  "y": 33.0,
+  "az": 0.971,
+  "el": 0.339,
+  "dist": 7.53,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_cupcake_mezz_bite": {
+  "pos": [
+   -83.22,
+   -16.52
+  ],
+  "posY": 14.97,
+  "az": -1.871,
+  "el": 0.95,
+  "dist": 15,
+  "time": 12,
+  "frames": 45
+ },
+ "rails_summit_hut": {
+  "free": [
+   -160.96,
+   -58.81
+  ],
+  "y": 16.0,
+  "az": -0.429,
+  "el": 0.6,
+  "dist": 14,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_peak_bridge_wide": {
+  "free": [
+   -167.0,
+   -54.0
+  ],
+  "y": 16.5,
+  "az": 2.4,
+  "el": 0.6,
+  "dist": 26,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_lookout_lip": {
+  "pos": [
+   -184.1,
+   -59.28
+  ],
+  "posY": 33.23,
+  "az": 0.971,
+  "el": 0.45,
+  "dist": 7,
+  "time": 12,
+  "frames": 45
+ },
+ "rails_cupcake_head": {
+  "pos": [
+   -86.12,
+   -22.85
+  ],
+  "posY": 14.97,
+  "az": -0.37,
+  "el": 1.0,
+  "dist": 13,
+  "time": 12,
+  "frames": 45
+ }
+}

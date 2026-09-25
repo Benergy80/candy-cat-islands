@@ -4,6 +4,7 @@
 // (api.lakeSurface) so the terrain builder can take it over later.
 import * as THREE from 'three';
 import { C, SPRINKLE, createBuilder, bench, fenceLine, icingDrip, softGlow, door, windowPane, lamppost } from './kit.js';
+import { railRun, caneStyle, arcPts } from './rails.js';
 
 export function buildLake(A) {
   const { B, world } = A;
@@ -116,12 +117,12 @@ function lakeShore(A, X, Z, WY, shoreAt, bx, bz) {
       B.waffleCyl(3.1, 3.35, 0.44, 16, { at: [tx, ty + 0.22, tz], color: C.waferPale });
       B.tor('icing', 3.1, 0.15, 5, 20, { at: [tx, ty + 0.44, tz], rot: [Math.PI / 2, 0, 0], color: C.icingMint });
       A.deckRing(tx, tz, 0, 3.0, ty + 0.46);
-      for (let i = 0; i < 7; i++) {                 // rail on the water side
-        const aa = face - 1.25 + (2.5 * i) / 6;
-        const px = tx + Math.sin(aa) * 3.0, pz = tz + Math.cos(aa) * 3.0;
-        B.stripeCyl(0.12, 0.13, 1.15, { at: [px, ty + 1.02, pz], variant: 3, seg: 6 });
-        B.sph('gloss', 0.19, 6, 5, { at: [px, ty + 1.66, pz], color: SPRINKLE[i % SPRINKLE.length] });
-      }
+      // HANDRAIL (Contract O): the drum is half a unit proud of the bank on
+      // the road side but its lake side stands ~1.7 over the chocolate. The
+      // seven canes that stood there (no rail, no collider) are now a measured
+      // rail: canes + striped rail + colliders wherever the rim drops > 1.2.
+      railRun(A.ctx, B, arcPts(tx, tz, 2.85, face - Math.PI, face + Math.PI, ty + 0.46).map(([x, z, yy]) => [x, z, yy]),
+        { site: 'lake_terrace', edge: 'rim', out: 1, lead: 1, style: caneStyle({ variant: 3 }) });
       bench(B, tx - Math.sin(face) * 1.4, ty + 0.46, tz - Math.cos(face) * 1.4, face, { w: 2.4, A });
       // a telescope on a post, pointed at the chocolate fountain
       const px = tx + Math.sin(face + 0.9) * 2.1, pz = tz + Math.cos(face + 0.9) * 2.1;
@@ -310,13 +311,17 @@ function buildBoathouse(A, x, z, rotY, WY) {
   for (const k of [0, 1]) B.cyl('matte', 0.08, 0.12, 2.9, 6, { at: P(W / 2 - 0.35 - k * 0.22, 1.5, D / 2 - 0.25), rot: [0.3 + k * 0.06, rotY, 0.32], color: k ? C.chocMilk : C.caramel });
   B.tor('matte', 0.42, 0.12, 6, 12, { at: P(-W / 2 + 0.9, 0.62, D / 2 + 0.7), rot: [Math.PI / 2, 0, 0], color: C.licorice });
 
-  // walls are solid; the doorway is a gap
+  // walls are solid — and so is the door: it is a shut, DECORATIVE door (a
+  // leaf drawn closed in the frame, no room behind it), so the collider runs
+  // straight across it. A gap here let the visitor walk through a closed door
+  // into an empty shell (Contract O: a collider gap only where a door opens).
   const top = y + fl + H;
   { const p = P(0, 0, -D / 2); A.collideBox(p[0], p[2], W, T, rotY, top); }
   for (const s2 of [-1, 1]) {
     const p = P(s2 * W / 2, 0, 0); A.collideBox(p[0], p[2], T, D, rotY, top);
     const q = P(s2 * (W + DOORW) / 4, 0, D / 2); A.collideBox(q[0], q[2], segW, T, rotY, top);
   }
+  { const q = P(0, 0, D / 2); A.collideBox(q[0], q[2], DOORW + 0.1, T, rotY, top); }
   A.claim(x, z, W + 0.6, D + 0.6, rotY);
   A.mark('boathouse', x, y, z);
   A.readSign('boats', ...xz(P(0, 0, D / 2 + 1.8)), 2.8, 'Read: Boats');
@@ -340,8 +345,6 @@ function buildBoathouse(A, x, z, rotY, WY) {
       const q = P(s * 1.15, 0, t);
       const bot = Math.min(world.height(q[0], q[2]) - 0.5, WY - 1.8);
       B.cyl('licorice', 0.2, 0.24, jy - bot, 8, { at: [q[0], (jy + bot) / 2, q[2]], color: C.licoriceSoft });
-      B.stripeCyl(0.11, 0.12, 1.05, { at: [q[0], jy + 0.55, q[2]], variant: 3, seg: 6 });
-      B.sph('gloss', 0.17, 6, 5, { at: [q[0], jy + 1.12, q[2]], color: SPRINKLE[i % SPRINKLE.length] });
     }
   }
   {
@@ -357,6 +360,15 @@ function buildBoathouse(A, x, z, rotY, WY) {
     moor.push(p);
   }
   B.tor('matte', 0.3, 0.075, 5, 12, { at: [moor[0][0], jy + 0.9, moor[0][2]], rot: [1.2, rotY, 0], color: C.licorice });
+  // HANDRAILS (Contract O): the jetty's canes used to stand alone every third
+  // plank with nothing between them. Now a striped rail runs along both sides
+  // and across the head (the bollards stand in for posts where they meet it),
+  // from where the bank falls away to where the jetty ends over the chocolate.
+  {
+    const JT = jy + 0.1, zA = D / 2 + 0.9, zB = D / 2 + jLen - 0.12;
+    const U = [P(-1.15, 0, zA), P(-1.15, 0, zB), P(1.15, 0, zB), P(1.15, 0, zA)].map((p) => [p[0], p[2], JT]);
+    railRun(A.ctx, B, U, { site: 'boathouse_jetty', edge: 'sides + head', out: -1, style: caneStyle({ variant: 3 }), lead: 1, have: moor.map((p) => [p[0], p[2]]) });
+  }
 
   // ── the swan paddle boat, striped, tied alongside ────────────────────────
   const bb = createBuilder(A.mats, A.signUV, null, A.builderOpts);
@@ -418,11 +430,16 @@ function buildFishPier(A, X, Z, ang, shoreR, WY) {
       const qx = px - dz * s * 1.1, qz = pz + dx * s * 1.1;
       const bot = Math.min(world.height(qx, qz) - 0.4, WY - 1.6);
       B.cyl('licorice', 0.19, 0.22, deck - bot, 7, { at: [qx, (deck + bot) / 2, qz], color: C.licoriceSoft });
-      B.stripeCyl(0.11, 0.12, 1.1, { at: [qx, deck + 0.6, qz], variant: 3, seg: 6 });
-      B.sph('gloss', 0.17, 6, 5, { at: [qx, deck + 1.18, qz], color: SPRINKLE[i % SPRINKLE.length] });
     }
   }
   A.deckSeg(ax, az, bx, bz, 1.2, deck, deck, 0);
+  // HANDRAILS (Contract O): both sides and the end, measured from the bank out
+  // (the landward stretch over dry ground stays open — you walk on from there).
+  {
+    const p = (t, s) => [ax + (bx - ax) * t - dz * s * 1.1, az + (bz - az) * t + dx * s * 1.1, deck];
+    const tEnd = 1 - 0.12 / len;
+    railRun(A.ctx, B, [p(0, 1), p(tEnd, 1), p(tEnd, -1), p(0, -1)], { site: 'fishing_pier', edge: 'sides + end', out: 1, style: caneStyle({ variant: 3 }), lead: 1 });
+  }
   // a bucket, a rod and one very hopeful chair
   B.cyl('matte', 0.34, 0.28, 0.6, 9, { at: [bx + dz * 0.7, deck + 0.4, bz - dx * 0.7], color: C.blue });
   B.cyl('matte', 0.05, 0.07, 3.0, 5, { at: [bx - dz * 0.6, deck + 1.1, bz + dx * 0.6], rot: [0.85, rotY + 1.2, 0], color: C.chocMilk });

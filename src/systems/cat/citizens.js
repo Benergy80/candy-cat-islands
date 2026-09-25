@@ -81,7 +81,7 @@
 //   met_tigers.
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
-import { rng, hash, clamp } from '../../core/util.js';
+import { rng, hash, clamp, smoothstep } from '../../core/util.js';
 import { createRigLibrary, buildCat } from './citizens/rig.js';
 import { updateCat, solidPush } from './citizens/brain.js';
 import { buildStageIndex, makeStageFn, SCENES } from './citizens/staging.js';
@@ -95,11 +95,14 @@ import { addSillPool, placeSillLoaves, breatheSills } from './citizens/sills.js'
 import { createNav } from './citizens/nav.js';
 import { createNpcXray } from './citizens/xray.js';
 import { buildHideout, RUSTY } from './citizens/rusty.js';
+import { createRaid } from './citizens/raid.js';
 import CAST from './citizens/cast.js';
 
 // Where the cats have decided you live. (containment/scenery.js owns the bed
 // itself; we ask it at boot and fall back to the address in the brief.)
 const GUEST_BED = { x: 168.2, z: 52.1 };
+// the tigers' rim light: lamplight by dusk, moonlight after dark (see the night pass in update)
+const RIM_WARM = new THREE.Color(0xffb06a), RIM_MOON = new THREE.Color(0xa4c8ff);
 
 const IDLE_SETS = {
   busy: ['stand', 'work', 'stand', 'groom'],
@@ -194,7 +197,7 @@ export function create(ctx) {
   // the ground blobs and the window loaves (which are not in anybody's way)
   const xray = createNpcXray(ctx);
   for (const p of pools) if (p.name !== 'blob' && p.name !== 'sillLoaf') xray.patch(p.mesh.material);
-  const xrayK = () => (T.carrying ? 0 : 1);
+  const xrayK = () => ((T.carrying || raid?.carrying) ? 0 : 1);
 
   // kittens run the same ring, staggered → a game of tag instead of milling
   cats.filter((c) => c.sched === 'kitten').forEach((c, i) => { c.kitIdx = i; });
@@ -764,6 +767,11 @@ export function create(ctx) {
   // within a stride is stepped onto (groundInfo lifts the feet). Tops come
   // from the core itself (forEachLow: classified + visually calibrated).
   const TIGER_SF = 0.22;     // a tiger's stride up (u above its feet)
+  // (a live `solid` band is written for the visitor, 1.8 u tall; a tiger's
+  //  back and ears stand 2 u up, so its feet count this much higher: under a
+  //  deck it keeps 2.7 u of headroom, not 2.3 — citizens/raid.js's grid and
+  //  brain.js step() use the same figure)
+  const TIGER_GATE_LIFT = 0.4;
   const CAT_SF = 0.25;       // a house cat's
   const LOWG = { src: null, n: -1, t: -1, cell: 4, map: new Map(), byC: new Map(), ok: false, sig: NaN, ver: 0 };
   const LOW_MARGIN = 1.1;    // ≥ the biggest circle ever pushed (a buff tiger's torso, 0.8)
@@ -841,16 +849,28 @@ export function create(ctx) {
   }
   const _lp = { x: 0, z: 0, hit: false };
   /** One circle out of every SOLID (the ground core) AND every LOW prop more
-   *  than `sf` above the feet at `fy` → _po. */
+   *  than `sf` above the feet at `fy` → _po.
+   *  (The live `solid` rules — a Candy Kingdom deck's gated handrail, the
+   *  peak's plinth, the cupcake's topless props — are written for a walker's
+   *  FEET and read the player's position to find them. A body is judged by its
+   *  OWN feet: the position is lent `fy` for the query and handed straight
+   *  back. Before, a tiger on the lawn beside a ramp met an invisible wall
+   *  whenever the visitor happened to stand at the ramp's height, and walked
+   *  through the same rail when he did not — where the raid's grid, which
+   *  judges a walker on the ground, could not know.) */
   function pushAll(pl, x, z, r, fy, sf) {
-    pl.pushOut(x, z, r, _po);
-    let px = _po.x, pz = _po.z, hit = _po.hit;
-    if (lowPush(px, pz, r, fy, sf, _lp)) {
-      px = _lp.x; pz = _lp.z; hit = true;
-      pl.pushOut(px, pz, r, _po);                    // (the bench shoved it into a wall?)
-      if (_po.hit) { px = _po.x; pz = _po.z; }
-    }
-    _po.x = px; _po.z = pz; _po.hit = hit;
+    const P = fy > -1e8 && fy < 1e8 ? pl.position : null, py = P ? P.y : 0;
+    if (P) P.y = fy + (sf === TIGER_SF ? TIGER_GATE_LIFT : 0);
+    try {
+      pl.pushOut(x, z, r, _po);
+      let px = _po.x, pz = _po.z, hit = _po.hit;
+      if (lowPush(px, pz, r, fy, sf, _lp)) {
+        px = _lp.x; pz = _lp.z; hit = true;
+        pl.pushOut(px, pz, r, _po);                    // (the bench shoved it into a wall?)
+        if (_po.hit) { px = _po.x; pz = _po.z; }
+      }
+      _po.x = px; _po.z = pz; _po.hit = hit;
+    } finally { if (P) P.y = py; }
     return _po;
   }
 
@@ -1487,7 +1507,14 @@ export function create(ctx) {
       c.gyT -= dt;
       if (moved || c.x !== c.sx || c.z !== c.sz || c.gyT <= 0 || c.gy === undefined) {
         c.gyT = 0.45 + c.seed * 0.3;
-        pl.groundInfo(c.x, c.z, _gi);
+        // (the Candy Kingdom's deck and stair walkables pick their surface by
+        //  the walker's feet — they read the player's position — so a body is
+        //  asked about by its OWN feet, as pushAll does: one on the lawn under
+        //  a deck 3 u up is not hoisted onto it because the visitor happens to
+        //  be at the deck's height)
+        const Pp = pl.position, lendG = !!Pp && c.y === c.y && c.y > -1e8 && c.y < 1e8, keepG = lendG ? Pp.y : 0;
+        if (lendG) Pp.y = c.y;
+        try { pl.groundInfo(c.x, c.z, _gi); } finally { if (lendG) Pp.y = keepG; }
         gy = _gi.h; c.gh = _gi.h; c.onProp = !!_gi.prop;
         const dy = discY(c.x, c.z); if (dy > gy) gy = dy;
         if (gy < 0.15) gy = 0.15;
@@ -1599,6 +1626,7 @@ export function create(ctx) {
   // last word on where the visitor is: fires after player.js has had its say
   ctx.events.on('camera:update', (cam) => {
     if (T.carrying && T.carrying.stage <= 1) placeCarried(1);
+    raid?.late();                          // the raid's carry (citizens/raid.js)
     xray.update(cam || ctx.camera, ctx.systems.player?.position, xrayK());   // this frame's final lens
   });
 
@@ -1724,7 +1752,7 @@ export function create(ctx) {
   const _mouth = { x: 0, y: 0, z: 0 };
   function startCarry(cat) {
     const pl = ctx.systems.player;
-    if (!pl || T.carrying || pl.locked || pl.onFerry || ctx.state.island !== 'cat') return;
+    if (!pl || T.carrying || raid?.carrying || pl.locked || pl.onFerry || ctx.state.island !== 'cat') return;
     if (ctx.systems.powerups?.active || pl.invulnerable) return;      // stars / i-frames
     T.carrying = { cat, t: 0, stage: 0 };
     cat.carryTo = { x: GUEST_BED.x, z: GUEST_BED.z };
@@ -1781,6 +1809,25 @@ export function create(ctx) {
     }
   }
 
+  /** Lights out: 06:00, the guest bed, the card. (Both carries end here — the
+   *  town's scruff-carry and the raid's carry over the rainbow.) */
+  function putToBed(name, card) {
+    const ui = ctx.systems.ui;
+    ctx.state.time = 6;
+    ctx.events.emit('time:set', 6);
+    lastHour = 6;
+    ctx.systems.player?.teleport(GUEST_BED.x + 1.7, GUEST_BED.z + 1.7);
+    ctx.systems.player && (ctx.systems.player.locked = true);
+    snapAll(6);
+    carryCard.handle = ui?.card?.({
+      title: card?.title || `Carried home by ${name.short}. Bedtime.`,
+      body: card?.body || `${name.full} deposited you in the guest bed, straightened the blanket with one enormous paw, and sat outside the door until morning.`,
+      buttons: [{ label: 'Sleep. Obviously.', primary: true }],
+    }) || null;
+    carryCard.t = 7;
+    ui?.banner?.('06:00', 'Everyone is a normal size again. Nobody mentions it.', 4.0, 'cat');
+  }
+
   function updateCarry(dt) {
     const C = T.carrying; if (!C) return;
     C.t += dt;
@@ -1796,20 +1843,8 @@ export function create(ctx) {
         const name = C.cat.tiger;
         const fade = ui?.fade ? ui.fade(true, 1.1) : Promise.resolve();
         fade.then(() => {
-          ctx.state.time = 6;
-          ctx.events.emit('time:set', 6);
-          lastHour = 6;
           endCarry();
-          ctx.systems.player?.teleport(GUEST_BED.x + 1.7, GUEST_BED.z + 1.7);
-          ctx.systems.player && (ctx.systems.player.locked = true);
-          snapAll(6);
-          carryCard.handle = ui?.card?.({
-            title: `Carried home by ${name.short}. Bedtime.`,
-            body: `${name.full} deposited you in the guest bed, straightened the blanket with one enormous paw, and sat outside the door until morning.`,
-            buttons: [{ label: 'Sleep. Obviously.', primary: true }],
-          }) || null;
-          carryCard.t = 7;
-          ui?.banner?.('06:00', 'Everyone is a normal size again. Nobody mentions it.', 4.0, 'cat');
+          putToBed(name);
           return ui?.fade ? ui.fade(false, 1.2) : Promise.resolve();
         }).then(() => {
           if (ctx.systems.player) ctx.systems.player.locked = false;
@@ -2000,7 +2035,8 @@ export function create(ctx) {
         fx?.burst({ x: cat.x, y: head, z: cat.z, count: 20, color: [0x2f9bff, 0x9fd8ff, 0xffffff], speed: 3.0, life: 0.6, size: 0.18, gravity: -6, spread: 0.9 });
         if (tiger) react(cat, 'flee', 8, null, src);
         else react(cat, 'hiss', 0.5, { kind: 'flee', dur: 8, then: sulk(5, 'WET. I am WET.') }, src);
-        if (S.playerNear(cat, 26)) ctx.systems.ui?.say(tiger ? 'Three hundred kilos of tiger discovers it is afraid of a balloon.' : 'MRRROW— NO. NO. NO.', { speaker: who });
+        // (a tiger's bust, said so: a raider on Candyland would otherwise get the island's 'creature')
+        if (S.playerNear(cat, 26)) ctx.systems.ui?.say(tiger ? 'Three hundred kilos of tiger discovers it is afraid of a balloon.' : 'MRRROW— NO. NO. NO.', tiger ? { speaker: who, portrait: { color: 0xf08a22, family: 'tiger' } } : { speaker: who });
         effect = 'flee'; secs = 8; break;
       }
     }
@@ -2019,6 +2055,8 @@ export function create(ctx) {
     if (ref.key) return cats.find((c) => c.key === ref.key) || null;
     if (Number.isFinite(ref.x) && Number.isFinite(ref.z)) {
       const n = api.nearest(ref.x, ref.z);
+      const rn = raid.nearest(ref.x, ref.z);         // (a raider on Candyland)
+      if (rn && rn.d < 4 && (!n || rn.d < Math.hypot(n.x - ref.x, n.z - ref.z))) return rn.cat;
       return n && Math.hypot(n.x - ref.x, n.z - ref.z) < 4 ? n : null;
     }
     return null;
@@ -2056,8 +2094,48 @@ export function create(ctx) {
     const dx = cat.x - cp.x, dz = cat.z - cp.z;
     return dx * dx + dz * dz > LOD_NEAR * LOD_NEAR ? LOD_FAR_DT : 0;
   }
+  // ═══ WAVE 4: THE RAID over the rainbow (citizens/raid.js, Contract M) ═════
+  // Its own group (the town's is switched off over Candyland) and its own
+  // pools; the brain's pieces — settle(), the star reaction, the spot finder,
+  // the LOW-prop blockers, bedtime — are lent to it from here.
+  const raidGroup = new THREE.Group();
+  raidGroup.name = 'cat_raid';
+  scene.add(raidGroup);
+  const raid = createRaid(ctx, {
+    lib, S, T, group: raidGroup, xray,
+    settle: (c, dt, plan) => settle(c, dt, plan),
+    starReact: (c, d2, p) => starReact(c, d2, p),
+    resolveSpot: (x, z, m, r) => resolveSpot(x, z, m, r),
+    groundCore, navBlocker: (c) => navBlocker(c), lowSync: (pl) => lowSync(pl),
+    putToBed: (name, card) => putToBed(name, card),
+  });
+  /** The citizens plus any raider standing on Candyland — what a weapon can
+   *  hit and a speaker can be found in. Rebuilt only when that set changes. */
+  const _catsAll = [];
+  let _catsSig = -1;
+  function catsView() {
+    if (!raid.active) return cats;
+    let sig = 0;
+    const P = raid.party;
+    for (let i = 0; i < P.length; i++) sig = sig * 2 + (P[i].mode === 'land' && P[i].vis > 0.5 ? 1 : 0);
+    if (!sig) return cats;
+    if (sig !== _catsSig) {
+      _catsSig = sig; _catsAll.length = 0;
+      for (let i = 0; i < cats.length; i++) _catsAll.push(cats[i]);
+      for (let i = 0; i < P.length; i++) if (P[i].mode === 'land' && P[i].vis > 0.5) _catsAll.push(P[i]);
+    }
+    return _catsAll;
+  }
+
   const api = {
-    group, cats, pools: lib.pools, materials: lib.materials,
+    group, pools: lib.pools, materials: lib.materials,
+    /** Every citizen — and, during a raid, the raiders on Candyland (see catsView). */
+    get cats() { return catsView(); },
+    /** WAVE 4 — the raiding party (citizens/raid.js): phase · active · party ·
+     *  carrying · carryStage · route · positions() · stats() · start() · end() · debug(o) */
+    raid,
+    /** Debug / views: pose the raid ({ phase: 'cross'|'hunt'|'carry'|'retreat'|'home', t, n, x, z, r }). */
+    raidDebug: (o) => raid.debug(o || {}),
     get count() { return cats.length; },
     byKey: (k) => cats.find((c) => c.key === k),
     nearest(x, z) { let b = null, bd = Infinity; for (const c of cats) { const d = Math.hypot(c.x - x, c.z - z); if (d < bd) { bd = d; b = c; } } return b; },
@@ -2096,6 +2174,7 @@ export function create(ctx) {
         events: { ...RES.kinds }, shoves: SEPN, graceLeft: +Math.max(0, T.graceUntil - S.elapsed).toFixed(1),
         xray: { ...xray.stats, k: +xray.uniforms.uNpcR.value.z.toFixed(2) },
         resLog: RES.log.slice(),
+        raid: raid.stats(),
       };
     },
 
@@ -2154,6 +2233,16 @@ export function create(ctx) {
         }
         out.push(e);
       }
+      // the raiders standing on Candyland (on the deck they are scripted: left out)
+      for (const c of raid.party) {
+        if (c.mode !== 'land' || c.vis < 0.5) continue;
+        const T = tigerScale(c), sy = Math.sin(c.yaw), cy = Math.cos(c.yaw);
+        const e = { x: c.x, y: c.y, z: c.z, r: TORSO_R * T, kind: 'tiger', key: c.key, on: c.onProp ? 'prop' : 'ground', ground: c.gy, gh: c.gh, raid: true,
+          head: { x: c.x + sy * HEAD_FWD * T, z: c.z + cy * HEAD_FWD * T, r: HEAD_R * T },
+          rear: { x: c.x - sy * REAR_BACK * T, z: c.z - cy * REAR_BACK * T, r: REAR_R * T } };
+        if (c.leapT > 0) e.leaping = true;
+        out.push(e);
+      }
       return out;
     },
 
@@ -2193,7 +2282,7 @@ export function create(ctx) {
           if (tiger) {
             cat.fxKind = 'flinch'; cat.fxUntil = now + 4; cat.fxThen = null;
             ctx.events.emit('cat:hit', { cat, weapon: w, effect: 'tiger-flinch' });
-            if (S.playerNear(cat, 26)) ctx.systems.ui?.say('It recoils, enormous and embarrassed, and backs into the dark.', { speaker: cat.tiger.short });
+            if (S.playerNear(cat, 26)) ctx.systems.ui?.say('It recoils, enormous and embarrassed, and backs into the dark.', { speaker: cat.tiger.short, portrait: { color: 0xf08a22, family: 'tiger' } });
             return { ok: true, effect: 'flinch', backOff: 10, secs: 4 };
           }
           cat.fxKind = 'hiss'; cat.fxUntil = now + 0.85;
@@ -2237,15 +2326,19 @@ export function create(ctx) {
       const player = ctx.systems.player?.position;
       if (!player) return;
       if (!booted) boot();
+      S.elapsed = ctx.state.elapsed;
+      { const pl0 = groundCore(); if (pl0) lowSync(pl0); }
+      // WAVE 4 (Contract M): the raiding party lives on both islands and the
+      // bridge between them, so it runs before the town's island gate
+      raid.update(dt);
+      if (carryCard.t > 0 && !group.visible && (carryCard.t -= dt) <= 0) { carryCard.handle?.close?.(); carryCard.handle = null; }
       // Cheap island gate: the cats only exist for the camera when Cat Island
       // (or its shoreline) is in view. Saves ~29 calls / ~70k tris elsewhere.
       const show = ctx.camera.position.x > -60 || player.x > -60;
       if (group.visible !== show) group.visible = show;
       if (!show) return;
 
-      S.elapsed = ctx.state.elapsed;
       S.frame++;
-      { const pl0 = groundCore(); if (pl0) lowSync(pl0); }
       // A jumped clock (debug / render harness) re-stages the whole island in
       // one frame; normal play moves ~0.08 h per second and never trips this.
       const hour = ctx.state.time;
@@ -2327,10 +2420,16 @@ export function create(ctx) {
       // left every tiger hovering an inch above Main Street with nothing
       // holding it down — so they now only soften, never leave.
       lib.materials.blobMat.opacity = 0.25 + ctx.state.daylight * 0.11;
-      // a tiger is the same value as wet cobbles: give it a warm rim and a
-      // breath of emissive so the silhouette survives the night
+      // a tiger is the same value as wet cobbles: give it a rim and a breath
+      // of emissive so the silhouette survives the night. The rim goes COLD
+      // after dark — moonlight: the street is all warm lanterns and windows,
+      // and a warm edge sank a striped back into them; a cold one cuts it out
       const tf = lib.materials.tigerFurMat;
-      if (tf) { tf.emissiveIntensity = 0.06 + night * 0.20; if (tf.userData.rim) tf.userData.rim.value = 0.05 + night * 0.55; }
+      if (tf) {
+        tf.emissiveIntensity = 0.06 + night * 0.20;
+        if (tf.userData.rim) tf.userData.rim.value = 0.05 + night * 0.72;
+        tf.userData.rimColor?.value?.copy?.(RIM_WARM)?.lerp?.(RIM_MOON, smoothstep(0.25, 0.75, night));
+      }
       // the window loaves are backlit by their own room
       const sm = lib.materials.sillMat;
       if (sm) sm.emissiveIntensity = 0.05 + night * 1.05;

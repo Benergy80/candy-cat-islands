@@ -2,6 +2,7 @@
 // A ring of giant sour-crusted gummy figures facing a stone with a very cute,
 // very wrong face. At its feet: a lost & found nobody has claimed.
 import { C, SPRINKLE, fenceLine } from './kit.js';
+import { railRun, icingStyle, arcPts } from './rails.js';
 
 const X = -218, Z = -44;
 const SOUR = [0xd6e87a, 0xf0a8c8, 0xa8d4f0, 0xf0cf8a, 0xc9a8e8, 0xef9494, 0xa8e8c0, 0xe8e0a0];
@@ -26,6 +27,15 @@ export function buildShrine(A) {
     B.ico('matteFlat', 0.55, 0, { at: [X + Math.cos(a) * 9.3, y + 0.9, Z + Math.sin(a) * 9.3], rot: [0, a, 0.2], scale: [1, 0.7, 1], color: 0xd9d2e8 });
   }
   A.deckRing(X, Z, 0, 8.6, y + 0.95);
+  // HANDRAIL (Contract O): the dais is 0.95 proud of its centre, but the
+  // clearing falls away to the south-west and there its rim stands up to ~1.6
+  // over the grass. A sugar-crystal balustrade where it does (measured), an
+  // open step everywhere else. NOT gated: nothing walks under a dais rim, and
+  // a gated band let a double jump off the rock beside it clear the rail.
+  railRun(A.ctx, B, arcPts(X, Z, 8.45, 0, Math.PI * 2, y + 0.95), {
+    site: 'sour_shrine', edge: 'dais rim', out: 1, lead: 1,
+    style: icingStyle({ colorA: 0xd9d2e8, colorB: 0xa39cba, postR: 0.11 }),
+  });
 
   // ── the stone ─────────────────────────────────────────────────────────────
   B.cyl('matteFlat', 3.2, 4.0, 1.1, 9, { at: [X, y + 1.35, Z], color: C.stoneDark });

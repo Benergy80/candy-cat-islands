@@ -198,6 +198,11 @@ export const SALT_PATCH = [
   'enjoy your little circle. it gets light in nine hours.',
 ];
 
+// What the gang is called where the player can read it (critic: the old name
+// is somebody's trademark). One word, so a later rename is one line.
+export const GANG = 'Sourlings';
+export const GANG_ONE = 'Sourling';
+
 export const EATEN_TOAST = [
   'Reviews: 5 stars, would eat again.',
   'Gumdrop Village rates you: chewy, slightly salty, 8/10.',
@@ -309,4 +314,47 @@ export const STEPIN = [
   'my turn.',
   'budge up. i\'m in.',
   'tag. tag me in.',
+];
+// ── WAVE 4: the raid over the rainbow (sourpatch/raid.js) ────────────────────
+// the column passes a visitor standing on the deck (the bridge is a truce)
+export const BRIDGE = [
+  'not yet.',
+  'excuse us! excuse US.',
+  'we\'re just walking. just walking.',
+  'pretty bridge. pretty snack.',
+  'save you for later!',
+  'don\'t mind us. we\'re a parade.',
+];
+// hunting on Cat Island (their night lines when you plead with them there)
+export const RAID = [
+  'new island. new menu.',
+  'we followed the rainbow. look what was at the end.',
+  'the cats said you were staying. so are we.',
+  'no salt out here. we checked. mostly.',
+  'the tigers get the leftovers. there won\'t be leftovers.',
+];
+// pacing the cats' salt line round Welcome Plaza
+export const CATSALT = [
+  'the CATS did this. cats are so rude.',
+  'salt is for fries. not for WALLS.',
+  'come out and look at the rainbow! it\'s so pretty out here!',
+  'the tigers don\'t care about salt. just saying.',
+  'we\'ll wait. cats can\'t stay up all night. oh. oh wait.',
+];
+// the small hours: slinking back to the rainbow before the sun can catch them
+// on the wrong island (still night kids — grinning, not hunting)
+export const RETREAT = [
+  'sun\'s coming. we have a curfew.',
+  'save our seats. we\'ll be back tonight.',
+  'you were lucky. tell the cats.',
+  'we\'re not leaving. we\'re pausing.',
+  'same time tomorrow?',
+];
+// the morning walk home over the rainbow
+export const HOMEWARD = [
+  'morning! we were never here.',
+  'long walk. worth it.',
+  'tell the cats thank you for having us.',
+  'the rainbow is much steeper going home.',
+  'see you tonight! same time!',
 ];

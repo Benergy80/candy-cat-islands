@@ -2,6 +2,7 @@
 // donut arch over the main road, the leaning candy bar, a jelly bean boulder
 // field, junction signposts, benches, fences and wind-spinner lollipops.
 import { C, SPRINKLE, bench, signpost, fenceLine, lamppost, plaque } from './kit.js';
+import { railRun, caneStyle } from './rails.js';
 
 export function buildProps(A) {
   const { B, world } = A;
@@ -108,23 +109,20 @@ function bridge(A, cx, cz, dir, half, halfW, o = {}) {
       B.box('licorice', 0.18, 0.3, seg + 0.1, { at: [x, (y0 + y1) / 2 - 0.22, z], rot: [-Math.atan2(y1 - y0, seg), dir, 0], color: C.licorice });
     }
   }
-  // candy-cane railing posts + rails
+  // candy-cane railing posts + rails (Contract O): the canes stood 2.3 apart
+  // with a red rail between them and no collider — you walked straight through
+  // into the syrup. Now ≈ 1.6 apart, and the rail line carries colliders
+  // (gated: the river bed runs under the bridge).
   for (const s of [-1, 1]) {
-    for (let i = 0; i <= 7; i++) {
-      const t = i / 7;
-      const x = ax + (bx - ax) * t - dz * s * (halfW - 0.12), z = az + (bz - az) * t + dx * s * (halfW - 0.12);
-      const yy = yA + (yB - yA) * t + crown * Math.sin(Math.PI * t);
-      B.stripeCyl(0.13, 0.15, 1.25, { at: [x, yy + 0.62, z], variant: o.variant || 0, seg: 7 });
-      B.sph('gloss', 0.21, 6, 5, { at: [x, yy + 1.3, z], color: SPRINKLE[i % SPRINKLE.length] });
+    const n = Math.ceil((half * 2) / 1.6), pts = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      pts.push([ax + (bx - ax) * t - dz * s * (halfW - 0.12), az + (bz - az) * t + dx * s * (halfW - 0.12), yA + (yB - yA) * t + crown * Math.sin(Math.PI * t)]);
     }
-    for (let i = 0; i < 14; i++) {
-      const t0 = i / 14, t1 = (i + 1) / 14, tm = (t0 + t1) / 2;
-      const x = ax + (bx - ax) * tm - dz * s * (halfW - 0.12), z = az + (bz - az) * tm + dx * s * (halfW - 0.12);
-      const y0 = yA + (yB - yA) * t0 + crown * Math.sin(Math.PI * t0);
-      const y1 = yA + (yB - yA) * t1 + crown * Math.sin(Math.PI * t1);
-      const seg = (half * 2) / 14;
-      B.box('licorice', 0.16, 0.16, seg + 0.1, { at: [x, (y0 + y1) / 2 + 1.08, z], rot: [-Math.atan2(y1 - y0, seg), dir, 0], color: C.licoriceRed });
-    }
+    railRun(A.ctx, B, pts, {
+      site: 'bridge_' + Math.round(cx) + '_' + Math.round(cz), edge: s > 0 ? 'left rail' : 'right rail', out: -s, force: true, gate: true,
+      style: caneStyle({ variant: o.variant || 0, postR: 0.13, railR: 0.085, top: C.licoriceRed }),
+    });
   }
   // approach piers in the syrup
   for (const t of [0.28, 0.72]) {

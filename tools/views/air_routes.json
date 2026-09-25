@@ -1,0 +1,370 @@
+{
+  "air_blimp_candy_day": {
+    "pos": [
+      -45.5,
+      23.4
+    ],
+    "free": [
+      -44,
+      14
+    ],
+    "y": 12,
+    "az": 0.95,
+    "el": 0.22,
+    "dist": 64,
+    "fov": 40,
+    "time": 10.5,
+    "frames": 90,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "planes.debugBlimp": [
+        "candy",
+        0.5
+      ]
+    }
+  },
+  "air_blimp_candy_night": {
+    "pos": [
+      -45.5,
+      23.4
+    ],
+    "free": [
+      -44,
+      14
+    ],
+    "y": 12,
+    "az": 0.95,
+    "el": 0.22,
+    "dist": 64,
+    "fov": 40,
+    "time": 22.5,
+    "frames": 90,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "planes.debugBlimp": [
+        "candy",
+        0.5
+      ]
+    }
+  },
+  "air_blimp_cat_day": {
+    "pos": [
+      96,
+      57.5
+    ],
+    "free": [
+      104,
+      60
+    ],
+    "y": 11,
+    "az": 2.2,
+    "el": 0.2,
+    "dist": 62,
+    "fov": 40,
+    "time": 11,
+    "frames": 90,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "planes.debugBlimp": [
+        "cat",
+        0.5
+      ]
+    }
+  },
+  "air_blimp_cat_night": {
+    "pos": [
+      96,
+      57.5
+    ],
+    "free": [
+      104,
+      60
+    ],
+    "y": 11,
+    "az": 2.2,
+    "el": 0.2,
+    "dist": 62,
+    "fov": 40,
+    "time": 23,
+    "frames": 90,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "planes.debugBlimp": [
+        "cat",
+        0.5
+      ]
+    }
+  },
+  "air_blimp_game": {
+    "pos": [
+      -45.4,
+      24.2
+    ],
+    "time": 10.5,
+    "frames": 90,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "planes.debugBlimp": [
+        "candy",
+        0.5
+      ]
+    }
+  },
+  "air_blimp_climb": {
+    "pos": [
+      -45.6,
+      24.4
+    ],
+    "time": 10.5,
+    "frames": 40,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "escape.routes.blimp.debugClimb": [
+        "candy",
+        0.6
+      ]
+    },
+    "az": 0.62,
+    "el": 0.28,
+    "dist": 26
+  },
+  "air_blimp_ride_mid": {
+    "time": 11,
+    "frames": 90,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "escape.routes.blimp.debugRide": [
+        0.5,
+        "mid"
+      ]
+    }
+  },
+  "air_blimp_ride_night": {
+    "time": 23,
+    "frames": 90,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "escape.routes.blimp.debugRide": [
+        0.55,
+        "midBack"
+      ]
+    }
+  },
+  "air_biplane_overview": {
+    "free": [
+      -152,
+      73
+    ],
+    "y": 5,
+    "az": 0.55,
+    "el": 0.42,
+    "dist": 66,
+    "fov": 40,
+    "time": 10,
+    "frames": 60,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "planes.debugBiplane": [
+        "refuel",
+        0.4
+      ]
+    }
+  },
+  "air_biplane_approach": {
+    "free": [
+      -128,
+      76
+    ],
+    "y": 8,
+    "az": 0.95,
+    "el": 0.16,
+    "dist": 58,
+    "fov": 40,
+    "time": 9.5,
+    "frames": 60,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "planes.debugBiplane": [
+        "approach",
+        0.8
+      ]
+    }
+  },
+  "air_biplane_refuel_talk": {
+    "pos": [
+      -158.9,
+      69.6
+    ],
+    "az": 1.95,
+    "el": 0.5,
+    "dist": 24,
+    "time": 10,
+    "frames": 100,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "escape.routes.biplane.debugTalk": [
+        1,
+        0.35
+      ]
+    }
+  },
+  "air_biplane_pump_prompt": {
+    "pos": [
+      -154.9,
+      78.1
+    ],
+    "az": 1.95,
+    "el": 0.42,
+    "dist": 16,
+    "time": 10,
+    "frames": 60,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "escape.routes.biplane.debugTalk": [
+        0,
+        0.3
+      ]
+    }
+  },
+  "air_biplane_night": {
+    "pos": [
+      -157.0,
+      70.6
+    ],
+    "az": 2.415,
+    "el": 0.42,
+    "dist": 35,
+    "fov": 34,
+    "time": 22.5,
+    "frames": 60,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "planes.debugBiplane": [
+        "loop",
+        0.3
+      ]
+    }
+  },
+  "air_biplane_seated": {
+    "pos": [
+      -154.9,
+      78.1
+    ],
+    "az": 1.95,
+    "el": 0.45,
+    "dist": 18,
+    "time": 10,
+    "frames": 45,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "escape.routes.biplane.debugRide": [
+        "refuel",
+        0.3
+      ]
+    }
+  },
+  "air_biplane_ride": {
+    "time": 10.5,
+    "frames": 90,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "planes.debugBlimp": [
+        "candy",
+        0.5
+      ],
+      "escape.routes.biplane.debugRide": [
+        "ferry",
+        0.5
+      ]
+    }
+  },
+  "air_biplane_dropoff": {
+    "free": [
+      205,
+      8
+    ],
+    "y": 6,
+    "az": 2.4,
+    "el": 0.35,
+    "dist": 48,
+    "fov": 40,
+    "time": 11,
+    "frames": 60,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "planes.debugBiplane": [
+        "dropoff",
+        0
+      ]
+    }
+  },
+  "air_jet_summon": {
+    "pos": [
+      -45,
+      24
+    ],
+    "free": [
+      0,
+      22
+    ],
+    "y": 62,
+    "az": 0.75,
+    "el": 0.12,
+    "dist": 70,
+    "fov": 40,
+    "time": 17.5,
+    "frames": 60,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "planes.debugSummon": [
+        0,
+        60,
+        22,
+        "hover"
+      ]
+    }
+  },
+  "air_blimp_eyes_night": {
+    "pos": [
+      -60,
+      30
+    ],
+    "time": 23,
+    "frames": 40,
+    "call": {
+      "escape.routes.blimp.debugReset": [],
+      "escape.routes.biplane.debugReset": [],
+      "planes.debugBlimp": [
+        "mid",
+        0.35
+      ],
+      "planes.debugFrame": [
+        "blimp",
+        {
+          "rel": 0.55,
+          "el": 0.02,
+          "dist": 34,
+          "fov": 40,
+          "dy": -1
+        }
+      ]
+    }
+  }
+}

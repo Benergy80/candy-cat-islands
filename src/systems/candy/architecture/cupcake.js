@@ -8,8 +8,9 @@
 // it a base to stand on, the swirl gives it a spiral, the cherry gives it a
 // full stop, and a 28-unit clear apron (claimed against vegetation) means you
 // actually see all three at once instead of a pink wall behind a lollipop.
-import { C, SPRINKLE, door, windowPane, signpost, lamppost, softGlow, arcCyl } from './kit.js';
+import { C, SPRINKLE, doorway, windowPane, signpost, lamppost, softGlow, arcCyl, plaque } from './kit.js';
 import * as IN from './interiors.js';
+import { railRun, caneStyle, arcPts, landingFloor, gateSolid, GATE } from './rails.js';
 
 const X = -88, Z = -18;
 // The two ways in, as WORLD angles (atan2(dz, dx)): +Z is south, −Z is north,
@@ -25,6 +26,13 @@ const X = -88, Z = -18;
 // sun, the meadow path and the camera all at once.
 const DOOR_A = Math.PI / 2, BITE_A = 0.30;
 const DOOR_HW = 0.28, BITE_HW = 0.60;          // half-widths, radians
+// THE FRONT DOOR (Contract O). Clear opening DOOR_W × DOOR_H above the sill:
+// "much too big" is the joke, so it is the biggest door in Candyland. The
+// wrapper is CUT for it (DOOR_CW either side of DOOR_A, up to the lintel), the
+// chocolate reveal lines the cut, and the jamb colliders stop exactly on the
+// reveal's inner faces — the ring's own gap was 5 u wide behind a 1.6 u door.
+const DOOR_W = 1.9, DOOR_H = 2.9, DOOR_CW = 0.18;
+const REVEAL_Z0 = 5.7, REVEAL_Z1 = 6.9;          // the reveal's depth, as offsets from Z
 
 export function buildCupcake(A) {
   const { B, world } = A;
@@ -45,6 +53,12 @@ export function buildCupcake(A) {
   const E = A.building({
     id: 'great_cupcake', name: 'the Great Cupcake', x: X, z: Z,
     radius: ROOM_R + 0.5, rot: 0, floorY: FLOOR_Y, pad: 0.2, tall: true, flat: true,
+    // 12% shell, not the default 28%. From the mezzanine the game camera looks
+    // down through the cake's lid, the wrapper AND the balcony at once: three
+    // stacked 28% ghosts read as a glass drum sealed over the stairwell and
+    // double-imaged every rail behind it (rails critique, round 3). The wafer
+    // panelling inside is the room's wall; the shell only has to whisper.
+    ghost: 0.88,
   });
   const W = E.wall, R = E.roof;
   const inGap = (a, c, hw) => Math.abs(Math.atan2(Math.sin(a - c), Math.cos(a - c))) < hw;
@@ -82,7 +96,12 @@ export function buildCupcake(A) {
           const a = a0 + ((a1 - a0) * i) / nn;
           B.sph('icing', 0.3, 5, 4, { at: [X + Math.cos(a) * (rad - 0.06), top, Z + Math.sin(a) * (rad - 0.06)], scale: [1, 0.7, 1], color: k % 2 ? C.icingPink : C.icing });
         }
-        A.deckArcRing(X, Z, r0 + 0.05, rad - 0.1, a0 - 0.03, a1 + 0.03, top);
+        // Each tread's walk runs in to where the tread above it ends (rad − 0.1
+        // of THAT tread): inset at both edges they left a 0.15-u crack between
+        // treads, all the way round, and a walker who followed one dropped
+        // 1.2–1.9 to the lawn inside the plinth (Contract O re-audit). The top
+        // tread still stops short of the wrapper.
+        A.deckArcRing(X, Z, k === PLINTH.length - 1 ? r0 + 0.05 : r0 - 0.1, rad - 0.1, a0 - 0.03, a1 + 0.03, top);
       }
     });
     for (let i = 0; i < 30; i++) {          // sprinkles over the treads (instanced, ~free)
@@ -100,7 +119,14 @@ export function buildCupcake(A) {
   // ── wrapper: a fluted paper cup, with a wedge bitten out of the north ─────
   {
     const a0 = BITE_A + BITE_HW, a1 = BITE_A + Math.PI * 2 - BITE_HW;
-    arcCyl(W, 'matte', WR_T, WR_B, WR_H, 34, a0, a1, { at: [X, y + WR_H / 2, Z], color: C.icingPink, open: true });
+    // ...and CUT for the front door: the two long arcs either side of it, and
+    // the piece of wrapper above the lintel (the flare puts the paper in front
+    // of the door's upper half, so an uncut wrapper buried the door in pink)
+    const hc = Math.max(0, world.height(X, Z + WR_B + 0.35) - y) + DOOR_H + 0.5;
+    arcCyl(W, 'matte', WR_T, WR_B, WR_H, 34, a0, DOOR_A - DOOR_CW, { at: [X, y + WR_H / 2, Z], color: C.icingPink, open: true });
+    arcCyl(W, 'matte', WR_T, WR_B, WR_H, 34, DOOR_A + DOOR_CW, a1, { at: [X, y + WR_H / 2, Z], color: C.icingPink, open: true });
+    const rCut = WR_B + (WR_T - WR_B) * (hc / WR_H);
+    arcCyl(W, 'matte', WR_T, rCut, WR_H - hc, 34, DOOR_A - DOOR_CW, DOOR_A + DOOR_CW, { at: [X, y + hc + (WR_H - hc) / 2, Z], color: C.icingPink, open: true });
     // The two torn edges of the paper, in near-white, plus a scalloped icing lip
     // running up the OUTSIDE of each. They are what frames the mouth from the
     // path: the void itself is permanently in the cupcake's own shadow, so the
@@ -315,10 +341,25 @@ export function buildCupcake(A) {
 
   const tilt = Math.atan2(WR_T - WR_B, WR_H);
   const NRIB = 30;
+  // Contract O: the pleats that fall inside the front-door cut (i = 7, 8 at
+  // DOOR_A ∓ 0.105) used to stand full height IN the opening, sill to head and
+  // with no collider, so the drawn clear width was 0.8 behind a 1.9 collider
+  // gap. They keep the pleat rhythm only on the wrapper piece over the lintel
+  // (from the cut height up, the same hc as the wrapper block above).
+  const hcRib = Math.max(0, world.height(X, Z + WR_B + 0.35) - y) + DOOR_H + 0.5;
   for (let i = 0; i < NRIB; i++) {
     const a = (i / NRIB) * Math.PI * 2;
     if (bitten(a)) continue;
     const rm = (WR_B + WR_T) / 2 + 0.18;
+    if (inGap(a, DOOR_A, DOOR_CW + 0.07)) {
+      const h0 = hcRib + 0.08, h1 = WR_H / 2 + (WR_H + 0.2) * Math.cos(tilt) / 2, hm = (h0 + h1) / 2;
+      const rr = rm + (hm - WR_H / 2) * Math.tan(tilt);
+      W.cyl('matte', 0.42, 0.3 + 0.12 * (h0 / WR_H), (h1 - h0) / Math.cos(tilt), 5, {
+        at: [X + Math.cos(a) * rr, y + hm, Z + Math.sin(a) * rr],
+        rot: [0, -a, -tilt], color: i % 2 ? 0xfff3f8 : C.pink,
+      });
+      continue;
+    }
     W.cyl('matte', 0.42, 0.3, WR_H + 0.2, 5, {
       at: [X + Math.cos(a) * rm, y + WR_H / 2, Z + Math.sin(a) * rm],
       rot: [0, -a, -tilt], color: i % 2 ? 0xfff3f8 : C.pink,
@@ -336,7 +377,14 @@ export function buildCupcake(A) {
   // the cake + balcony above it become the overhanging lip of the mouth — which
   // is what makes the void read as a bite rather than as a doorway, without
   // notching a balcony the player is supposed to be able to walk all the way round.
-  W.cyl('matteFlat', 9.3, 8.2, CAKE_H, 26, { at: [X, CAKE_Y + CAKE_H / 2, Z], color: C.chocMilk });
+  // Its LID is on the roof builder: from inside, the game camera looks down
+  // through the cake's top at the whole room, and a ghosted 9-u disc over the
+  // mezzanine sealed the stairwell and every rail round it under glass. The roof
+  // hides while you are inside; outside the three pieces are the same closed
+  // drum as before (the underside faces down, so only a low camera sees it).
+  W.cyl('matteFlat', 9.3, 8.2, CAKE_H, 26, { at: [X, CAKE_Y + CAKE_H / 2, Z], color: C.chocMilk, open: true });
+  W.disc('matteFlat', 8.2, 26, { at: [X, CAKE_Y, Z], rot: [Math.PI / 2, -Math.PI / 2, 0], color: C.chocMilk });
+  R.disc('matteFlat', 9.3, 26, { at: [X, CAKE_Y + CAKE_H, Z], rot: [-Math.PI / 2, Math.PI / 2, 0], color: C.chocMilk });
   for (let i = 0; i < 18; i++) {   // crumb bumps
     const a = r.range(0, 6.283), h = r.range(0.2, 0.85);
     W.ico('matteFlat', h, 0, { at: [X + Math.cos(a) * 9.1, CAKE_Y + r.range(0.4, CAKE_H - 0.3), Z + Math.sin(a) * 9.1], color: r.chance(0.5) ? C.chocMilk : 0x8f5a30 });
@@ -424,22 +472,8 @@ export function buildCupcake(A) {
       });
     }
     A.deckArcRing(X, Z, BAL_R0, BAL_R1 - 0.3, bA0 + 0.03, bA1 - 0.03, BAL_Y + 0.2);
-    for (let i = 0; i <= 17; i++) {                                // railing
-      const a = bA0 + ((bA1 - bA0) * i) / 17;
-      const px = X + Math.cos(a) * (BAL_R1 - 0.3), pz = Z + Math.sin(a) * (BAL_R1 - 0.3);
-      W.stripeCyl(0.13, 0.15, 1.15, { at: [px, BAL_Y + 0.75, pz], variant: 0, seg: 6 });
-      W.sph('gloss', 0.2, 6, 5, { at: [px, BAL_Y + 1.38, pz], color: SPRINKLE[i % SPRINKLE.length] });
-    }
-    W.tor('matte', BAL_R1 - 0.3, 0.075, 5, 30, {
-      at: [X, BAL_Y + 1.22, Z], rot: [Math.PI / 2, -bA0, 0], arc: bA1 - bA0, color: C.licorice,
-    });
-    // a rail across each cut end, so you cannot walk off into the bite
-    for (const a of [bA0, bA1]) {
-      W.box('matte', BAL_R1 - r0, 0.14, 0.14, {
-        at: [X + Math.cos(a) * rm, BAL_Y + 1.0, Z + Math.sin(a) * rm], rot: [0, -a, 0], color: C.licoriceRed,
-      });
-      A.collideBox(X + Math.cos(a) * rm, Z + Math.sin(a) * rm, BAL_R1 - r0, 0.3, -a, BAL_Y + 1.3);
-    }
+    // the railing (and the rails across the two cut ends) is built with the
+    // ramp's, below — cupcakeRails() — so the three meet where they should
     for (let i = 0; i < 12; i++) {                                 // icing corbels
       const a = (i / 12) * Math.PI * 2 + 0.26;
       if (bitten(a)) continue;
@@ -462,12 +496,7 @@ export function buildCupcake(A) {
     const px = X + Math.cos(a) * RMID, pz = Z + Math.sin(a) * RMID;
     const seg = (SWEEP / STEPS) * RMID + 0.35;
     B.waffleBox(RAMP_R1 - RAMP_R0, 0.26, seg, { at: [px, ry, pz], rot: [0, -a, 0], color: i % 2 ? C.wafer : C.waferPale });
-    // outer railing + support
-    if (i % 2 === 0) {
-      const ox = X + Math.cos(a) * (RAMP_R1 - 0.18), oz = Z + Math.sin(a) * (RAMP_R1 - 0.18);
-      B.stripeCyl(0.12, 0.13, 1.1, { at: [ox, ry + 0.62, oz], variant: 2, seg: 6 });
-      B.sph('gloss', 0.18, 6, 5, { at: [ox, ry + 1.2, oz], color: SPRINKLE[i % SPRINKLE.length] });
-    }
+    // support (the railing comes from cupcakeRails)
     if (i % 5 === 2) {
       const g2 = world.height(px, pz);
       const hgt = ry - g2;
@@ -490,34 +519,85 @@ export function buildCupcake(A) {
       at: [(ax + bx) / 2, ly - 0.04, (az + bz) / 2], rot: [0, Math.atan2(cx, cz), 0], color: C.waferPale,
     });
     A.deckSeg(ax, az, bx, bz, 1.5, ly, ly, 0);
-    for (const s of [-1, 1]) for (let i = 0; i <= 2; i++) {
-      const t = i / 2;
-      const px = ax + (bx - ax) * t - cz * s * 1.4, pz = az + (bz - az) * t + cx * s * 1.4;
-      B.stripeCyl(0.12, 0.13, 1.1, { at: [px, ly + 0.6, pz], variant: 2, seg: 6 });
-      B.sph('gloss', 0.18, 6, 5, { at: [px, ly + 1.18, pz], color: SPRINKLE[(i + (s > 0 ? 0 : 3)) % SPRINKLE.length] });
-    }
     // a prop under the outer corner, so the landing is visibly held up
     const g2 = world.height(ax, az);
     if (ly - g2 > 1.2) B.stripeCyl(0.32, 0.38, ly - g2, { at: [ax, (ly + g2) / 2, az], variant: 0, seg: 8 });
   }
 
-  // ── front door + steps ────────────────────────────────────────────────────
+  cupcakeRails(A, W, {
+    y, BAL_Y, BAL_R0, BAL_R1, RAMP_R0, RAMP_R1, A0, SWEEP, RMID, CAKE_TOP: CAKE_Y + CAKE_H, WR_B,
+    yA: world.height(X, Z + RMID) + 0.2, PLINTH,
+  });
+  // ── the walks up here must not be shoved by things down there ────────────
+  // A collider with no top is solid to the sky: a lollipop planted under the
+  // ramp stands in the middle of the ramp nine units up (the scripted climb
+  // stuck on one), a crumb in the bite reaches the balcony. At world:ready,
+  // every topless collider whose footprint lies under the ramp, the landing or
+  // the balcony becomes solid only for walkers down at ITS level (a live rule
+  // on `solid`, like the gated rails). Anything that switches it off later
+  // (architecture.js disarms props in rooms) still can.
+  {
+    const aE = A0 + SWEEP, bA0 = BITE_A + BITE_HW + 0.05, bA1 = BITE_A + Math.PI * 2 - BITE_HW - 0.05;
+    const inSweep = (a, a0, a1) => { let d = a - a0; d = ((d % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2); return d <= a1 - a0; };
+    const cxE = Math.cos(aE), czE = Math.sin(aE);
+    const under = (x, z) => {
+      const dx = x - X, dz = z - Z, r = Math.hypot(dx, dz), a = Math.atan2(dz, dx);
+      if (r >= RAMP_R0 - 0.2 && r <= RAMP_R1 + 0.2 && inSweep(a, A0, aE)) return true;
+      if (r >= BAL_R0 - 0.2 && r <= BAL_R1 + 0.2 && inSweep(a, bA0, bA1)) return true;
+      const along = dx * cxE + dz * czE, perp = -dx * czE + dz * cxE;
+      return along >= BAL_R0 && along <= RAMP_R1 + 0.3 && Math.abs(perp) <= 1.8;
+    };
+    A.ctx.events.on('world:ready', () => {
+      const P = () => A.ctx.systems?.player?.position;
+      let n = 0;
+      for (const c of A.ctx.colliders) {
+        if (!c || c.rail || (typeof c.h === 'number' && c.h < 1e4)) continue;
+        const d0 = Object.getOwnPropertyDescriptor(c, 'solid');
+        if (c.solid === false || (d0 && d0.get)) continue;
+        const R = c.box ? 0.5 * Math.hypot(c.w || 0, c.d || 0) : (c.r || 0);
+        if (!(R > 0) || R > 4) continue;
+        let hit = under(c.x, c.z);
+        for (let k = 0; k < 6 && !hit; k++) { const a = k * Math.PI / 3; hit = under(c.x + Math.cos(a) * R, c.z + Math.sin(a) * R); }
+        if (!hit) continue;
+        const lim = world.height(c.x, c.z) + 2.3;
+        let base = c.solid;
+        Object.defineProperty(c, 'solid', {
+          configurable: true, enumerable: true,
+          get() { if (base === false) return false; const p = P(); return !p || p.y < lim; },
+          set(v) { base = v; },
+        });
+        n++;
+      }
+      if (n) console.warn('[candy/arch] cupcake: ' + n + ' topless props under the ramp/balcony now stop at their own level');
+    });
+  }
+
+  // ── front door + doorstep ─────────────────────────────────────────────────
   const dz = Z + WR_B + 0.35;
   const dy = world.height(X, dz);
-  // door reveal: a jamb either side of a REAL opening (no dark filler block —
-  // this doorway now leads somewhere)
-  for (const s of [-1, 1]) B.box('matteFlat', 0.42, 3.0, 0.9, { at: [X + s * 1.1, dy + 1.5, dz - 0.3], color: 0x6b3a2a });
-  B.box('matteFlat', 2.6, 0.5, 0.9, { at: [X, dy + 2.85, dz - 0.3], color: 0x6b3a2a });
-  const dp = door(B, X, dy, dz, 0, { w: 1.6, h: 2.7, frame: C.icing, color: C.chocolate, knob: C.yellow, leaf: false });
-  E.door({ x: X, y: dy - 0.02, z: dz - 0.12, rot: 0, w: 1.55, h: 2.65, color: C.chocolate, swing: 1, r: 3.0, say: 'The door is warm, and much too big, and it opens anyway.' });
-  for (let i = 0; i < 2; i++) B.waffleBox(3.0 - i * 0.5, 0.22, 0.8, { at: [X, dy + 0.11 + i * 0.22, dz + 1.5 - i * 0.7], color: C.waferPale });
-  // porch lamps
+  // the REVEAL: a chocolate-sponge portal through the thickness of the cake —
+  // two jambs and a lintel lining the cut in the wrapper, DOOR_W apart, deep
+  // enough (REVEAL_Z0..Z1) that the flared paper never shows its cut edge
+  const rz = Z + (REVEAL_Z0 + REVEAL_Z1) / 2, rd = REVEAL_Z1 - REVEAL_Z0;
+  for (const s of [-1, 1]) B.box('matteFlat', 0.42, DOOR_H + 0.55, rd, { at: [X + s * (DOOR_W / 2 + 0.21), dy + (DOOR_H + 0.55) / 2, rz], color: 0x6b3a2a });
+  B.box('matteFlat', DOOR_W + 0.94, 0.55, rd, { at: [X, dy + DOOR_H + 0.275, rz], color: 0x6b3a2a });
+  // the icing surround on the portal's face, the keystone a glacé cherry
+  const dp = doorway(B, X, dy, Z + REVEAL_Z1, 0, { w: DOOR_W, h: DOOR_H, depth: 0.4, frame: C.icing, knob: 0xd42038, baseColor: C.icingPink });
+  E.door({ x: X, y: dy - 0.02, z: dz - 0.12, rot: 0, w: DOOR_W, h: DOOR_H + 0.02, color: C.chocolate, swing: 1, r: 3.0, say: 'The door is warm, and much too big, and it opens anyway.' });
+  // the sill (through the reveal) and a wafer doorstep, both level with the
+  // hall floor and WALKABLE (Contract A): ground → step → sill → hall
+  const sillY = FLOOR_Y;
+  B.waffleBox(DOOR_W + 0.84, Math.max(0.12, sillY - dy + 0.1), rd, { at: [X, sillY - Math.max(0.12, sillY - dy + 0.1) / 2, rz], color: C.waferPale });
+  A.deckRRect(X, rz, DOOR_W + 0.1, rd + 0.3, 0, sillY);
+  B.waffleBox(3.4, Math.max(0.14, sillY - dy + 0.12), 1.5, { at: [X, sillY - Math.max(0.14, sillY - dy + 0.12) / 2, Z + REVEAL_Z1 + 0.75], color: C.wafer });
+  A.deckRRect(X, Z + REVEAL_Z1 + 0.75, 3.4, 1.5, 0, sillY);
+  // porch lamps, either side of the portal
   for (const s of [-1, 1]) {
-    B.cyl('matte', 0.1, 0.12, 0.5, 6, { at: [X + s * 1.45, dy + 2.9, dz + 0.15], rot: [0, 0, s * 0.5], color: C.licorice });
-    B.sph('glowWarm', 0.34, 9, 7, { at: [X + s * 1.7, dy + 2.75, dz + 0.15], color: 0xfff3cc });
-    softGlow(B, X + s * 1.7, dy + 2.75, dz + 0.15, 2.4);
+    B.cyl('matte', 0.1, 0.12, 0.5, 6, { at: [X + s * 1.55, dy + 3.25, Z + REVEAL_Z1 + 0.2], rot: [0, 0, s * 0.5], color: C.licorice });
+    B.sph('glowWarm', 0.34, 9, 7, { at: [X + s * 1.8, dy + 3.1, Z + REVEAL_Z1 + 0.2], color: 0xfff3cc });
+    softGlow(B, X + s * 1.8, dy + 3.1, Z + REVEAL_Z1 + 0.2, 2.4);
   }
-  A.light(X, dy + 3.1, dz + 0.9, 0xffc98a, 14, 72);
+  A.light(X, dy + 3.4, dz + 0.9, 0xffc98a, 14, 72);
 
   // ── windows ───────────────────────────────────────────────────────────────
   for (let i = 0; i < 5; i++) {
@@ -538,9 +618,25 @@ export function buildCupcake(A) {
     { id: 'to_pier', dir: Math.atan2(0.6, 0.8) },
   ], { h: 3.6, variant: 0 });
   A.collide(X + 4.5, Z + 11.5, 0.6);
-  B.signQuad('cupcake', 3.6, 1.4, { at: [X - 5.5, world.height(X - 5.5, Z + 10.5) + 2.4, Z + 10.5], rot: [0, -0.35, 0] });
-  for (const s of [-1, 1]) B.stripeCyl(0.15, 0.17, 2.6, { at: [X - 5.5 + s * 1.7, world.height(X - 5.5, Z + 10.5) + 1.3, Z + 10.5 - s * 0.6], variant: 1, seg: 7 });
-  A.readSign('cupcake', X - 5.5, Z + 10.5, 3.4, 'Read: The Great Cupcake');
+  // The name board: a wafer board between two mint posts, lettered on BOTH
+  // faces, beside the path where it reaches the plinth. It was a bare sign quad
+  // (the sign material is double-sided) turned the opposite way to its posts —
+  // a unit clear of either — and it stood across the foot of the spiral ramp,
+  // so you walked up through it and, from the ramp above, read it backwards:
+  // "3HT TAERG". Now it stands off the ramp's outer edge (r ≈ 15–17).
+  {
+    const sx = X - 5.0, sz = Z + 15.2, sg = world.height(sx, sz);
+    const ux = 1.7, uz = -0.6, ul = Math.hypot(ux, uz);          // the post line
+    const yaw = Math.atan2(-uz, ux), PH = 3.35, PO = 2.0;          // board faces +Z turned by yaw (SSE)
+    plaque(B, 'cupcake', 3.6, 1.4, { at: [sx, sg + 2.4, sz], rot: [0, yaw, 0], both: true, pad: 0.2, t: 0.16, color: C.waferPale });
+    for (const s of [-1, 1]) {
+      const px = sx + s * (ux / ul) * PO, pz = sz + s * (uz / ul) * PO;
+      B.stripeCyl(0.15, 0.17, PH, { at: [px, sg + PH / 2, pz], variant: 1, seg: 7 });
+      B.sph('gloss', 0.22, 8, 6, { at: [px, sg + PH + 0.1, pz], scale: [1, 0.8, 1], color: C.pink });
+      A.collide(px, pz, 0.25);
+    }
+  }
+  A.readSign('cupcake', X - 5.0, Z + 15.2, 3.4, 'Read: The Great Cupcake');
 
   // ── the bite: the second way in ───────────────────────────────────────────
   // A wafer tongue of crumbs spills out of the mouth and down the notch in the
@@ -581,7 +677,9 @@ export function buildCupcake(A) {
       // the torn frosting cap, and a smear of jam where it broke
       B.sph('icing', s * 0.5, 8, 6, { at: [px + s * 0.2, gy + s * 1.1, pz - s * 0.15], scale: [1.25, 0.42, 1.15], color: i % 2 ? C.icingPink : 0xffc2dd });
       if (i % 2 === 0) B.sph('matteFlat', s * 0.34, 7, 5, { at: [px - s * 0.5, gy + s * 0.72, pz + s * 0.5], scale: [1.2, 0.6, 1], color: 0xd42038 });
-      A.collide(px, pz, s * 1.15);
+      // a TOP (Contract O): topless, a crumb was a pillar to the sky — the one
+      // under the balcony's west end shoved you off the balcony into the bite
+      A.ctx.colliders.push({ x: px, z: pz, r: s * 1.15, h: gy + Math.max(1.65, s * 1.5) });
       for (let k = 0; k < 3; k++) {
         const aa = r.range(0, 6.283), rr2 = s * r.range(1.3, 2.2);
         const qx = px + Math.cos(aa) * rr2, qz = pz + Math.sin(aa) * rr2;
@@ -615,6 +713,12 @@ export function buildCupcake(A) {
     { a: DOOR_A, w: 0.20 },                      // the front door
     { a: BITE_A, w: BITE_HW + 0.06 },            // the bite
   ]);
+  // ...and the door's own jambs, closing the ring's gap down to the reveal:
+  // the collider gap is DOOR_W, on the reveal's inner faces, the whole way through
+  for (const s of [-1, 1]) {
+    const x0 = DOOR_W / 2, x1 = 2.95;
+    A.collideBox(X + s * (x0 + x1) / 2, Z + (REVEAL_Z0 + REVEAL_Z1) / 2, x1 - x0, REVEAL_Z1 - REVEAL_Z0, 0, CAKE_Y + CAKE_H);
+  }
   A.claimCircle(X, Z, WR_B + 0.4);
 
   cupcakeInterior(A, E, { X, Z, y, FLOOR_Y, UPPER_Y, ROOM_R, CAKE_Y, CAKE_H, WR_H, dz });
@@ -626,6 +730,28 @@ export function buildCupcake(A) {
   // and blanks its canes and lollipops, which is the only reason the whole
   // silhouette — plinth, swirl, cherry — is visible from the path at all.
   A.claimApron(X, Z, 13.8, 28.0, { r: 3.6 });
+  // ...and the RAMP's own footprint, which the apron (13.8 out) and the wrapper
+  // ring (6.6 in) both missed: lollipops and gummy bears grew straight up
+  // through the spiral — a blue bear's head through the deck and the railing
+  // at mid-climb, lollipop discs through the rail. Two rows of claim circles
+  // along the ramp and the landing: the inner row over the deck, the outer one
+  // for canopies that would lean in over the outer rail. Vegetation's clearance
+  // pass blanks a tree whose trunk is 0.8 inside a circle, so 2.4-u circles
+  // clear trunks out to ~1.6 either side of each row. The row starts 0.3 rad up
+  // the ramp: the foot is at grade, and `game.teleport` still lands a walker
+  // there (it steps out of every circle, solid or not). h 0.01: a claim is not
+  // a wall — the camera's collider passes read a circle with no h as six
+  // units of trunk, and these must not start dollying the lens on the ramp.
+  {
+    const a0 = A0 + 0.3, a1 = A0 + SWEEP + 0.13;
+    for (const [rr, cr] of [[(RAMP_R0 + RAMP_R1) / 2, 2.4], [RAMP_R1 + 1.0, 2.4]]) {
+      const n = Math.ceil(((a1 - a0) * rr) / 1.6);
+      for (let i = 0; i <= n; i++) {
+        const a = a0 + ((a1 - a0) * i) / n;
+        A.ctx.colliders.push({ x: X + Math.cos(a) * rr, z: Z + Math.sin(a) * rr, r: cr, h: 0.01, solid: false, apron: true });
+      }
+    }
+  }
 
   A.interact({
     id: 'candy_cupcake_knock', x: X, z: dz + 3.4, r: 2.4, label: 'Knock on the Great Cupcake',
@@ -644,6 +770,135 @@ export function buildCupcake(A) {
 
   return { top: CH, balconyY: BAL_Y };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * HANDRAILS (Contract O) — outside. Ben: "all ramps on or in buildings should
+ * have handrails to help keep players from falling off." The spiral ramp had
+ * a cane every other tread on its OUTER edge only, the landing six canes and
+ * the balcony eighteen, and not one collider between them: you could walk off
+ * the ramp's inner edge from nine units up, off either side of the landing, or
+ * straight off the balcony onto the plinth. Now:
+ *   · the ramp is railed both sides from where it leaves the plinth (measured:
+ *     inner edge against the tread it overhangs, outer edge against the lawn),
+ *   · the landing is railed round its open end and both open sides,
+ *   · the balcony is railed all round, open only where the landing meets it,
+ *     with a rail across each cut end at the bite,
+ *   · the balcony's INNER edge gets an invisible collider along the cake's
+ *     flank — the cake is the wall there, you just used to be able to walk
+ *     into it (and out of the bottom of it onto the plinth),
+ *   · the notch ends of the upper treads (the door slot and the bite slot)
+ *     get short railings where they stand more than 1.2 over the slot.
+ * Every one of these rails stands over ground somebody walks on (the plinth,
+ * the lawn), so their colliders are GATED: solid only while the visitor is up
+ * at that level (rails.js).
+ */
+function cupcakeRails(A, W, G) {
+  const { B, ctx, world } = A;
+  const { y, BAL_Y, BAL_R1, A0, SWEEP, CAKE_TOP, WR_B, yA, PLINTH } = G;
+  const floor = landingFloor(world);
+  const inGap = (a, c, hw) => Math.abs(Math.atan2(Math.sin(a - c), Math.cos(a - c))) < hw;
+  // the stepped plinth under everything: what a walker stepping off lands on
+  const R_IN = WR_B + 0.1;
+  const plinthAt = (x, z) => {
+    const r = Math.hypot(x - X, z - Z);
+    if (r < R_IN || r > PLINTH[0][0]) return -Infinity;
+    const a = Math.atan2(z - Z, x - X);
+    if (inGap(a, DOOR_A, DOOR_HW) || inGap(a, BITE_A, BITE_HW)) return -Infinity;
+    let top = y;
+    for (const [rad, hh] of PLINTH) { if (r <= rad) top += hh; }
+    return top;
+  };
+  const below = (x, z) => Math.max(floor(x, z), plinthAt(x, z));
+  // ONE family for the whole cupcake, inside and out (railFamily): bubblegum
+  // canes with cherry finials on the ramp, the landing, the plinth and every
+  // rail indoors; classic red canes with lemon gumdrops round the balcony —
+  // one finial colour per tier, not the sprinkle cycle, which on four stacked
+  // turns of spiral read as a picket of confetti.
+  const cane = railFamily(2, CHERRY);
+  const caneW = railFamily(0, C.yellow);
+  const LY = BAL_Y + 0.2;
+  const aEnd = A0 + SWEEP;
+  const yRamp = (a) => yA + (LY - yA) * ((a - A0) / SWEEP);
+  const cx = Math.cos(aEnd), cz = Math.sin(aEnd);
+  const R = (rad, tan, yy = LY) => [X + cx * rad - cz * tan, Z + cz * rad + cx * tan, yy];
+  const RO = RAMP_R1_RAIL, RI = RAMP_R0_RAIL, RB = BAL_R1 - 0.3;
+  const HALF = 1.4;                                      // landing rails (deckSeg halfW 1.5)
+  const sideIn = Math.sqrt(RI * RI - HALF * HALF), sideB = Math.sqrt(RB * RB - HALF * HALF);
+  const gIn = Math.atan2(HALF, sideIn), gB = Math.atan2(HALF, sideB);
+  const base = { site: 'great_cupcake', gate: true, below };
+
+  // the spiral ramp — both sides, from where they leave the plinth / lawn
+  railRun(ctx, B, arcPts(X, Z, RO, A0, aEnd, yRamp), { ...base, edge: 'ramp outer', out: 1, style: cane, lead: 1 });
+  railRun(ctx, B, arcPts(X, Z, RI, A0, aEnd - gIn, yRamp), { ...base, edge: 'ramp inner', out: -1, style: cane, lead: 1 });
+  // the landing: round its open end and down its far side to the balcony
+  railRun(ctx, B, [R(RO, 0), R(RO, HALF), R(sideB, HALF)], { ...base, edge: 'landing end + far side', out: 1, style: cane, force: true });
+  railRun(ctx, B, [R(sideIn, -HALF), R(sideB, -HALF)], { ...base, edge: 'landing near side', out: -1, style: cane, force: true });
+  // the balcony: all round, open where the landing arrives, closed across both cut ends
+  const bA0 = BITE_A + BITE_HW + 0.05, bA1 = BITE_A + Math.PI * 2 - BITE_HW - 0.05;
+  const RC = 8.85;                                       // the cake's flank at head height
+  railRun(ctx, W, arcPts(X, Z, RB, bA0, aEnd - gB, LY), { ...base, edge: 'balcony outer (a)', out: 1, style: caneW, force: true });
+  railRun(ctx, W, arcPts(X, Z, RB, aEnd + gB, bA1, LY), { ...base, edge: 'balcony outer (b)', out: 1, style: caneW, force: true });
+  for (const [a, out, nm] of [[bA0, 1, 'balcony cut end (bite, east)'], [bA1, -1, 'balcony cut end (bite, west)']]) {
+    railRun(ctx, W, [[X + Math.cos(a) * RC, Z + Math.sin(a) * RC, LY], [X + Math.cos(a) * RB, Z + Math.sin(a) * RB, LY]],
+      { ...base, edge: nm, out, style: caneW, force: true });
+  }
+  railRun(ctx, W, arcPts(X, Z, RC, bA0, bA1, LY), {
+    ...base, edge: 'balcony inner (the cake flank)', out: -1, force: true, noPosts: true, noRail: true, h: CAKE_TOP - LY,
+    note: 'invisible: the cake is the wall',
+  });
+  // the notch ends of the treads: door slot and bite slot — the same canes as
+  // the ramp that climbs away beside them (they were fat piped-icing dumbbells)
+  const ends = [
+    [DOOR_A + DOOR_HW, 1, 'door slot, east'], [DOOR_A - DOOR_HW, -1, 'door slot, west'],
+    [BITE_A + BITE_HW, 1, 'bite slot, south'], [BITE_A - BITE_HW, -1, 'bite slot, north'],
+  ];
+  for (const [a0, out, nm] of ends) {
+    let top = y;
+    PLINTH.forEach(([rad, hh], k) => {
+      top += hh;
+      const rIn = k === PLINTH.length - 1 ? R_IN : PLINTH[k + 1][0];
+      const r0 = rIn + 0.15, r1 = rad - 0.12;
+      const pts = [];
+      for (const rr of [r0, r1]) {
+        const a = a0 + (out > 0 ? 1 : -1) * (0.16 / rr);     // 0.16 in from the cut face
+        pts.push([X + Math.cos(a) * rr, Z + Math.sin(a) * rr, top]);
+      }
+      railRun(ctx, B, pts, { ...base, edge: `plinth tread ${k + 1} end (${nm})`, out, style: cane, below: floor });
+    });
+  }
+  // the plinth's outermost step: the lawn falls away under the north side (the
+  // ramp's high end), so there the bottom tread stands up to ~1.8 over it — a
+  // railing where it does, an open step everywhere else
+  railRun(ctx, B, arcPts(X, Z, PLINTH[0][0] - 0.14, DOOR_A + DOOR_HW, BITE_A + Math.PI * 2 - BITE_HW, y + PLINTH[0][1]),
+    { ...base, edge: 'plinth bottom step (west arc)', out: 1, style: cane, below: floor });
+  railRun(ctx, B, arcPts(X, Z, PLINTH[0][0] - 0.14, BITE_A + BITE_HW, DOOR_A - DOOR_HW, y + PLINTH[0][1]),
+    { ...base, edge: 'plinth bottom step (east arc)', out: 1, style: cane, below: floor });
+}
+const CHERRY = 0xd42038;          // the cherry on top, the keystone, the finials
+/**
+ * The cupcake's railing, one family everywhere (Contract O: "rails read as part
+ * of the building"): rails.js's candy cane — striped post, striped top rail,
+ * licorice mid rail on stairs, a gumdrop finial — in stripe colourway
+ * `variant`, one finial colour, and a FOOT: a dome of piped frosting where each
+ * post meets the wafer, so it stands on the deck instead of stabbing through it.
+ * Keys: 'stripe', 'gloss', 'licorice', 'icing' — the main builder has them all;
+ * the shell and the interior builders collapse gloss/licorice/icing onto their
+ * one matte, and carry 'stripe' (the interior's rails are its only stripes:
+ * +1 draw call, and only while you are inside).
+ */
+function railFamily(variant, knob) {
+  const st = caneStyle({ variant, knob });
+  return {
+    post(B, x, y, z, h, i) {
+      st.post(B, x, y, z, h, i);
+      B.sph('icing', 0.2, 8, 3, { at: [x, y, z], thetaLen: Math.PI / 2, scale: [1, 0.55, 1], color: C.icing });
+    },
+    rail: st.rail,
+  };
+}
+const RAMP_R1_RAIL = 13.02;       // ramp walkable 10.8 … 13.0: rails just inside both edges
+const RAMP_R0_RAIL = 10.9;
 
 // ─────────────────────────────────────────────────────────────────────────────
 /**
@@ -709,10 +964,91 @@ function cupcakeInterior(A, E, G) {
     });
   }
   A.deckRing(X, Z, MEZ_R0, ROOM_R + 0.15, UPPER_Y);
-  I.tor('icing', MEZ_R0, 0.12, 5, 24, { at: [X, UPPER_Y + 0.5, Z], rot: [Math.PI / 2, 0, 0], color: C.icingPink });
-  for (let i = 0; i < 14; i++) {           // stairwell railing
-    const a = (i / 14) * Math.PI * 2;
-    I.cyl('matte', 0.07, 0.07, 0.6, 5, { at: [X + Math.cos(a) * MEZ_R0, UPPER_Y + 0.3, Z + Math.sin(a) * MEZ_R0], color: C.licorice });
+  // A NEWEL: a fat bubblegum cane on a frosting foot with an icing collar, and
+  // on top either a glowing cherry lamp (the stair head — it replaces the
+  // ceiling lamp that hung, cord and all, from a ceiling the camera never
+  // draws, and so read as a salt shaker parked on the rail) or a glacé cherry.
+  let lampAt = null;
+  const newel = (x, z, lamp) => {
+    const y0 = UPPER_Y, NH = 1.3;
+    I.sph('icing', 0.42, 10, 3, { at: [x, y0, z], thetaLen: Math.PI / 2, scale: [1, 0.5, 1], color: C.icing });
+    I.stripeCyl(0.19, 0.23, NH, { at: [x, y0 + NH / 2, z], variant: 2, seg: 8 });
+    I.tor('icing', 0.22, 0.08, 5, 12, { at: [x, y0 + NH, z], rot: [Math.PI / 2, 0, 0], color: C.icing });
+    I.cyl('icing', 0.26, 0.24, 0.1, 10, { at: [x, y0 + NH + 0.05, z], color: C.icingPink });
+    if (lamp) {
+      I.sph('glowWarm', 0.3, 12, 9, { at: [x, y0 + NH + 0.38, z], color: 0xe8283f });
+      I.cyl('licorice', 0.025, 0.03, 0.26, 4, { at: [x + 0.06, y0 + NH + 0.75, z], rot: [0, 0, -0.3], color: 0x3f7a2a });
+      softGlow(I, x, y0 + NH + 0.38, z, 1.5);
+      lampAt = [x, z];
+    } else {
+      I.sph('gloss', 0.26, 10, 8, { at: [x, y0 + NH + 0.33, z], color: CHERRY });
+      I.cyl('licorice', 0.022, 0.028, 0.3, 4, { at: [x + 0.07, y0 + NH + 0.7, z], rot: [0, 0, -0.35], color: 0x3f7a2a });
+    }
+  };
+  // ── HANDRAILS (Contract O), inside ────────────────────────────────────────
+  // The frosting stair had no rail at all on its open side (a nine-unit drop to
+  // the hall by the top turn), the stairwell had a ring of 0.6-unit licorice
+  // stubs with no collider, and nothing stopped you walking off the TOP tread
+  // into the flight below. Now: a handrail (+ mid rail) up the open side of the
+  // stair, the same round the stairwell — both measured, so both leave
+  // themselves open along the last turn where stair and mezzanine are a stride
+  // apart (that is the way off) — a rail across the head of the stair, and a
+  // collider for the piped newel the stair winds round. The SAME candy canes
+  // as the ramp outside (railFamily): from the mezzanine you see both at once
+  // through the bite, and a dusty-pink icing tube beside a striped cane read as
+  // two buildings. Where the ring opens for the stair, a fat cane NEWEL stands
+  // at each end: a lamp newel at the stair head, a cherry-capped one opposite.
+  {
+    const total = TURNS * Math.PI * 2, aTop = A0 + total;
+    const ys = (u) => FLOOR_Y + rise * (u / total);
+    // the highest tread of the flight(s) under (x, z) that is below `yy`, else the hall floor
+    const stairBelow = (x, z, yy) => {
+      const dx = x - X, dz = z - Z, r = Math.hypot(dx, dz);
+      let best = FLOOR_Y;
+      if (Math.abs(r - STAIR_R) <= HALF_W) {
+        let a = Math.atan2(dz, dx) - A0; a = ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+        for (let u = a; u <= total; u += Math.PI * 2) { const h = ys(u); if (h < yy + 0.3 && h > best) best = h; }   // level counts: you step across
+      }
+      return best;
+    };
+    const base = { site: 'great_cupcake', gate: true, style: railFamily(2, CHERRY) };
+    const RS = STAIR_R + HALF_W - 0.1;
+    const stairPts = [];
+    for (let u = 0, n = Math.ceil(total * RS / 1.55); u <= n; u++) {
+      const uu = total * (u / n), a = A0 + uu;
+      stairPts.push([X + Math.cos(a) * RS, Z + Math.sin(a) * RS, ys(uu)]);
+    }
+    // off the stair's open side you land on the hall floor — or step onto the
+    // mezzanine, where it is within a stride
+    const offStair = (x, z, yy) => (UPPER_Y - yy <= 1.2 ? UPPER_Y : FLOOR_Y);
+    railRun(A.ctx, I, stairPts, { ...base, edge: 'interior stair, open side', out: 1, mid: true, lead: 1, leadBack: true, below: offStair });
+    railRun(A.ctx, I, [[X + Math.cos(aTop) * 1.05, Z + Math.sin(aTop) * 1.05, UPPER_Y], [X + Math.cos(aTop) * (MEZ_R0 + 0.1), Z + Math.sin(aTop) * (MEZ_R0 + 0.1), UPPER_Y]],
+      { ...base, edge: 'interior stair, head', out: -1, force: true, below: stairBelow });
+    const ringPts = arcPts(X, Z, MEZ_R0 + 0.1, aTop, aTop + Math.PI * 2, UPPER_Y);
+    const well = railRun(A.ctx, I, ringPts, { ...base, edge: 'mezzanine stairwell', out: -1, below: stairBelow });
+    // the newels: the lamp newel at the stair head (aTop, where the head rail
+    // meets the ring), and a cherry newel wherever else the ring changes from
+    // open to railed. arcPts steps ≤ POST_GAP, so span k is segment k of ringPts.
+    newel(ringPts[0][0], ringPts[0][1], true);
+    const built = well.drops.map((d) => d[0] !== '·');
+    for (let k = 0; k < built.length - 1; k++) {
+      if (built[k] !== built[k + 1]) newel(ringPts[k + 1][0], ringPts[k + 1][1], false);
+    }
+    // THE BITE, UP HERE. The mezzanine deck runs out to the panelling all the
+    // way round, and so do the upper wafer panels — but the ring of wall
+    // colliders (collideRingGaps, r 6.4) is cut for the bite, because down at
+    // the ground that gap is the crater's walk-in mouth. So over the bite the
+    // panelling had nothing behind it: you walked through the wafer and fell
+    // ten units into the crater (the biggest drop in the building). The panels
+    // are the wall there, so it gets the wall's collider on the panel line —
+    // inner face at ROOM_R + 0.1, where the ring's is — gated to the mezzanine,
+    // with the crater mouth running underneath. Overlaps the ring either side.
+    railRun(A.ctx, I, arcPts(X, Z, ROOM_R + 0.22, BITE_A - BITE_HW - 0.1, BITE_A + BITE_HW + 0.1, UPPER_Y), {
+      ...base, edge: 'mezzanine outer edge at the bite', out: 1, force: true, noPosts: true, noRail: true,
+      note: 'invisible: the wafer panelling is the wall',
+    });
+    // the piped newel: the stair's inner edge is the column, which had no collider
+    A.ctx.colliders.push({ x: X, z: Z, r: 1.0 });
   }
   for (let i = 0; i < NP; i++) {           // upper wall panels
     const a = (i / NP) * Math.PI * 2 + Math.PI / NP;
@@ -723,13 +1059,22 @@ function cupcakeInterior(A, E, G) {
     });
   }
 
-  // a bed the size of a small boat
-  const ba = Math.PI * 1.35, bx = X + Math.cos(ba) * 4.0, bz = Z + Math.sin(ba) * 4.0;
-  I.box('licorice', 3.4, 0.5, 4.4, { at: [bx, UPPER_Y + 0.25, bz], rot: [0, -ba, 0], color: C.licoriceSoft });
-  I.sph('gloss', 1.7, 10, 7, { at: [bx, UPPER_Y + 0.6, bz], scale: [1, 0.34, 1.3], color: C.pink });
-  I.sph('icing', 0.85, 8, 6, { at: [bx - Math.cos(ba) * 1.5, UPPER_Y + 0.95, bz - Math.sin(ba) * 1.5], scale: [1.5, 0.5, 1], color: C.cream });
-  I.box('licorice', 3.5, 1.5, 0.28, { at: [bx - Math.cos(ba) * 2.2, UPPER_Y + 1.0, bz - Math.sin(ba) * 2.2], rot: [0, -ba, 0], color: C.licorice });
-  A.collide(bx, bz, 1.9);
+  // a bed the size of a small boat — along the wall, clear of the stairwell.
+  // (It stood across the head of the stair, half of it hanging over the well,
+  // with a solid collider that walled the top turn down to a 0.5-unit lane.)
+  const ba = Math.PI * 0.585, BR = 5.3, BW = 1.9, BL = 4.4;
+  const bx = X + Math.cos(ba) * BR, bz = Z + Math.sin(ba) * BR;
+  const tx = -Math.sin(ba), tz = Math.cos(ba);           // along the wall
+  I.box('licorice', BW, 0.5, BL, { at: [bx, UPPER_Y + 0.25, bz], rot: [0, -ba, 0], color: C.licoriceSoft });
+  I.sph('gloss', 1.7, 10, 7, { at: [bx, UPPER_Y + 0.6, bz], rot: [0, -ba, 0], scale: [0.56, 0.34, 1.3], color: C.pink });
+  I.sph('icing', 0.85, 8, 6, { at: [bx + tx * 1.5, UPPER_Y + 0.95, bz + tz * 1.5], rot: [0, -ba, 0], scale: [1.05, 0.5, 0.8], color: C.cream });
+  I.box('licorice', BW + 0.1, 1.5, 0.28, { at: [bx + tx * 2.2, UPPER_Y + 1.0, bz + tz * 2.2], rot: [0, -ba, 0], color: C.licorice });
+  {
+    // solid only up on the mezzanine: the hall runs underneath it
+    const c = { x: bx, z: bz, w: BW, d: BL, rot: ba, box: true };   // no top, as before (a solid bed)
+    gateSolid(c, A.ctx, UPPER_Y - GATE);
+    A.ctx.colliders.push(c);
+  }
 
   // the window seat, looking out at Lollipop Meadow (-110, -45)
   const wa = Math.atan2(-45 - Z, -110 - X);
@@ -740,14 +1085,17 @@ function cupcakeInterior(A, E, G) {
   I.box('windowWarm', 0.1, 1.5, 2.2, { at: [X + Math.cos(wa) * (ROOM_R + 0.12), UPPER_Y + 1.45, Z + Math.sin(wa) * (ROOM_R + 0.12)], rot: [0, -wa, 0], color: 0xfff0d0 });
 
   // ── the cherry skylight ───────────────────────────────────────────────────
-  I.cyl('windowWarm', 1.5, 1.5, 0.12, 16, { at: [X, CEIL, Z], color: 0xff3a56 });
-  I.tor('icing', 1.55, 0.16, 5, 18, { at: [X, CEIL - 0.06, Z], rot: [Math.PI / 2, 0, 0], color: C.icing });
+  // On the ROOF builder, which hides while you are inside: the game camera is
+  // always above this ceiling, so indoors the skylight was only ever seen from
+  // on top — a flat red disc floating over the stairwell, blotting out the
+  // flights and the rail round them. Its glow stays in the room.
+  E.roof.cyl('glowWarm', 1.5, 1.5, 0.12, 16, { at: [X, CEIL, Z], color: 0xff3a56 });
+  E.roof.tor('icing', 1.55, 0.16, 5, 18, { at: [X, CEIL - 0.06, Z], rot: [Math.PI / 2, 0, 0], color: C.icing });
   IN.softLight(I, X, CEIL - 0.6, Z, 3.4);
 
-  // lamps
-  const l1 = IN.ceilingLamp(I, IN.frameAt(X, UPPER_Y, Z, 0), 3.2, 2.2, -2.4, { glow: 2.6 });
+  // lamps: the upper room's is the newel lamp at the stair head (above)
   IN.ceilingLamp(I, F, -3.0, 3.4, 2.0, { glow: 2.2, hood: C.icingMint });
-  E.lamp(l1.x, UPPER_Y + 1.8, l1.z, 0xffb27a);
+  if (lampAt) E.lamp(lampAt[0], UPPER_Y + 1.8, lampAt[1], 0xffb27a);
 
   // a gag you can press
   A.interact({

@@ -199,7 +199,7 @@ export const RUSTY = {
   ],
   none: [
     "No candy? Then we're just two lads under a jetty, which is honestly fine, but it isn't business.",
-    'Candyland has candy lying in the road. Lying in the ROAD. Nobody there believes me either.',
+    'The Candy Kingdom has candy lying in the road. Lying in the ROAD. Nobody there believes me either.',
     "Come back with something sweet and I'll remember where I put things.",
   ],
   // tiers

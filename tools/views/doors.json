@@ -1,0 +1,315 @@
+{
+ "doors_house0": {
+  "pos": [
+   -146.41,
+   44.55
+  ],
+  "time": 11,
+  "frames": 40,
+  "az": 2.343,
+  "el": 0.42,
+  "dist": 15
+ },
+ "doors_house2": {
+  "free": [
+   -137.3,
+   52.3
+  ],
+  "y": 6.4,
+  "time": 11,
+  "frames": 40,
+  "az": -2.95,
+  "el": 0.3,
+  "dist": 10
+ },
+ "doors_house4": {
+  "pos": [
+   -129.18,
+   43.86
+  ],
+  "time": 11,
+  "frames": 40,
+  "az": -2.138,
+  "el": 0.42,
+  "dist": 15
+ },
+ "doors_house8": {
+  "pos": [
+   -140.48,
+   30.92
+  ],
+  "time": 11,
+  "frames": 40,
+  "az": 0.345,
+  "el": 0.42,
+  "dist": 15
+ },
+ "doors_cupcake": {
+  "free": [
+   -88.0,
+   -10.9
+  ],
+  "y": 6.6,
+  "time": 10.5,
+  "frames": 40,
+  "az": 0.18,
+  "el": 0.2,
+  "dist": 10.5
+ },
+ "doors_booth": {
+  "free": [
+   -46.2,
+   30.4
+  ],
+  "y": 6.2,
+  "time": 11,
+  "frames": 40,
+  "az": 4.45,
+  "el": 0.3,
+  "dist": 12
+ },
+ "doors_lookout": {
+  "pos": [
+   -176.53,
+   -50.6
+  ],
+  "time": 14,
+  "frames": 40,
+  "az": 0.821,
+  "el": 0.4,
+  "dist": 16
+ },
+ "doors_house0_game": {
+  "pos": [
+   -145.4,
+   45.9
+  ],
+  "time": 11,
+  "frames": 40,
+  "az": 2.2,
+  "el": 0.62,
+  "dist": 31
+ },
+ "doors_guest_house": {
+  "pos": [
+   170.85,
+   56.66
+  ],
+  "time": 11,
+  "frames": 40,
+  "az": 1.135,
+  "el": 0.34,
+  "dist": 11
+ },
+ "doors_guest_room": {
+  "pos": [
+   168.73,
+   54.54
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": 0.985,
+  "el": 0.9,
+  "dist": 13,
+  "call": {
+   "catArchitecture.enter": "guest"
+  }
+ },
+ "doors_cupcake_straight": {
+  "free": [
+   -88.0,
+   -11.1
+  ],
+  "y": 6.2,
+  "time": 10.5,
+  "frames": 40,
+  "az": 0.0,
+  "el": 0.06,
+  "dist": 5.5,
+  "fov": 55
+ },
+ "doors_guest_door_open": {
+  "free": [
+   169.44,
+   56.09
+  ],
+  "y": 7.16,
+  "time": 14,
+  "frames": 45,
+  "az": 0.785,
+  "el": 0.16,
+  "dist": 4.4,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "guest",
+    true
+   ],
+   "player.teleport": [
+    171.42,
+    55.38
+   ]
+  }
+ },
+ "doors_cat_guest_front": {
+  "free": [
+   169.44,
+   56.09
+  ],
+  "y": 7.36,
+  "time": 14,
+  "frames": 45,
+  "az": 1.085,
+  "el": 0.24,
+  "dist": 6.4,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "guest",
+    true
+   ],
+   "player.teleport": [
+    172.06,
+    55.31
+   ]
+  }
+ },
+ "doors_cat_guest_shut": {
+  "free": [
+   169.44,
+   56.09
+  ],
+  "y": 7.36,
+  "time": 14,
+  "frames": 45,
+  "az": 1.085,
+  "el": 0.24,
+  "dist": 6.4,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "guest",
+    false
+   ],
+   "player.teleport": [
+    172.06,
+    55.31
+   ]
+  }
+ },
+ "doors_cat_purrbucks": {
+  "free": [
+   100.12,
+   0.69
+  ],
+  "y": 6.85,
+  "time": 11,
+  "frames": 45,
+  "az": 0.381,
+  "el": 0.16,
+  "dist": 7.4,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "purrbucks",
+    true
+   ],
+   "player.teleport": [
+    103.28,
+    1.58
+   ]
+  }
+ },
+ "doors_cat_purrbucks_shut": {
+  "free": [
+   100.12,
+   0.69
+  ],
+  "y": 6.85,
+  "time": 11,
+  "frames": 45,
+  "az": 0.381,
+  "el": 0.16,
+  "dist": 7.4,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "purrbucks",
+    false
+   ],
+   "player.teleport": [
+    103.28,
+    1.58
+   ]
+  }
+ },
+ "doors_cat_travel": {
+  "free": [
+   129.51,
+   -4.75
+  ],
+  "y": 8.62,
+  "time": 11,
+  "frames": 45,
+  "az": -0.065,
+  "el": 0.14,
+  "dist": 7.2,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "travel",
+    true
+   ],
+   "player.teleport": [
+    131.58,
+    -2.61
+   ]
+  }
+ },
+ "doors_cat_meow": {
+  "free": [
+   125.8,
+   -21.5
+  ],
+  "y": 7.55,
+  "time": 11,
+  "frames": 45,
+  "az": 0.0,
+  "el": 0.14,
+  "dist": 7.5,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "meow",
+    true
+   ],
+   "player.teleport": [
+    128.1,
+    -19.5
+   ]
+  }
+ },
+ "doors_cat_purrliament": {
+  "free": [
+   152.0,
+   -4.1
+  ],
+  "y": 9.58,
+  "time": 11,
+  "frames": 45,
+  "az": 0.0,
+  "el": 0.1,
+  "dist": 8.5,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "purrliament",
+    true
+   ],
+   "player.teleport": [
+    156.2,
+    -1.1
+   ]
+  }
+ }
+}

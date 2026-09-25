@@ -67,7 +67,42 @@
 // EVENTS  'planes:drop' {x,z} (release; x,z = landing spot) · 'planes:landed' {x,z,id}
 //         'planes:flyover' {name:'biplane'|'jet'} when one passes over the visitor
 //         (also calls ctx.systems.audio?.play?.('plane'|'jet') if audio grows that API)
-// Views   tools/views/planes.json
+// Views   tools/views/planes.json · tools/views/air_routes.json
+//
+// WAVE 4 · Contract L — AIR ROUTES (the same builder owns escape/blimp.js and
+// escape/biplane.js, which hold the rides; this file flies the aircraft)
+//   BLIMP SCHEDULE  two mooring masts: Sugar Pier (nose north to a mast on the
+//                   beach, the rope ladder landing on the planks) and Fish Harbor
+//                   (nose east to a mast on the lawn). Each pass: nose in, moor
+//                   20 s (ladder drops, props idle, letters lit after dark),
+//                   back off, climb, drift to the other mast (speed 4.6).
+//                   planes.blimp = { moored:'candy'|'cat'|null, eta(mast),
+//                   departIn, ladder (0..1), phase, leg, seat(out), foot(mast),
+//                   masts, cycle } — day AND night.
+//   BIPLANE PLAN    the banner biplane circles Candyland and, by day only, drops
+//                   in on its fuel stop (AIR.strip, south of Gumdrop Village):
+//                   lands, taxis to the candy pump, refuels 25 s with the engine
+//                   off and the banner laid out on the grass, takes off and
+//                   rejoins its loop. With a passenger aboard he flies to Wing
+//                   Nut Field instead, stops, lets you off, and flies home.
+//                   planes.biplane = { mode, phase, refuelLeft, eta(), stopped,
+//                   wait(s), board(), release(), seat(out), pilot(out), ... }
+//                   The fuel stop's ground is planes.air.strip.pad (buildPad: one
+//                   raised slab over the RENDERED terrain mesh's envelope — no
+//                   ground pokes through it); the taxi tracks, the pump hose and
+//                   the laid-out banner rest on it (air.strip.restH). The tow rope
+//                   runs through a knot bone: it sags in the air and, parked, drops
+//                   off the tail onto the ground and along to the lead pole; in
+//                   flight the banner streams at (nearly) the plane's height
+//                   instead of hanging off a climb-out like a sea anchor.
+//   summonJet({x,y,z}, {hold}) → Promise  the MEOW AIR jet leaves its lane,
+//                   banks round the point, slows to a hover 12 u above it with a
+//                   rope ladder trailing to y, holds ≈ 8 s, climbs out east. The
+//                   promise resolves (with {x,y,z,top}) when the ladder is at the
+//                   point. planes.jetState · jetHold(s) · jetGo()
+//   debug hooks     debugBlimp('candy'|'cat'|'mid'|'midBack', k) ·
+//                   debugBiplane('approach'|'refuel'|'ferry'|'dropoff'|'home', k) ·
+//                   debugSummon(x, y, z, 'hover'|'approach'|'depart')
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 import { rng, hash, clamp, lerp, smoothstep, TAU } from '../core/util.js';
@@ -121,6 +156,131 @@ export const ROUTES = {
   paper: { x: 78, z: 18, r: 12.5, alt: 44, loopR: 3.8, speed: 9, loopTime: 2.6, loopAt: 1.2, delays: [0, 0.95, 1.9], lateral: [0, 3.0, -3.0] },
   jet: { alt: 110, speed: 64, period: 90, half: 560, first: 10 },
 };
+
+// ── WAVE 4 · the ground end of the air routes ───────────────────────────────
+// Masts: `foot` is where the rope ladder lands (where you board); the blimp
+// hangs `LAD_BACK` ahead of it and the mast stands under its nose. Sugar Pier's
+// foot is ON the pier planks (deck = terrain at [x, z] + lift, as pier.js
+// builds it). The strip: centre, axis angle (0 = east, + toward south), size.
+export const AIR = {
+  masts: {
+    candy: { foot: [-44, 22.2], heading: Math.PI, label: 'Sugar Pier', island: 'candy', to: 'cat', deck: [-46, 22, 0.62] },
+    cat: { foot: [97, 60], heading: Math.PI / 2, label: 'Fish Harbor', island: 'cat', to: 'candy' },
+  },
+  ladder: 7.4,                       // rope ladder, balcony floor → ground
+  // measured (tools/_tmp/air/probe_strip.mjs): no wall, house or big trunk within
+  // the runway + 3.5 u of wing room, nor on the apron south of its west end
+  strip: { x: -146, z: 72, ang: 0.2618, len: 46, wid: 9, apron: -1 },
+  refuel: 25,                        // seconds at the pump
+};
+
+// ── the AIRFIELD PAD (the fuel stop's ground) ────────────────────────────────
+// The runway and apron used to be drapes sampled from world.height every 2 u.
+// The terrain MESH is not world.height: terrain/ground.js triangulates it on its
+// own 208-quad grid per island (size = radius × 2.36; each quad split b–c), so
+// between samples the ground rode up to 0.22 u over the drape and cut jagged
+// holes through the lawn, the apron tiles, the threshold bars and the banner.
+// Now the pad is ONE raised slab: its top is a 1 u grid laid over the DILATED
+// upper envelope of that exact mesh (every pad vertex clears the mesh by LIFT
+// everywhere within 1.5 u of it, i.e. over every triangle it belongs to — no
+// poke-through anywhere), smoothed upward, with the apron's fall toward the
+// beach held to APRON_FALL. biplane.js draws it (top, skirt, kerb), registers
+// it as a walkable, and the taxi tracks + the grounded banner sit on it.
+// Frame: a = along the runway (east-ish), k = toward the apron (k = side·apron).
+export const PAD_SPEC = { G: 1, margin: 2, lift: 0.16, apronK: 11.5, apronA: -1, apronFall: 0.28, dilate: 1.5, smooth: 3 };
+/** Exact height of the rendered terrain mesh at (x, z) (setup-time sampler; caches its vertices). */
+export function terrainMeshSampler(world) {
+  const SEG = 208, cache = new Map(), grids = {};
+  for (const id of ['candy', 'cat']) {
+    const isl = world.ISLANDS[id]; const size = isl.radius * 2.36;
+    grids[id] = { x0: isl.center.x - size / 2, z0: isl.center.z - size / 2, step: size / SEG, tag: id === 'cat' ? 1 : 0 };
+  }
+  const V = (g, i, j) => {
+    i = Math.max(0, Math.min(SEG, i)); j = Math.max(0, Math.min(SEG, j));
+    const key = (g.tag * 512 + i) * 512 + j;
+    let h = cache.get(key);
+    if (h === undefined) { h = world.height(g.x0 + i * g.step, g.z0 + j * g.step); cache.set(key, h); }
+    return h;
+  };
+  return (x, z) => {
+    const g = x < 0 ? grids.candy : grids.cat;
+    const fx = (x - g.x0) / g.step, fz = (z - g.z0) / g.step, i = Math.floor(fx), j = Math.floor(fz), u = fx - i, v = fz - j;
+    const a = V(g, i, j), b = V(g, i + 1, j), c = V(g, i, j + 1);
+    if (u + v <= 1) return a + (b - a) * u + (c - a) * v;
+    const d = V(g, i + 1, j + 1);
+    return d + (c - d) * (1 - u) + (b - d) * (1 - v);
+  };
+}
+/** Build the pad heightfield for AIR.strip (pure; runs once at setup). */
+export function buildPad(world, strip, o = {}) {
+  const S = { ...PAD_SPEC, ...o };
+  const SU = { x: Math.cos(strip.ang), z: Math.sin(strip.ang) }, SN = { x: Math.sin(strip.ang), z: -Math.cos(strip.ang) };
+  const AS = strip.apron ?? -1, HL = strip.len / 2, HW = strip.wid / 2;
+  const { G, margin: MG, lift: LIFT, apronK: APK, apronA: APA } = S;
+  const A0 = -HL - MG, K0 = -HW - MG;
+  const NA = Math.round((2 * HL + 2 * MG) / G) + 1, NK = Math.round((APK + HW + 2 * MG) / G) + 1;
+  const meshH = S.meshH || terrainMeshSampler(world);
+  const toX = (a, k) => strip.x + SU.x * a + SN.x * k * AS, toZ = (a, k) => strip.z + SU.z * a + SN.z * k * AS;
+  // 1. the mesh on a fine lattice (0.25 u) over the grid + the dilation margin
+  const FS = 0.25, FM = Math.ceil(S.dilate / FS);
+  const FA = (NA - 1) * G / FS + 1 + 2 * FM, FK = (NK - 1) * G / FS + 1 + 2 * FM;
+  const F = new Float32Array(FA * FK);
+  for (let i = 0; i < FA; i++) for (let j = 0; j < FK; j++) {
+    const a = A0 + (i - FM) * FS, k = K0 + (j - FM) * FS;
+    F[i * FK + j] = meshH(toX(a, k), toZ(a, k));
+  }
+  // 2. dilated envelope at every pad vertex (+ world.height: what walkers stand on)
+  const E = new Float32Array(NA * NK), H = new Float32Array(NA * NK);
+  const R2 = (S.dilate / FS) * (S.dilate / FS), step = G / FS;
+  for (let i = 0; i < NA; i++) for (let j = 0; j < NK; j++) {
+    const ci = FM + i * step, cj = FM + j * step;
+    let m = -Infinity;
+    for (let di = -FM; di <= FM; di++) for (let dj = -FM; dj <= FM; dj++) {
+      if (di * di + dj * dj > R2) continue;
+      const h = F[(ci + di) * FK + cj + dj]; if (h > m) m = h;
+    }
+    const a = A0 + i * G, k = K0 + j * G;
+    E[i * NK + j] = Math.max(m, world.height(toX(a, k), toZ(a, k))) + LIFT;
+  }
+  // 3. smoothed upward (never below the envelope), then the apron's fall held
+  H.set(E);
+  const T = new Float32Array(NA * NK);
+  const at = (A, i, j) => A[Math.max(0, Math.min(NA - 1, i)) * NK + Math.max(0, Math.min(NK - 1, j))];
+  const blur = () => {
+    for (let i = 0; i < NA; i++) for (let j = 0; j < NK; j++) {
+      let s = 0;
+      for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) s += at(H, i + di, j + dj) * (2 - Math.abs(di)) * (2 - Math.abs(dj));
+      T[i * NK + j] = Math.max(E[i * NK + j], s / 16);
+    }
+    H.set(T);
+  };
+  for (let n = 0; n < S.smooth; n++) blur();
+  const jEdge = Math.round((HW - K0) / G);
+  for (let i = 0; i < NA; i++) {
+    const top = H[i * NK + jEdge];
+    for (let j = jEdge + 1; j < NK; j++) H[i * NK + j] = Math.max(H[i * NK + j], top - S.apronFall * (j - jEdge) * G);
+  }
+  blur();
+  // sampling (the SAME triangle split biplane.js draws: (00,10,01) + (10,11,01))
+  const hAK = (a, k) => {
+    const fi = Math.max(0, Math.min(NA - 1.0001, (a - A0) / G)), fj = Math.max(0, Math.min(NK - 1.0001, (k - K0) / G));
+    const i = Math.floor(fi), j = Math.floor(fj), u = fi - i, v = fj - j;
+    const h00 = H[i * NK + j], h10 = H[(i + 1) * NK + j], h01 = H[i * NK + j + 1];
+    if (u + v <= 1) return h00 + (h10 - h00) * u + (h01 - h00) * v;
+    const h11 = H[(i + 1) * NK + j + 1];
+    return h11 + (h01 - h11) * (1 - u) + (h10 - h11) * (1 - v);
+  };
+  const insideAK = (a, k, pad = 0) => (Math.abs(a) <= HL + pad && Math.abs(k) <= HW + pad) || (a >= -HL - pad && a <= APA + pad && k >= HW - pad && k <= APK + pad);
+  const toAK = (x, z, out) => { const dx = x - strip.x, dz = z - strip.z; out.a = dx * SU.x + dz * SU.z; out.k = (dx * SN.x + dz * SN.z) * AS; return out; };
+  const _ak = { a: 0, k: 0 };
+  return {
+    spec: S, G, A0, K0, NA, NK, H, E, HL, HW, APK, APA, AS, SU, SN, meshH, toX, toZ, toAK, hAK, insideAK,
+    /** Pad top at (x, z), or null off the pad (pad = extra margin, u). */
+    at(x, z, pad = 0) { toAK(x, z, _ak); return insideAK(_ak.a, _ak.k, pad) ? hAK(_ak.a, _ak.k) : null; },
+    /** Pad top where there is pad, else the terrain mesh (setup-time). */
+    ground(x, z) { toAK(x, z, _ak); return insideAK(_ak.a, _ak.k, 0.25) ? hAK(_ak.a, _ak.k) : meshH(x, z); },
+  };
+}
 
 /** Arc-length LUT of a closed Catmull-Rom loop. at(s, out) wraps s. */
 export function buildLoop(pts, n = 2048) {
@@ -192,7 +352,7 @@ class Kit {
     this.SI.push(b0, b1, 0, 0); this.SW.push(1 - w1, w1, 0, 0); this.GL.push(this.glow); this.FL.push(this.fill);
   }
   /** Rigid part. color: hex or fn(x,y,z [part-local centroid], X,Y,Z [aircraft-local]) → hex. */
-  part(geo, m, color, bone, { flip = false, both = false } = {}) {
+  part(geo, m, color, bone, { flip = false, both = false, b1 = 0, w1 = 0 } = {}) {
     const g = geo.index ? geo.toNonIndexed() : geo;
     const pre = g.attributes.position.array.slice();
     if (m) g.applyMatrix4(m);
@@ -205,8 +365,8 @@ class Kit {
           (p[i] + p[i + 3] + p[i + 6]) / 3, (p[i + 1] + p[i + 4] + p[i + 7]) / 3, (p[i + 2] + p[i + 5] + p[i + 8]) / 3));
       }
       const order = flip ? [0, 6, 3] : [0, 3, 6];
-      for (const j of order) { const s = flip ? -1 : 1; this.vert(p[i + j], p[i + j + 1], p[i + j + 2], n[i + j] * s, n[i + j + 1] * s, n[i + j + 2] * s, _c, 0, 0, bone); }
-      if (both) for (const j of [0, 6, 3]) this.vert(p[i + j], p[i + j + 1], p[i + j + 2], -n[i + j], -n[i + j + 1], -n[i + j + 2], _c, 0, 0, bone);
+      for (const j of order) { const s = flip ? -1 : 1; this.vert(p[i + j], p[i + j + 1], p[i + j + 2], n[i + j] * s, n[i + j + 1] * s, n[i + j + 2] * s, _c, 0, 0, bone, b1, w1); }
+      if (both) for (const j of [0, 6, 3]) this.vert(p[i + j], p[i + j + 1], p[i + j + 2], -n[i + j], -n[i + j + 1], -n[i + j + 2], _c, 0, 0, bone, b1, w1);
     }
     geo.dispose(); if (g !== geo) g.dispose();
   }
@@ -265,6 +425,37 @@ function tube(a, b, r0, r1 = r0, seg = 8) {
   const g = new THREE.CylinderGeometry(r1, r0, L, seg, 1);
   const q = new THREE.Quaternion().setFromUnitVectors(UP, d.normalize());
   return { g, m: new THREE.Matrix4().compose(A.clone().add(B).multiplyScalar(0.5), q, new THREE.Vector3(1, 1, 1)) };
+}
+
+/**
+ * A ROPE LADDER skinned between two bones: `top` (f = 0) and `bot` (f = 1).
+ * Every vertex sits at the SAME local offset in both bones' frames and is
+ * weighted (1 − f, f), so linear-blend skinning places rung i at the lerp of
+ * the two bone origins — the ladder unrolls, swings and stretches with no
+ * rung ever squashing. Both bones carry the vehicle's rotation.
+ */
+function ladder(kit, top, bot, rungs, halfW, rungCol, ropeCol) {
+  const col = new THREE.Color();
+  const quad = (a, b, c, d, n, fa, fb, hex) => {      // a,b at fraction fa · c,d at fb
+    col.setHex(hex);
+    const V = (p, f) => kit.vert(p[0], p[1], p[2], n[0], n[1], n[2], col, 0, 0, top, bot, f);
+    V(a, fa); V(b, fa); V(c, fb); V(a, fa); V(c, fb); V(d, fb);
+  };
+  const R = 0.075;
+  for (const sx of [-1, 1]) {                        // two licorice ropes, cut at every rung
+    const x = sx * halfW;
+    for (let i = 0; i < rungs; i++) {
+      const fa = i / rungs, fb = (i + 1) / rungs;
+      const c = [[x - R, 0, -R], [x + R, 0, -R], [x + R, 0, R], [x - R, 0, R]];
+      const N = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]];
+      for (let k = 0; k < 4; k++) { const a = c[k], b = c[(k + 1) % 4]; quad(a, b, b, a, N[k], fa, fb, ropeCol); }
+    }
+  }
+  for (let i = 1; i <= rungs; i++) {                 // candy-stick rungs, alternate red / cream
+    const f = (i - 0.35) / rungs;
+    const g = new THREE.BoxGeometry(halfW * 2 + 0.1, 0.13, 0.17);
+    kit.part(g, null, i % 2 ? rungCol : C.white, top, { b1: bot, w1: f });
+  }
 }
 
 // ── atlas (map + emissive) ───────────────────────────────────────────────────
@@ -425,15 +616,20 @@ export function create(ctx) {
   ctx.scene.add(group);
 
   const bLoop = buildLoop(ROUTES.biplane.pts);
-  const mLoop = buildLoop(ROUTES.blimp.pts);
 
   // ── bones ──────────────────────────────────────────────────────────────────
   const K = 9;                 // banner bones
   const BANNER_L = 21, BANNER_H = 3.3, SEG = BANNER_L / (K - 1);
   const ROPE = 9, SAG = 3.3;   // path distance to the banner pole, and how far below the path it hangs
+  const TOW_TAIL = [0, -0.05, -2.66], TOW_POLE = [0, BANNER_H / 2 + 0.22, 0.14];
+  // in the air the banner streams out behind at (nearly) the plane's own
+  // height: its path history is pulled this far toward the plane's altitude,
+  // so a climb-out no longer hangs it 15 u below the plane like a sea anchor
+  const STREAM = 0.78;
   const B = {}; let nb = 0;
   B.biplane = nb++; B.prop = nb++; B.banner = nb; nb += K;
-  for (const k of ['jet', 'blimp', 'blimpPropL', 'blimpPropR', 'earL', 'earR', 'paper0', 'paper1', 'paper2', 'candy', 'canopy', 'scarf', 'wave']) B[k] = nb++;
+  for (const k of ['jet', 'blimp', 'blimpPropL', 'blimpPropR', 'earL', 'earR', 'paper0', 'paper1', 'paper2', 'candy', 'canopy', 'scarf', 'wave',
+    'ladM0', 'ladM1', 'ladJ0', 'ladJ1', 'hoseA', 'hoseM', 'hoseB', 'beaconC', 'beaconK', 'ropeM']) B[k] = nb++;
   const bones = [], inv = [];
   for (let i = 0; i < nb; i++) { const b = new THREE.Bone(); b.matrixAutoUpdate = false; b.matrixWorldAutoUpdate = false; b.name = 'planes_bone' + i; bones.push(b); inv.push(new THREE.Matrix4()); }
   for (let k = 0; k < K; k++) inv[B.banner + k].makeTranslation(0, 0, k * SEG);
@@ -518,13 +714,32 @@ export function create(ctx) {
     kb.part(new THREE.CylinderGeometry(0.1, 0.13, 0.62, 8), M(0, 0.31, 0), C.bear, B.wave);
     kb.part(new THREE.SphereGeometry(0.15, 8, 6), M(0, 0.66, 0), C.bearLight, B.wave);
     kb.fill = 0.3;
+    // WAVE 4: the PASSENGER SEAT — a candy-striped deckchair strapped to the
+    // fuselage behind the pilot (for one visitor, one sweet, one promise), and
+    // the gold filler cap the pump's hose screws onto
+    {
+      const deck = (x, y, z) => ((Math.floor((z + 8) / 0.2) % 2) ? C.red : C.white);
+      kb.part(new THREE.BoxGeometry(0.92, 0.2, 0.96), M(0, 0.47, -1.78), C.lic, b);                         // saddle
+      kb.part(new THREE.BoxGeometry(0.86, 0.09, 0.88, 1, 1, 5), M(0, 0.6, -1.7, 0.05), deck, b);            // seat
+      kb.part(new THREE.BoxGeometry(0.86, 0.95, 0.09, 1, 5, 1), M(0, 1.02, -2.2, -0.34), (x, y) => ((Math.floor((y + 8) / 0.19) % 2) ? C.red : C.white), b);   // back
+      for (const sx of [-1, 1]) {
+        kb.part(new THREE.BoxGeometry(0.1, 0.1, 0.8), M(sx * 0.47, 0.86, -1.75), C.gold, b);                // arm rests
+        kb.part(new THREE.BoxGeometry(0.08, 0.34, 0.08), M(sx * 0.47, 0.7, -1.42), C.gold, b);
+      }
+      kb.part(new THREE.CylinderGeometry(0.16, 0.16, 0.12, 10), M(0, 0.88, 1.3), C.gold, b);                 // filler cap
+    }
     // propeller (own bone, hub at the origin, spins about +Z) — the blur disc is in fx
     kb.part(new THREE.BoxGeometry(0.24, 3.1, 0.09), null, (x, y) => ((Math.floor(y * 2.2 + 20) % 2) ? C.red : C.white), B.prop);
     kb.part(new THREE.SphereGeometry(0.16, 6, 4), M(0, 0, 0.06), C.gold, B.prop);
     // banner pole + gumdrop weight (on banner bone 0) and the tow rope
     kb.part(new THREE.BoxGeometry(0.18, BANNER_H + 0.6, 0.18), M(0, 0.05, 0.12), C.lic, B.banner);
     kb.part(new THREE.SphereGeometry(0.36, 8, 6), M(0, -BANNER_H / 2 - 0.42, 0.12, 0, 0, 0, 1, 0.8, 1), C.gummy, B.banner);
-    kb.link(b, [0, -0.05, -2.66], B.banner, [0, BANNER_H / 2 + 0.22, 0.14], 0.08, C.lic, [0, -0.3, -1]);
+    // the tow rope: two spans through a free knot (ropeM) — it sags in the air
+    // and, with the banner laid out at the pump, drops off the tail onto the
+    // ground and runs along it to the lead pole
+    kb.link(b, TOW_TAIL, B.ropeM, [0, 0, 0], 0.08, C.lic, [0, 0, -1]);
+    kb.link(B.ropeM, [0, 0, 0], B.banner, TOW_POLE, 0.08, C.lic, [0, 0, -1]);
+    kb.part(new THREE.SphereGeometry(0.13, 6, 4), null, C.lic, B.ropeM);
     kb.fill = 0;
     // nav lights: red to port, green to starboard, a white strobe on the fin, a red belly beacon
     lights.push([b, 3.5, 1.44, 0.55, 0xff2a2a, 0, 1.25, 0], [b, -3.5, 1.44, 0.55, 0x2aff5a, 0, 1.25, 0.3],
@@ -616,6 +831,10 @@ export function create(ctx) {
 
   // CATBLIMP
   const BLIMP_R = 4.2, BLIMP_L = 12.5;
+  // the balcony deck (blimp frame): the passenger stands on it, the ladder
+  // hangs off its back edge. LAD_BACK = how far the ladder foot is behind the
+  // envelope's centre; NOSE = centre → mast contact.
+  const BAL = { y: -6.2, z: -3.25 }, LAD_TOP = { y: -6.3, z: -4.05 }, LAD_BACK = 4.05, NOSE = 12.85;
   const blimpRadius = (z) => { const t = z / BLIMP_L; let r = BLIMP_R * Math.sqrt(Math.max(0, 1 - t * t)); if (z < 0) r *= 1 - 0.22 * t * t; return r; };
   {
     const b = B.blimp;
@@ -635,7 +854,12 @@ export function create(ctx) {
     kb.glow = 0;
     // cat face on the nose
     for (const sx of [-1, 1]) {
-      kb.part(new THREE.SphereGeometry(0.72, 10, 8), M(sx * 1.3, 1.05, 10.85, 0, 0, 0, 1, 1, 0.7), C.eye, b);
+      // the eyes: black by day; after dark they light up amber round a slit
+      // pupil (glow × lampMix) — a lantern blimp that is looking at you
+      kb.glow = 60;
+      kb.part(new THREE.SphereGeometry(0.72, 10, 8), M(sx * 1.3, 1.05, 10.98, 0, 0, 0, 1, 1, 0.7), 0x201a06, b);
+      kb.glow = 0;
+      kb.part(new THREE.BoxGeometry(0.17, 0.92, 0.06), M(sx * 1.3, 1.05, 11.47, 0, sx * 0.12, 0), C.eye, b);
       kb.part(new THREE.SphereGeometry(0.22, 6, 5), M(sx * 1.18, 1.32, 11.35), 0xffffff, b);
       for (const k of [-1, 0, 1]) kb.part(new THREE.BoxGeometry(2.3, 0.14, 0.14), M(sx * 2.05, -0.15 + k * 0.32, 11.25, 0, sx * 0.35, sx * k * 0.2), C.lic, b);
     }
@@ -675,6 +899,21 @@ export function create(ctx) {
       kb.part(g, M(0, GY, GZ), (x, y) => (y > -0.26 ? C.cream : (y > -0.52 ? C.pink : C.cocoa)), b);   // row edges at ±0.25/0.5 of the half-height
     }
     for (const dz of [-1.2, 3.1]) for (const sx of [-1, 1]) kb.part(new THREE.BoxGeometry(0.22, 0.75, 0.22), M(sx * 0.7, -4.15, dz, 0, 0, sx * 0.25), C.choc, b);
+    // WAVE 4: the OBSERVATION BALCONY at the back of the car — a wafer deck
+    // with a candy-cane rail, where the rope ladder hangs and a passenger rides
+    {
+      const BZ = BAL.z, BY = BAL.y;
+      kb.part(new THREE.BoxGeometry(1.95, 0.2, 1.62), M(0, BY - 0.1, BZ), C.cocoa, b);
+      kb.part(new THREE.BoxGeometry(1.85, 0.06, 1.52, 1, 1, 6), M(0, BY + 0.01, BZ), (x, y, z) => ((Math.floor((z + 8) / 0.26) % 2) ? 0xe9b877 : 0xd89a5a), b);
+      const cane = (x, y) => ((Math.floor((y + 20) / 0.22) % 2) ? C.red : C.white);
+      for (const [px, pz] of [[-0.9, -0.74], [0.9, -0.74], [-0.9, 0.62], [0.9, 0.62], [-0.36, -0.74], [0.36, -0.74]]) {
+        kb.part(new THREE.CylinderGeometry(0.075, 0.075, 1.0, 8, 4), M(px, BY + 0.5, BZ + pz), cane, b);
+        kb.part(new THREE.SphereGeometry(0.11, 8, 6), M(px, BY + 1.02, BZ + pz), C.gold, b);
+      }
+      for (const sx of [-1, 1]) kb.part(new THREE.BoxGeometry(0.09, 0.09, 1.36), M(sx * 0.9, BY + 0.95, BZ - 0.06), C.red, b);   // side rails
+      for (const sx of [-1, 1]) kb.part(new THREE.BoxGeometry(0.54, 0.09, 0.09), M(sx * 0.63, BY + 0.95, BZ - 0.74), C.red, b);   // rear rail, a gap for the ladder
+      kb.part(new THREE.BoxGeometry(0.86, 0.12, 0.12), M(0, BY - 0.06, BZ - 0.8), C.gold, b);                               // ladder bar
+    }
     for (const sx of [-1, 1]) {
       // awning over the windows, sloping out and down
       kb.part(new THREE.BoxGeometry(0.66, 0.09, 4.2, 1, 1, 8), M(sx * 1.62, -4.6, 0.05, 0, 0, -sx * 0.55),
@@ -815,6 +1054,17 @@ export function create(ctx) {
     for (const [x, z] of [[1.6, 0], [-1.6, 0], [0, 1.6], [0, -1.6]]) kb.link(pb, [x, 0, z], cb, [x * 0.12, 0.38, z * 0.12], 0.035, C.lic, [x, -2.4, z]);
     lights.push([cb, 0, 0, 0, 0xff6fb0, 0, 1.3, 0]);
   }
+
+  // WAVE 4: rope ladders (blimp balcony · jet belly), the pump hose (three
+  // bones: nozzle · sag · filler cap; parked under the world when not in use)
+  kb.fill = 0.25;
+  ladder(kb, B.ladM0, B.ladM1, 13, 0.42, C.red, C.lic);
+  ladder(kb, B.ladJ0, B.ladJ1, 18, 0.46, C.jetOrange, C.navy);
+  kb.link(B.hoseA, [0, 0, 0], B.hoseM, [0, 0, 0], 0.11, 0x3fbf6a, [0, 0, 1]);
+  kb.link(B.hoseM, [0, 0, 0], B.hoseB, [0, 0, 0], 0.11, 0x3fbf6a, [0, 0, 1]);
+  kb.fill = 0;
+  // mooring-mast beacons (static bones, placed once) — red, slow pulse, night only
+  lights.push([B.beaconC, 0, 0, 0, 0xff3030, 1, 2.2, 0.1], [B.beaconK, 0, 0, 0, 0xff3030, 1, 2.2, 0.6]);
 
   // ── meshes ─────────────────────────────────────────────────────────────────
   const bodyGeo = kb.build();
@@ -1008,8 +1258,6 @@ export function create(ctx) {
   // ── state ───────────────────────────────────────────────────────────────────
   let T = 0;                               // flight clock (stops while paused or held)
   let TR = 0;                              // rotor / ripple clock (stops only while paused)
-  let sB = 0.12 * bLoop.len;               // biplane arc offset
-  let sM = 0.9 * mLoop.len;                // blimp arc offset
   let tP = 0;                              // paper clock offset
   let jetOff = ROUTES.jet.period - ROUTES.jet.first;
   const api = {};
@@ -1022,8 +1270,8 @@ export function create(ctx) {
   const p0 = new THREE.Vector3(), pA = new THREE.Vector3(), pB = new THREE.Vector3(), f = new THREE.Vector3();
   const acc = new THREE.Vector3(), up = new THREE.Vector3(), xa = new THREE.Vector3(), ya = new THREE.Vector3();
   const m1 = new THREE.Matrix4(), m2 = new THREE.Matrix4(), q1 = new THREE.Quaternion(), s1 = new THREE.Vector3(), v1 = new THREE.Vector3();
-  const bannerP = Array.from({ length: K }, () => new THREE.Vector3());
-  const tangent = new THREE.Vector3(), nrm = new THREE.Vector3();
+  const bannerP = Array.from({ length: K + 2 }, () => new THREE.Vector3());
+  const tangent = new THREE.Vector3(), nrm = new THREE.Vector3(), side = new THREE.Vector3();
   const jetA = new THREE.Vector3(), jetDir = new THREE.Vector3(), jetSide = new THREE.Vector3();
   let jetLane = -1, jetLen = 1;
   const tint = new THREE.Color(), white = new THREE.Color(0xffffff), nightTint = new THREE.Color(0x707c9c);   // moonlit contrails
@@ -1038,43 +1286,519 @@ export function create(ctx) {
   }
   const heading = (fw) => Math.atan2(fw.x, fw.z);
   const store = (o, pos, fw) => { o.x = pos.x; o.y = pos.y; o.z = pos.z; o.heading = heading(fw); };
+  const wrapA = (a) => { a %= TAU; if (a > Math.PI) a -= TAU; if (a < -Math.PI) a += TAU; return a; };
+  const lerpA = (a, b, k) => a + wrapA(b - a) * k;
+  const gH = (x, z) => world.height(x, z);
 
-  // ── BIPLANE + BANNER ─────────────────────────────────────────────────────────
-  function flyBiplane(t, w) {
-    const sp = ROUTES.biplane.speed, s = sB + t * sp, d = 7;
-    bLoop.at(s - d, pA); bLoop.at(s, p0); bLoop.at(s + d, pB);
-    f.subVectors(pB, pA).normalize();
-    acc.copy(pB).add(pA).addScaledVector(p0, -2).multiplyScalar(sp * sp / (d * d));
-    up.set(0, G, 0).add(acc).normalize();
-    p0.y += 0.45 * Math.sin(t * 0.8);
+  // ════════════════════════════════════════════════════════════════════════════
+  // WAVE 4 · FLIGHT TRACKS — open Catmull-Rom tracks through authored points
+  // [x, y, z, v, ground], resampled by arc length. `v` is the target speed at
+  // that point (interpolated in v² over arc length: constant acceleration, so
+  // a 0 really stops); a run of ground points is draped on the terrain at the
+  // biplane's wheel height. Built once (setup only allocates).
+  // ════════════════════════════════════════════════════════════════════════════
+  const BW = 1.62;                          // biplane origin above the grass, wheels down
+  function buildTrack(pts, n = 768) {
+    const curve = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(p[0], p[1], p[2])), false, 'centripetal');
+    const SUB = 40, M = (pts.length - 1) * SUB;
+    const tl = new Float32Array(M + 1);
+    const q = new THREE.Vector3(), q0 = new THREE.Vector3();
+    curve.getPoint(0, q0);
+    let L = 0;
+    for (let i = 1; i <= M; i++) { curve.getPoint(i / M, q); L += q.distanceTo(q0); tl[i] = L; q0.copy(q); }
+    const cs = pts.map((_, i) => tl[i * SUB]);
+    const P = new Float32Array(n * 3), V = new Float32Array(n), Gd = new Float32Array(n);
+    let k = 0, c = 0;
+    for (let j = 0; j < n; j++) {
+      const sj = L * j / (n - 1);
+      while (k < M - 1 && tl[k + 1] < sj) k++;
+      const fk = clamp((sj - tl[k]) / Math.max(1e-6, tl[k + 1] - tl[k]), 0, 1);
+      curve.getPoint((k + fk) / M, q);
+      while (c < pts.length - 2 && cs[c + 1] <= sj) c++;
+      const u = clamp((sj - cs[c]) / Math.max(1e-6, cs[c + 1] - cs[c]), 0, 1);
+      const va = pts[c][3], vb = pts[c + 1][3];
+      V[j] = Math.sqrt(Math.max(0, va * va + (vb * vb - va * va) * u));
+      const g = pts[c][4] && pts[c + 1][4];
+      if (g) q.y = Math.max(restH(q.x, q.z), 0.2) + BW;
+      Gd[j] = g ? 1 : 0;
+      P[j * 3] = q.x; P[j * 3 + 1] = q.y; P[j * 3 + 2] = q.z;
+    }
+    const at = (s, out) => {
+      const fs = clamp(s / L, 0, 1) * (n - 1), i0 = Math.min(n - 2, Math.floor(fs)), t = fs - i0, a = i0 * 3, b = a + 3;
+      out.x = P[a] + (P[b] - P[a]) * t; out.y = P[a + 1] + (P[b + 1] - P[a + 1]) * t; out.z = P[a + 2] + (P[b + 2] - P[a + 2]) * t;
+      return out;
+    };
+    const lin = (A, s) => { const fs = clamp(s / L, 0, 1) * (n - 1), i0 = Math.min(n - 2, Math.floor(fs)), t = fs - i0; return A[i0] + (A[i0 + 1] - A[i0]) * t; };
+    return { len: L, n, P, pts, at, speed: (s) => lin(V, s), ground: (s) => lin(Gd, s) };
+  }
+  /** Trapezoid speed profile: distance covered after tau s (accelerate ta, cruise v, brake td). */
+  function trap(tau, L, v, ta, td) {
+    const Tt = L / v + (ta + td) / 2;
+    if (tau <= 0) return 0;
+    if (tau < ta) return 0.5 * v / ta * tau * tau;
+    if (tau < Tt - td) return 0.5 * v * ta + v * (tau - ta);
+    if (tau < Tt) { const r = Tt - tau; return L - 0.5 * v / td * r * r; }
+    return L;
+  }
+  function trapV(tau, L, v, ta, td) {
+    const Tt = L / v + (ta + td) / 2;
+    if (tau <= 0 || tau >= Tt) return 0;
+    if (tau < ta) return v * tau / ta;
+    if (tau > Tt - td) return v * (Tt - tau) / td;
+    return v;
+  }
+
+  // ── biplane loop helpers (setup-time) ─────────────────────────────────────────
+  function loopS(x, z) {
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < bLoop.n; i++) { const dx = bLoop.P[i * 3] - x, dz = bLoop.P[i * 3 + 2] - z, d = dx * dx + dz * dz; if (d < bd) { bd = d; best = i; } }
+    return best / bLoop.n * bLoop.len;
+  }
+  const loopPt = (s) => bLoop.at(s, new THREE.Vector3());
+  const loopTan = (s) => { const a = bLoop.at(s - 2, new THREE.Vector3()), b = bLoop.at(s + 2, new THREE.Vector3()); return b.sub(a).setY(0).normalize(); };
+
+  // ── the fuel stop's frame: along = the runway axis (east-ish), side + = north ─
+  const STR = AIR.strip;
+  const SU = { x: Math.cos(STR.ang), z: Math.sin(STR.ang) }, SN = { x: Math.sin(STR.ang), z: -Math.cos(STR.ang) };
+  const SP = (a, sd) => [STR.x + SU.x * a + SN.x * sd, STR.z + SU.z * a + SN.z * sd];
+  // the airfield pad (see buildPad): the wheels roll on IT, not on the terrain under it
+  const PAD = buildPad(world, STR);
+  const meshH = PAD.meshH;
+  /** Where wheels / a laid-out banner rest: the pad, a walkable deck (Wing Nut
+   *  Field's planks), else the higher of the rendered mesh and world.height. */
+  const restH = (x, z, decks = true) => {
+    const p = PAD.at(x, z, 0.3);
+    if (p !== null) return p;
+    let h = Math.max(gH(x, z), meshH(x, z));
+    if (decks) {
+      const ws = ctx.walkables;
+      if (ws) for (let i = 0; i < ws.length; i++) {
+        const w = ws[i]; if (!w || !w.test || w.air) continue;
+        const t = w.test(x, z);
+        if (typeof t === 'number' && t === t && t > h && t < h + 2.5) h = t;
+      }
+    }
+    return h;
+  };
+  const AIRP = (a, sd, dy, v) => { const [x, z] = SP(a, sd); return [x, Math.max(gH(x, z), 0.5) + dy, z, v, 0]; };
+  const GNDP = (a, sd, v) => { const [x, z] = SP(a, sd); return [x, restH(x, z, false) + BW, z, v, 1]; };
+  const AS = STR.apron ?? -1;                // which side of the runway the apron is on (−1 = south, the beach side)
+  const PARK = { a: -12, s: 5.2 * AS };      // parked: nose +along, on the apron beside the runway
+  const PUMP = { a: -8.6, s: 8.6 * AS };     // the candy pump, clear of the wingtip
+  const pumpXZ = SP(PUMP.a, PUMP.s);
+  const parkXZ = SP(PARK.a, PARK.s);
+  const S_EXIT = loopS(-57, 2), S_REJOIN = loopS(-160, 77), S_HOME = loopS(-100, 71);
+  const tracks = {};
+  {
+    const E0 = loopPt(S_EXIT), ET = loopTan(S_EXIT);
+    // LAND: leave the loop over Sugar Pier's beach heading south, a descending
+    // right turn over the sea onto the runway's extended centreline, touch down
+    // westbound, roll out, a tight right U-turn onto the apron, stop at the pump
+    tracks.land = buildTrack([
+      [E0.x, E0.y, E0.z, 13, 0],
+      [E0.x + ET.x * 20, E0.y - 5, E0.z + ET.z * 20, 13, 0],
+      [-62, 38, 46, 12.5, 0],
+      [-66, 31, 66, 12, 0],
+      [-74, 24, 81, 11.5, 0],
+      AIRP(62, 0, 17, 11),
+      AIRP(42, 0, 9, 10),
+      AIRP(27, 0, 3.6, 9),
+      GNDP(16, 0, 8),
+      GNDP(-4, 0, 3.4),
+      GNDP(-13, 0, 2.6),
+      GNDP(-17.2, 2.1 * AS, 2.2),
+      GNDP(-16.4, 4.7 * AS, 2.0),
+      GNDP(PARK.a, PARK.s, 0),
+    ]);
+    // DEPART: taxi off the apron (swinging clear of the pump), line up, roll
+    // east, lift off at the far end, then a climbing right-hand teardrop over
+    // the sea back onto the loop heading west
+    const HEAD = [
+      GNDP(PARK.a, PARK.s, 0),
+      GNDP(-9.4, 3.3 * AS, 2.2),
+      GNDP(-5, 0.8 * AS, 2.8),
+      GNDP(0, 0, 3.4),
+      GNDP(9, 0, 7.8),
+      GNDP(20, 0, 11),
+      AIRP(31, 0, 4.5, 12.5),
+      AIRP(46, 0, 11, 13),
+    ];
+    tracks.head = HEAD;
+    const J = loopPt(S_REJOIN), JT = loopTan(S_REJOIN);
+    tracks.depart = buildTrack([
+      ...HEAD,
+      [-80, 22, 94, 13, 0],
+      [-84, 30, 112, 13, 0],
+      [-104, 36, 118, 13, 0],
+      [-124, 41, 104, 13, 0],
+      [J.x - JT.x * 22, J.y - 1, J.z - JT.z * 22, 13, 0],
+      [J.x, J.y, J.z, 13, 0],
+    ]);
+  }
+  // FERRY + HOME (Wing Nut Field) are built on first use: they need the flying
+  // machine's pad and runway bearing, which exist only once escape/flyer.js has.
+  function wingnutFrame() {
+    const lm = world.LANDMARKS.flyer_pad;
+    const fr = ctx.systems.escape?.routes?.flyer || ctx.systems.escape?.api?.routes?.flyer;
+    const sp = fr?.home || fr?.spot;
+    const pad = { x: Number.isFinite(sp?.x) ? sp.x : lm.x, z: Number.isFinite(sp?.z) ? sp.z : lm.z };
+    // the take-off corridor points from the pad toward Candyland (flyer.js
+    // publishes it as route.home.yaw, measured clear for 90 u × 26 u)
+    const yaw = [fr?.home?.yaw, fr?.runway?.yaw, fr?.runwayYaw, sp?.yaw].find((v) => Number.isFinite(v));
+    let dx, dz;
+    if (Number.isFinite(yaw)) { dx = Math.sin(yaw); dz = Math.cos(yaw); }
+    else { const pier = world.LANDMARKS.candy_dock; dx = pier.x - pad.x; dz = pier.z - pad.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; }
+    // step off / turn round on whichever side is emptier
+    const cols = ctx.colliders || [];
+    const busy = (x, z) => { let n = 0; for (const c of cols) { if (!c || c.solid === false || c.claim) continue; if (Math.hypot(c.x - x, c.z - z) < 7 + (c.r || 0)) n++; } return n; };
+    const nL = { x: -dz, z: dx };
+    const stopX = pad.x + dx * 16, stopZ = pad.z + dz * 16;
+    const sgn = busy(stopX + nL.x * 5, stopZ + nL.z * 5) <= busy(stopX - nL.x * 5, stopZ - nL.z * 5) ? 1 : -1;
+    return { pad, d: { x: dx, z: dz }, n: { x: nL.x * sgn, z: nL.z * sgn }, bearingFrom: Number.isFinite(yaw) ? 'flyer' : 'pier' };
+  }
+  function buildWingnut() {
+    const W = wingnutFrame();
+    const Pp = (r, sd = 0) => [W.pad.x + W.d.x * r + W.n.x * sd, W.pad.z + W.d.z * r + W.n.z * sd];
+    const A = (r, dy, v, sd = 0) => { const [x, z] = Pp(r, sd); return [x, Math.max(gH(x, z), 0.5) + dy, z, v, 0]; };
+    const Gp = (r, v, sd = 0) => { const [x, z] = Pp(r, sd); return [x, restH(x, z) + BW, z, v, 1]; };
+    // across the strait south of the paper planes, then down the flying
+    // machine's own take-off corridor (kept clear by its builder) onto the grass
+    tracks.ferry = buildTrack([
+      ...tracks.head,
+      // wave-hopping at ~20 u: the blimp's crossings keep their gondola above 30 u,
+      // and this line stays wide of both mast approaches and the paper planes
+      [-70, 18, 88, 13, 0],
+      [-22, 18, 80, 13, 0],
+      [24, 22, 56, 13, 0],
+      [62, 28, 38, 13, 0],
+      A(100, 26, 12),
+      A(64, 13, 11),
+      A(42, 5, 9.5),
+      Gp(32, 8.5),
+      Gp(21, 3.4),
+      Gp(16, 0),
+    ]);
+    const J = loopPt(S_HOME), JT = loopTan(S_HOME);
+    tracks.home = buildTrack([
+      Gp(16, 0),
+      Gp(17.8, 2.0, 2.2),
+      Gp(16.4, 2.2, 4.6),
+      Gp(19, 2.0, 5.2),
+      Gp(24, 3.4, 2.6),
+      Gp(34, 8, 0.6),
+      Gp(46, 11.5),
+      A(58, 5, 12.5),
+      A(82, 15, 13),
+      [96, 22, 30, 13, 0],
+      [40, 20, 40, 13, 0],
+      [0, 20, 58, 13, 0],
+      [-36, 22, 80, 13, 0],
+      [J.x - JT.x * 24, J.y, J.z - JT.z * 24, 13, 0],
+      [J.x, J.y, J.z, 13, 0],
+    ]);
+    tracks.wingnut = W;
+    const [sx, sz] = Pp(16);
+    tracks.stop = { x: sx, z: sz, off: Pp(16, -3.6), d: W.d };
+    return true;
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // BIPLANE — loop, fuel stop, passenger flights
+  // ════════════════════════════════════════════════════════════════════════════
+  const BP = {
+    mode: 'loop', phase: 'loop', s: 0, tr: null, u: 0, v: ROUTES.biplane.speed,
+    refuelLeft: 0, waitLeft: 0, waitUsed: 0, refT: 0, dropT: 0, sinceStop: 999, stops: 0,
+    passenger: false, released: false, prop: 0, propRate: 31, engine: 1, groundK: 0,
+    skipped: 0, lastSkip: '', loopV: ROUTES.biplane.speed, slot: -1,
+  };
+  // ── the fuel-stop TIMETABLE ────────────────────────────────────────────────
+  // A day is DAY_LENGTH_SEC (300 s); the street lamps are off 05:59 → 18:49
+  // (sky/palette lampMixAt > 0.5), i.e. ≈ 160 s of daylight. A stop is the
+  // approach (≈ 27 s) + 25 s at the pump ≈ 4.2 game hours, and from the end of
+  // one refuel to the next S_EXIT crossing is the climb-out (≈ 23 s) + the rim
+  // (≈ 34 s at cruise). Two stops a day only fit when the first approach starts
+  // right as the lamps go out — but a lap (≈ 46 s) and a day (300 s) never
+  // line up, so a plane that simply takes "the first crossing after dawn"
+  // drifts to one stop a day (measured: 293 s apart). So he keeps a timetable:
+  // two SLOTS a day (approach starts ≈ 06:04 and ≈ 14:27), and while he flies
+  // the rim he trims his cruise (0.8 – 1.3 × 13 u/s) to cross S_EXIT on the
+  // next one. A slot is served once; a late plane (a charter, a long wait)
+  // takes it up to MAX_LATE after, but only if the whole stop — approach AND
+  // refuel — sits between lamps-off and lamps-on (never after lampsOn, and he
+  // never extends a wait past it either: see wait()). Frozen time (the title,
+  // views, tests) keeps the simple rule: every lap, while the frozen hour is
+  // inside the window.
+  const HPS = 24 / world.DAY_LENGTH_SEC;             // game hours per second
+  const V0 = ROUTES.biplane.speed, VMIN = V0 * 0.8, VMAX = V0 * 1.3;
+  const STOP_MIN = 20;                               // at least this long on the loop between stops
+  const LAMP_OFF = 6.0, LAMP_ON = 18.75;             // lampsOn flips at 05:58.5 / 18:49.5 (≈ 1 s of margin)
+  const trackTime = (tr) => { let t = 0; for (let u = 0; u < tr.len; u += 0.25) t += 0.25 / Math.max(0.45, tr.speed(u)); return t; };
+  const LAND_ALL = trackTime(tracks.land);           // approach start → at the pump (s)
+  const STOP_H = (LAND_ALL + AIR.refuel) * HPS;      // approach start → refuel over (h)
+  const DAY_FROM = LAMP_OFF, DAY_TO = LAMP_ON - STOP_H;   // an approach may START in [DAY_FROM, DAY_TO]
+  const SLOTS = [LAMP_OFF + 0.06, DAY_TO - 0.12];    // approach-start hours
+  const EARLY = 0.05, MAX_LATE = 3.6;                // a slot is due from −EARLY to +MAX_LATE hours
+  const served = [false, false];
+  const LOOP_L = bLoop.len;
+  const exitDist = (s) => { const d = (((S_EXIT - s) % LOOP_L) + LOOP_L) % LOOP_L; return d > 1e-3 ? d : LOOP_L; };
+  /** a − b in hours, wrapped into (−12, 12]. */
+  const hdiff = (a, b) => { let d = (((a - b) % 24) + 24) % 24; return d > 12 ? d - 24 : d; };
+  BP.s = S_EXIT - 12 * V0;                            // (views / the title: frozen time stops on the first lap)
+  function stopWindow(h = ctx.state.time ?? 12) {
+    return h >= DAY_FROM && h <= DAY_TO && !(ctx.systems.sky?.lampsOn ?? false);
+  }
+  /** The slot a crossing at hour h would serve, or −1. */
+  function dueSlot(h) {
+    for (let i = 0; i < SLOTS.length; i++) { const d = hdiff(h, SLOTS[i]); if (!served[i] && d >= -EARLY && d <= MAX_LATE) return i; }
+    return -1;
+  }
+  /** Forget a served slot once the clock is well away from it (so it comes round tomorrow). */
+  function tidySlots(h) {
+    for (let i = 0; i < SLOTS.length; i++) { const d = hdiff(h, SLOTS[i]); if (d < -1 || d > MAX_LATE + 1) served[i] = false; }
+  }
+  /** Seconds from now to the slot he should aim for next (0 = one is due and
+   *  still catchable flat out from `d0` short of S_EXIT: go). */
+  function slotAhead(h, d0) {
+    let T = Infinity;
+    const hArr = h + d0 / VMAX * HPS;
+    for (let i = 0; i < SLOTS.length; i++) {
+      const d = hdiff(h, SLOTS[i]);
+      if (!served[i] && d >= -EARLY && d <= MAX_LATE && hdiff(hArr, SLOTS[i]) <= MAX_LATE && hArr <= DAY_TO) return 0;
+      let ahead = -d; if (ahead <= 0) ahead += 24;
+      const t = ahead / HPS; if (t < T) T = t;
+    }
+    return T;
+  }
+  /** Cruise speed on the rim: arrive at S_EXIT exactly on the next slot (laps
+   *  chosen so the speed stays nearest 13 u/s), or flat out when late. */
+  function loopSpeed() {
+    if (ctx.state.timeFrozen) return V0;
+    const d0 = exitDist(BP.s), T = slotAhead(ctx.state.time ?? 12, d0);
+    if (!(T < Infinity)) return V0;
+    if (T * VMAX <= d0) return VMAX;
+    let best = VMAX, err = Infinity;
+    for (let n = 0; n < 16; n++) {
+      const v = (d0 + n * LOOP_L) / T;
+      if (v > VMAX) break;
+      if (v >= VMIN && Math.abs(v - V0) < err) { err = Math.abs(v - V0); best = v; }
+    }
+    return best;
+  }
+  function startTrack(name, phase, u0 = 0) {
+    const tr = tracks[name];
+    if (!tr) return false;
+    BP.mode = 'track'; BP.phase = phase; BP.tr = tr; BP.u = u0; BP.v = tr.speed(u0);
+    ctx.events.emit('planes:biplane', { phase });
+    return true;
+  }
+  function toLoop(s, overshoot = 0) {
+    BP.mode = 'loop'; BP.phase = 'loop'; BP.tr = null; BP.s = s + overshoot; BP.v = BP.loopV = ROUTES.biplane.speed;
+    ctx.events.emit('planes:biplane', { phase: 'loop' });
+  }
+  // the banner rides the plane's own recent path (a ring of samples every
+  // HSTEP of travel), so it trails it through every turn, down onto the grass
+  // at the fuel stop, and back up again on take-off
+  const HN = 320, HSTEP = 0.35;
+  const HX = new Float32Array(HN), HY = new Float32Array(HN), HZ = new Float32Array(HN);
+  let hHead = 0, hCount = 0;
+  function histPush(x, y, z) { hHead = (hHead + 1) % HN; HX[hHead] = x; HY[hHead] = y; HZ[hHead] = z; if (hCount < HN) hCount++; }
+  function histMaybe(x, y, z) {
+    if (!hCount) { histPush(x, y, z); return; }
+    const dx = x - HX[hHead], dy = y - HY[hHead], dz = z - HZ[hHead];
+    if (dx * dx + dy * dy + dz * dz >= HSTEP * HSTEP) histPush(x, y, z);
+  }
+  /** Refill the history from a path sampler (debug jumps / teleports). */
+  function histFill(sample, span = 60) {
+    hCount = 0; hHead = 0;
+    for (let d = span; d >= 0; d -= HSTEP) { sample(d, v1); histPush(v1.x, v1.y, v1.z); }
+  }
+  const BAN_D = new Float32Array(K + 2), BFLAT = new Float32Array(K);
+  for (let k = 0; k < K; k++) BAN_D[k + 1] = ROPE + k * SEG;
+  BAN_D[0] = ROPE - 1.5; BAN_D[K + 1] = ROPE + (K - 1) * SEG + 1.5;
+  /** Points on the travelled path at distances BAN_D behind (px,py,pz), in one walk. */
+  function histWalk(px, py, pz) {
+    let ax = px, ay = py, az = pz, accD = 0, j = hHead, i = 0, k = 0;
+    while (k < K + 2) {
+      if (i >= hCount) { bannerP[k].set(ax, ay, az); k++; continue; }
+      const bx = HX[j], by = HY[j], bz = HZ[j];
+      const L = Math.hypot(bx - ax, by - ay, bz - az);
+      if (accD + L >= BAN_D[k] && L > 1e-6) {
+        const t = (BAN_D[k] - accD) / L;
+        bannerP[k].set(ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t);
+        k++; continue;
+      }
+      accD += L; ax = bx; ay = by; az = bz; i++; j = (j - 1 + HN) % HN;
+    }
+  }
+
+  function stepBiplane(dt) {
+    if (dt <= 0) return;
+    if (BP.mode === 'loop') {
+      const h = ctx.state.time ?? 12, frozen = !!ctx.state.timeFrozen;
+      if (!frozen) tidySlots(h);
+      // trim the cruise toward the timetable (eased: no visible lurch)
+      BP.loopV += (loopSpeed() - BP.loopV) * Math.min(1, dt * 0.9);
+      const sp = BP.loopV, s0 = BP.s;
+      BP.s += sp * dt; BP.v = sp;
+      BP.sinceStop += dt;
+      const L = bLoop.len;
+      const a = ((s0 % L) + L) % L, b = a + sp * dt;
+      const crossed = (a <= S_EXIT && b > S_EXIT) || (a <= S_EXIT + L && b > S_EXIT + L);
+      if (crossed) {
+        const slot = frozen ? -1 : dueSlot(h);
+        if (BP.sinceStop < STOP_MIN) BP.lastSkip = 'recent';
+        else if (!stopWindow(h)) { BP.lastSkip = 'night'; BP.skipped++; }
+        else if (!frozen && slot < 0) BP.lastSkip = 'timetable';
+        else {
+          if (slot >= 0) served[slot] = true;
+          BP.slot = slot;
+          const over = b > S_EXIT + L ? b - S_EXIT - L : b - S_EXIT;
+          startTrack('land', 'approach', over);
+        }
+      }
+      return;
+    }
+    const tr = BP.tr;
+    if (BP.phase === 'refuel') {
+      // the clock jumped into lamp-time while he sat at the pump (a debug
+      // setTime, a wake-up skip): he never refuels under the lamps — off he goes
+      if (!ctx.state.timeFrozen && (ctx.systems.sky?.lampsOn ?? false)) { BP.refuelLeft = 0; BP.waitLeft = 0; }
+      if (BP.refuelLeft > 0) BP.refuelLeft = Math.max(0, BP.refuelLeft - dt);
+      else if (BP.waitLeft > 0) BP.waitLeft = Math.max(0, BP.waitLeft - dt);
+      // engine off at the pump; it coughs back to life 2.5 s before he rolls
+      BP.refT += dt;
+      const left = BP.refuelLeft + BP.waitLeft;
+      BP.engine = Math.max(smoothstep(2.5, 0.2, left), 1 - smoothstep(0, 1.6, BP.refT));
+      if (left <= 0) {
+        BP.stops++; BP.sinceStop = 0;
+        if (BP.passenger && (tracks.ferry || buildWingnut())) startTrack('ferry', 'ferry');
+        else { BP.passenger = false; startTrack('depart', 'depart'); }
+      }
+      return;
+    }
+    if (BP.phase === 'dropoff') {
+      BP.dropT += dt;
+      BP.engine = 0.35;
+      if (BP.released || BP.dropT > 16) { BP.released = false; BP.passenger = false; startTrack('home', 'home'); }
+      return;
+    }
+    BP.engine = 1;
+    // a crawl floor: tracks start (and some end) at 0 — v² interpolation would never leave / reach them
+    BP.v = Math.max(0.45, tr.speed(BP.u));
+    BP.u += BP.v * dt;
+    if (BP.u >= tr.len - 0.03) {
+      const over = BP.u - tr.len;
+      if (BP.phase === 'approach') {
+        BP.u = tr.len; BP.v = 0; BP.phase = 'refuel'; BP.refuelLeft = AIR.refuel; BP.waitLeft = 0; BP.waitUsed = 0; BP.refT = 0;
+        ctx.events.emit('planes:biplane', { phase: 'refuel' });
+      } else if (BP.phase === 'depart') toLoop(S_REJOIN, Math.max(0, over));
+      else if (BP.phase === 'ferry') {
+        BP.u = tr.len; BP.v = 0; BP.phase = 'dropoff'; BP.dropT = 0; BP.released = false;
+        ctx.events.emit('planes:biplane', { phase: 'dropoff' });
+      } else if (BP.phase === 'home') { BP.sinceStop = 0; toLoop(S_HOME, Math.max(0, over)); }
+    }
+  }
+
+  // ── BIPLANE + BANNER (pose) ───────────────────────────────────────────────────
+  function flyBiplane(t, w, dt) {
+    const sp = Math.max(BP.v, 0.001);
+    let gk = 0;
+    if (BP.mode === 'loop') {
+      const s = BP.s, d = 7;
+      bLoop.at(s - d, pA); bLoop.at(s, p0); bLoop.at(s + d, pB);
+      f.subVectors(pB, pA).normalize();
+      acc.copy(pB).add(pA).addScaledVector(p0, -2).multiplyScalar(sp * sp / (d * d));
+      up.set(0, G, 0).add(acc).normalize();
+      p0.y += 0.45 * Math.sin(t * 0.8);
+    } else {
+      const tr = BP.tr, u = BP.u;
+      gk = tr.ground(u);
+      const d = gk > 0.5 ? 1.2 : 4;
+      tr.at(u - d, pA); tr.at(u, p0); tr.at(u + d, pB);
+      if (u + d > tr.len) { f.subVectors(p0, pA); } else if (u - d < 0) { f.subVectors(pB, p0); } else f.subVectors(pB, pA);
+      f.normalize();
+      acc.copy(pB).add(pA).addScaledVector(p0, -2).multiplyScalar(sp * sp / (d * d));
+      if (u + d > tr.len || u - d < 0) acc.set(0, 0, 0);
+      up.set(0, G, 0).addScaledVector(acc, 1 - gk).normalize();
+      if (gk < 0.5) p0.y += 0.3 * Math.sin(t * 0.8) * (1 - gk);
+      // a taildragger sits nose-up on the grass; the tail lifts as she gathers speed
+      const tail = gk * (0.2 * (1 - smoothstep(6, 10.5, sp)));
+      if (tail > 0) { f.y = 0; f.normalize(); f.y = Math.tan(tail); f.normalize(); }
+    }
+    BP.groundK = gk;
     pose(BM[B.biplane], p0, f, up);
     store(air.biplane, p0, f);
-    // propeller
-    m1.makeRotationZ(w * 31).setPosition(0, 0.05, 2.66);
+    histMaybe(p0.x, p0.y, p0.z);
+    // propeller: stops at the pump (engine off), idles on the ground
+    const rate = 31 * clamp(BP.engine, 0, 1) * (gk > 0.5 && sp < 4 ? 0.55 : 1);
+    BP.propRate = rate;
+    BP.prop = (BP.prop + rate * dt) % TAU;
+    m1.makeRotationZ(BP.prop).setPosition(0, 0.05, 2.66);
     BM[B.prop].multiplyMatrices(BM[B.biplane], m1);
-    // the pilot's scarf streams and snaps; the other paw waves at whoever is below
-    m1.makeRotationFromEuler(e1.set(0.1 + 0.1 * Math.sin(w * 13.1), 0.22 + 0.26 * Math.sin(w * 9.3), 0.3 * Math.sin(w * 17.3))).setPosition(0.12, 0.92, -1.14);
+    // the pilot's scarf streams and snaps (droops when parked); the other paw waves at whoever is below
+    const flap = 1 - 0.8 * (BP.phase === 'refuel' || BP.phase === 'dropoff' ? 1 : 0);
+    m1.makeRotationFromEuler(e1.set(0.1 + (0.1 * Math.sin(w * 13.1)) * flap + (1 - flap) * 0.9, (0.22 + 0.26 * Math.sin(w * 9.3)) * flap, 0.3 * Math.sin(w * 17.3) * flap)).setPosition(0.12, 0.92, -1.14);
     BM[B.scarf].multiplyMatrices(BM[B.biplane], m1);
     m1.makeRotationFromEuler(e1.set(0.25, 0, -(0.6 + 0.42 * Math.sin(w * 5.2)))).setPosition(0.4, 0.98, -0.8);
     BM[B.wave].multiplyMatrices(BM[B.biplane], m1);
-    // banner: each bone sits ON the flight path, ROPE + k·SEG behind, a wave running down it
+    // banner: on the travelled path ROPE + k·SEG behind, a wave running down it;
+    // below ~6 u over the grass it lies down flat, face up
+    histWalk(p0.x, p0.y, p0.z);
+    const grounded = gk > 0.5 || BP.phase === 'refuel' || BP.phase === 'dropoff';
     for (let k = 0; k < K; k++) {
-      const sk = s - ROPE - k * SEG;
-      bLoop.at(sk, bannerP[k]);
-      bLoop.at(sk + 1.5, pA); bLoop.at(sk - 1.5, pB);
-      tangent.subVectors(pA, pB); tangent.y = 0; tangent.normalize();
+      const P = bannerP[k + 1];
+      tangent.subVectors(bannerP[k], bannerP[k + 2]); tangent.y = 0;
+      if (tangent.lengthSq() < 1e-6) tangent.set(Math.sin(air.biplane.heading), 0, Math.cos(air.biplane.heading));
+      tangent.normalize();
       nrm.set(-tangent.z, 0, tangent.x);
+      // (airborne: world.height is plenty — and never grows the mesh sampler's vertex cache in flight)
+      const g = Math.max(grounded ? restH(P.x, P.z, true) : gH(P.x, P.z), 0.1);
+      const flat = 1 - smoothstep(g + BW + 2.2, g + BW + 5.2, P.y);
       const kk = k / (K - 1);
-      const lat = (0.08 + 0.8 * Math.pow(kk, 1.25)) * Math.sin(w * 8.2 - k * 0.95) + 0.3 * kk * Math.sin(w * 1.7 - k * 0.4);
-      bannerP[k].addScaledVector(nrm, lat);
-      bannerP[k].y += -SAG + 0.45 * Math.sin(t * 0.8 - 0.3) - 0.35 * kk + 0.16 * kk * Math.sin(w * 10.5 - k * 1.4);
+      const lat = ((0.08 + 0.8 * Math.pow(kk, 1.25)) * Math.sin(w * 8.2 - k * 0.95) + 0.3 * kk * Math.sin(w * 1.7 - k * 0.4)) * (1 - flat);
+      P.addScaledVector(nrm, lat);
+      const py = P.y + (p0.y - P.y) * STREAM * (1 - flat);
+      const hang = Math.max(py - SAG + (0.45 * Math.sin(t * 0.8 - 0.3) - 0.35 * kk + 0.16 * kk * Math.sin(w * 10.5 - k * 1.4)) * (1 - flat), g + 0.4);
+      // laid out: on whatever it rests on, lifted clear of the rise to its neighbours
+      let gl = g;
+      if (flat > 0.01) {
+        const Pa = bannerP[k], Pb = bannerP[k + 2];
+        gl = Math.max(g, restH((P.x + Pa.x) * 0.5, (P.z + Pa.z) * 0.5, grounded), restH((P.x + Pb.x) * 0.5, (P.z + Pb.z) * 0.5, grounded));
+      }
+      P.y = hang + (gl + 0.1 + 0.05 * Math.sin(w * 2.1 - k) * (1 - flat) - hang) * flat;
+      BFLAT[k] = flat;
     }
     for (let k = 0; k < K; k++) {
-      if (k === 0) f.subVectors(bannerP[0], bannerP[1]); else f.subVectors(bannerP[k - 1], bannerP[k]);
+      const P = bannerP[k + 1];
+      if (k === 0) f.subVectors(P, bannerP[2]); else f.subVectors(bannerP[k], P);
+      if (f.lengthSq() < 1e-8) f.copy(tangent);
       f.normalize();
-      pose(BM[B.banner + k], bannerP[k], f, UP);
+      const fl = BFLAT[k];
+      side.set(-f.z, 0, f.x); if (side.lengthSq() < 1e-6) side.set(1, 0, 0); side.normalize();
+      up.copy(UP).multiplyScalar(1 - fl).addScaledVector(side, fl);
+      if (up.lengthSq() < 1e-6) up.copy(UP);
+      pose(BM[B.banner + k], P, f, up.normalize());
     }
+    // the tow rope's knot: half-way and sagging in the air; laid out, it sits
+    // on the ground ~2.4 u behind the tail, so the rope drops off the tail and
+    // runs along the ground to the lead pole
+    bpLocal(TOW_TAIL[0], TOW_TAIL[1], TOW_TAIL[2], pA);
+    pB.set(TOW_POLE[0], TOW_POLE[1], TOW_POLE[2]).applyMatrix4(BM[B.banner]);
+    const fl0 = BFLAT[0];
+    v1.addVectors(pA, pB).multiplyScalar(0.5);
+    v1.y -= 0.5 + 0.12 * Math.sin(w * 3.1);
+    if (fl0 > 0.001) {
+      const dx = pB.x - pA.x, dz = pB.z - pA.z, dh = Math.hypot(dx, dz) || 1, kx = Math.min(2.4, dh * 0.45) / dh;
+      const gx = pA.x + dx * kx, gz = pA.z + dz * kx;
+      const gy = Math.max(restH(gx, gz, grounded), restH((gx + pB.x) * 0.5, (gz + pB.z) * 0.5, grounded)) + 0.12;
+      v1.x += (gx - v1.x) * fl0; v1.y += (gy - v1.y) * fl0; v1.z += (gz - v1.z) * fl0;
+    }
+    f.subVectors(pB, pA); if (f.lengthSq() < 1e-8) f.set(0, 0, 1); f.normalize();
+    pose(BM[B.ropeM], v1, f, Math.abs(f.y) > 0.95 ? side.set(1, 0, 0) : UP);
   }
+
+  /** Where the pilot's head is / the passenger seat is (world). */
+  function bpLocal(x, y, z, out) { return out.set(x, y, z).applyMatrix4(BM[B.biplane]); }
 
   // ── JET ──────────────────────────────────────────────────────────────────────
   // Each pass gets a fresh seeded lane; of eight seeded candidates it takes the
@@ -1128,22 +1852,12 @@ export function create(ctx) {
     jetLane = k;
   }
   let trailOn = false;
-  function flyJet(t) {
+  /** Contrails: two strips behind the engines laid along the lane; `head` is
+   *  how far along the lane the jet got, `tau` the lane clock (age = tau − x/v). */
+  function drawTrail(head, tau) {
     const J = ROUTES.jet;
-    const jt = t + jetOff;
-    const k = Math.floor(jt / J.period), tau = jt - k * J.period;
-    if (k !== jetLane) jetLaneFor(k);
-    const D = tau * J.speed;
-    if (D <= jetLen) {
-      p0.copy(jetA).addScaledVector(jetDir, D);
-      up.copy(UP).addScaledVector(jetSide, 0.04 * Math.sin(t * 0.5));
-      pose(BM[B.jet], p0, jetDir, up.normalize());
-      store(air.jet, p0, jetDir); air.jet.active = true;
-    } else { BM[B.jet].copy(HIDDEN); air.jet.active = false; }
-    // contrails: two strips behind the engines, age = time since that air was laid
     const maxAge = 11, trailLen = Math.min(J.speed * maxAge, jetLen);
-    const head = Math.min(D, jetLen);
-    const alive = tau < jetLen / J.speed + maxAge;
+    const alive = tau < head / J.speed + maxAge;
     if (!alive) { if (trailOn) { fxGeo.setDrawRange(trailIdxCount, Infinity); trailOn = false; } return; }
     if (!trailOn) { fxGeo.setDrawRange(0, Infinity); trailOn = true; }
     for (let e = 0; e < 2; e++) {
@@ -1169,20 +1883,271 @@ export function create(ctx) {
       }
     }
   }
+  function flyJet(t, dt) {
+    if (SUMN.on) { flySummon(t, dt); return; }
+    const J = ROUTES.jet;
+    const jt = t + jetOff;
+    const k = Math.floor(jt / J.period), tau = jt - k * J.period;
+    if (k !== jetLane) jetLaneFor(k);
+    const D = tau * J.speed;
+    if (D <= jetLen) {
+      p0.copy(jetA).addScaledVector(jetDir, D);
+      up.copy(UP).addScaledVector(jetSide, 0.04 * Math.sin(t * 0.5));
+      pose(BM[B.jet], p0, jetDir, up.normalize());
+      store(air.jet, p0, jetDir); air.jet.active = true;
+    } else { BM[B.jet].copy(HIDDEN); air.jet.active = false; }
+    BM[B.ladJ0].copy(HIDDEN); BM[B.ladJ1].copy(HIDDEN);
+    drawTrail(Math.min(D, jetLen), tau);
+  }
 
-  // ── BLIMP ────────────────────────────────────────────────────────────────────
-  function flyBlimp(t, w) {
-    const s = sM + t * ROUTES.blimp.speed;
-    mLoop.at(s - 9, pA); mLoop.at(s, p0); mLoop.at(s + 9, pB);
-    f.subVectors(pB, pA); f.y = 0; f.normalize();
-    const yaw = 0.05 * Math.sin(t * 0.23);
-    const c = Math.cos(yaw), sn = Math.sin(yaw);
-    f.set(f.x * c + f.z * sn, 0.035 * Math.sin(t * 0.27), -f.x * sn + f.z * c).normalize();
-    p0.y += 0.9 * Math.sin(t * 0.31);
+  // ════════════════════════════════════════════════════════════════════════════
+  // summonJet — MEOW AIR answers a flare (Contract L, for the ending)
+  // The jet leaves its lane where it is (or comes in from the west if it is
+  // between passes), banks round the point at 64 u/s, spirals in slowing to a
+  // hover 12 u over it with the rope ladder unrolled to the point, holds, then
+  // climbs away east off the map. Everything is on the planes clock (T), so a
+  // stepped screenshot run replays it exactly.
+  // ════════════════════════════════════════════════════════════════════════════
+  const SUMN = {
+    on: false, phase: null, tr: null, dep: null, u: 0, v: 0, hold: 8, holdT: 0, depT: 0, ladK: 0,
+    target: new THREE.Vector3(), promise: null, resolve: null, resolved: false,
+    trailHead: 0, trailTau0: 0, trailT0: 0, hoverH: 0, info: null,
+  };
+  const SUM_DEC = 7.5;                       // braking into the hover, u/s²
+  function summonJet(p, opts = {}) {
+    try {
+      const x = Number(p?.x), y = Number(p?.y), z = Number(p?.z);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return Promise.resolve(null);
+      if (SUMN.on && SUMN.phase !== 'depart' && SUMN.target.distanceTo(v1.set(x, y, z)) < 1) {
+        if (Number.isFinite(opts.hold)) SUMN.hold = Math.max(0.5, opts.hold);
+        return SUMN.promise;
+      }
+      // where the jet is now (mid-crossing), else a fresh entry from the west
+      let sx, sy, sz, dx, dz;
+      if (!SUMN.on && air.jet.active) { sx = air.jet.x; sy = air.jet.y; sz = air.jet.z; dx = jetDir.x; dz = jetDir.z; }
+      else if (SUMN.on) { sx = air.jet.x; sy = air.jet.y; sz = air.jet.z; dx = Math.sin(air.jet.heading); dz = Math.cos(air.jet.heading); }
+      else { sx = x - 430; sy = ROUTES.jet.alt; sz = z - 60; dx = 0.99; dz = 0.14; }
+      const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+      // freeze the lane's contrail where it is and let it age out
+      if (!SUMN.on) {
+        const J = ROUTES.jet, jt = T + jetOff, k = Math.floor(jt / J.period), tau = jt - k * J.period;
+        SUMN.trailHead = Math.min(tau * J.speed, jetLen); SUMN.trailTau0 = tau; SUMN.trailT0 = T;
+      }
+      const pts = [[sx, sy, sz]];
+      const s1x = sx + dx * 150, s1z = sz + dz * 150, s1y = Math.max(y + 55, sy - 8);
+      pts.push([s1x, s1y, s1z]);
+      // bank round the point: an arc (R 95) that tightens into a spiral and
+      // arrives heading roughly east (so the climb-out needs no second turn)
+      const a0 = Math.atan2(s1z - z, s1x - x);
+      const best = (sense) => { const aF = sense > 0 ? -Math.PI / 2 : Math.PI / 2; let sw = ((sense * (aF - a0)) % TAU + TAU) % TAU; if (sw < Math.PI * 0.8) sw += TAU; return sw; };
+      const sense = best(1) <= best(-1) ? 1 : -1, sweep = best(sense);
+      const nArc = Math.max(4, Math.ceil(sweep / 0.55));
+      for (let i = 1; i <= nArc; i++) {
+        const k = i / nArc, a = a0 + sense * sweep * k;
+        const R = k < 0.55 ? 95 : lerp(95, 11, smoothstep(0.55, 1, k));
+        pts.push([x + Math.cos(a) * R, lerp(s1y, y + 16, smoothstep(0, 1, k)), z + Math.sin(a) * R]);
+      }
+      pts.push([x, y + 12, z]);
+      SUMN.tr = buildTrack(pts.map((q) => [q[0], q[1], q[2], 64, 0]), 1024);
+      SUMN.on = true; SUMN.phase = 'approach'; SUMN.u = 0; SUMN.v = ROUTES.jet.speed; SUMN.holdT = 0; SUMN.depT = 0; SUMN.ladK = 0;
+      SUMN.hold = Number.isFinite(opts.hold) ? Math.max(0.5, opts.hold) : 8;
+      SUMN.target.set(x, y, z); SUMN.resolved = false; SUMN.dep = null; SUMN.info = null;
+      SUMN.promise = new Promise((res) => { SUMN.resolve = res; });
+      ctx.events.emit('planes:summon', { phase: 'approach', x, y, z });
+      return SUMN.promise;
+    } catch (err) {
+      console.warn('[planes] summonJet failed', err?.message || err);
+      return Promise.resolve(null);
+    }
+  }
+  const jetLadTop = new THREE.Vector3(), jetLadBot = new THREE.Vector3();
+  function flySummon(t, dt) {
+    const S = SUMN, P = S.target;
+    // the lane's contrail, frozen at its head, ageing away
+    drawTrail(S.trailHead, S.trailTau0 + (T - S.trailT0));
+    if (S.phase === 'approach') {
+      const L = S.tr.len;
+      S.v = Math.max(0.9, Math.min(ROUTES.jet.speed, Math.sqrt(2 * SUM_DEC * Math.max(0, L - S.u))));
+      S.u += S.v * dt;
+      if (S.u >= L - 0.05) { S.u = L; S.phase = 'hover'; S.holdT = 0; S.hoverH = air.jet.heading; ctx.events.emit('planes:summon', { phase: 'hover', x: P.x, y: P.y, z: P.z }); }
+    } else if (S.phase === 'hover') {
+      S.holdT += dt;
+      if (S.resolved && S.holdT >= S.hold) {
+        S.phase = 'depart'; S.depT = 0;
+        const h = S.hoverH, dx = Math.sin(h), dz = Math.cos(h);
+        S.dep = buildTrack([[P.x, P.y + 12, P.z, 1, 0], [P.x + dx * 40, P.y + 20, P.z + dz * 40, 30, 0],
+          [P.x + 150, P.y + 48, P.z + dz * 30, 60, 0], [P.x + 420, P.y + 110, P.z, 72, 0], [P.x + 900, P.y + 170, P.z - 20, 72, 0]], 512);
+        S.u = 0;
+        ctx.events.emit('planes:summon', { phase: 'depart', x: P.x, y: P.y, z: P.z });
+      }
+    } else if (S.phase === 'depart') {
+      S.depT += dt;
+      S.v = Math.min(72, 1 + S.depT * S.depT * 2.2);
+      S.u += S.v * dt;
+      if (S.u >= S.dep.len - 0.05) {
+        // back to the timetable: the next ordinary crossing in ~25 s
+        S.on = false; S.phase = null;
+        const J = ROUTES.jet, kNext = Math.floor((T + jetOff) / J.period) + 2;
+        jetOff = kNext * J.period - 25 - T;
+        fxGeo.setDrawRange(trailIdxCount, Infinity); trailOn = false;
+        ctx.events.emit('planes:summon', { phase: 'gone' });
+        flyJet(t, 0);
+        return;
+      }
+    }
+    // pose
+    const hover = S.phase === 'hover';
+    const tr = S.phase === 'depart' ? S.dep : S.tr, u = S.u, d = Math.max(2, Math.min(12, S.v * 0.25));
+    if (hover) {
+      p0.set(P.x + 0.25 * Math.sin(t * 0.7), P.y + 12 + 0.3 * Math.sin(t * 1.1), P.z + 0.25 * Math.cos(t * 0.6));
+      const h = S.hoverH + 0.04 * Math.sin(t * 0.45);
+      f.set(Math.sin(h), 0.1, Math.cos(h)).normalize();
+      up.copy(UP).addScaledVector(side.set(Math.cos(h), 0, -Math.sin(h)), 0.05 * Math.sin(t * 0.8)).normalize();
+    } else {
+      tr.at(u - d, pA); tr.at(u, p0); tr.at(u + d, pB);
+      if (u + d > tr.len) f.subVectors(p0, pA); else if (u - d < 0) f.subVectors(pB, p0); else f.subVectors(pB, pA);
+      f.normalize();
+      acc.copy(pB).add(pA).addScaledVector(p0, -2).multiplyScalar(S.v * S.v / (d * d));
+      if (u + d > tr.len || u - d < 0) acc.set(0, 0, 0);
+      up.set(0, G, 0).add(acc).normalize();
+      // nose up as she brakes into the hover (the cat-tail fin wags for balance)
+      const flare = S.phase === 'approach' ? 0.22 * (1 - smoothstep(4, 40, S.v)) : 0.18 * smoothstep(0, 1.5, S.depT) * (1 - smoothstep(4, 9, S.depT));
+      if (flare > 0) { const fy = f.y; f.y = 0; f.normalize(); f.y = Math.tan(Math.atan(fy) + flare); f.normalize(); }
+    }
+    pose(BM[B.jet], p0, f, up);
+    store(air.jet, p0, f); air.jet.active = true;
+    // the rope ladder: unrolls over the last stretch, hangs to the point, reels in on the way out
+    if (S.phase === 'approach') S.ladK = smoothstep(S.tr.len - 75, S.tr.len - 4, S.u);
+    else if (hover) S.ladK = Math.min(1, S.ladK + dt * 0.8);
+    else S.ladK = Math.max(0, S.ladK - dt * 0.55);
+    if (S.ladK > 0.01) {
+      m1.makeTranslation(0, -1.1, 0.4);
+      BM[B.ladJ0].multiplyMatrices(BM[B.jet], m1);
+      const e = BM[B.ladJ0].elements;
+      jetLadTop.set(e[12], e[13], e[14]);
+      const L = (jetLadTop.y - P.y) * S.ladK;
+      jetLadBot.set(jetLadTop.x - f.x * 1.2 * S.ladK * (hover ? 0.2 : 1), jetLadTop.y - L, jetLadTop.z - f.z * 1.2 * S.ladK * (hover ? 0.2 : 1));
+      if (hover) { jetLadBot.x += 0.12 * Math.sin(t * 1.3); jetLadBot.z += 0.12 * Math.cos(t * 1.1); }
+      BM[B.ladJ1].copy(BM[B.ladJ0]);
+      BM[B.ladJ1].elements[12] = jetLadBot.x; BM[B.ladJ1].elements[13] = jetLadBot.y; BM[B.ladJ1].elements[14] = jetLadBot.z;
+    } else { BM[B.ladJ0].copy(HIDDEN); BM[B.ladJ1].copy(HIDDEN); }
+    if (hover && S.ladK >= 0.999 && !S.resolved) {
+      S.resolved = true;
+      S.info = { x: P.x, y: P.y, z: P.z, top: { x: jetLadTop.x, y: jetLadTop.y, z: jetLadTop.z }, jet: { x: p0.x, y: p0.y, z: p0.z, heading: air.jet.heading } };
+      ctx.events.emit('planes:summon', { phase: 'ladder', x: P.x, y: P.y, z: P.z });
+      try { S.resolve?.(S.info); } catch { /* the caller's problem */ }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // BLIMP SCHEDULE (Contract L) — two moorings, two legs, one cycle
+  //   [0, dw)            moored at Sugar Pier (ladder down, props idling)
+  //   [dw, dw+AB)        unmoor (back off + climb, still facing the mast), pivot,
+  //                      drift the strait, line up, nose in at Fish Harbor
+  //   [dw+AB, 2dw+AB)    moored at Fish Harbor
+  //   [2dw+AB, P)        back again
+  // A pure function of the planes clock: renders and eta() agree exactly.
+  // ════════════════════════════════════════════════════════════════════════════
+  const BLS = { dwell: 20, rev: 8, back: 14, lift: 8, pivot: 9, acc: 6, dec: 13, v: ROUTES.blimp.speed };
+  const MI = {};
+  for (const [name, m] of Object.entries(AIR.masts)) {
+    const fx = Math.sin(m.heading), fz = Math.cos(m.heading);
+    const fy = m.deck ? gH(m.deck[0], m.deck[1]) + m.deck[2] : gH(m.foot[0], m.foot[1]);
+    const cx = m.foot[0] + fx * LAD_BACK, cz = m.foot[1] + fz * LAD_BACK, cy = fy + AIR.ladder - LAD_TOP.y;
+    const tx = cx + fx * NOSE, tz = cz + fz * NOSE;
+    MI[name] = {
+      name, label: m.label, island: m.island, to: m.to, heading: m.heading, fx, fz,
+      foot: { x: m.foot[0], y: fy, z: m.foot[1] }, centre: { x: cx, y: cy, z: cz },
+      top: { x: tx, y: cy + 0.1, z: tz }, base: { x: tx, y: gH(tx, tz), z: tz },
+    };
+  }
+  function blimpLeg(from, to, mids) {
+    const A = MI[from], Bm = MI[to];
+    const Q = [A.centre.x - A.fx * BLS.back, A.centre.y + BLS.lift, A.centre.z - A.fz * BLS.back];
+    const pts = [Q, ...mids,
+      [Bm.centre.x - Bm.fx * 36, Bm.centre.y + 7, Bm.centre.z - Bm.fz * 36],
+      [Bm.centre.x - Bm.fx * 17, Bm.centre.y + 1.8, Bm.centre.z - Bm.fz * 17],
+      [Bm.centre.x, Bm.centre.y, Bm.centre.z]].map((p) => [p[0], p[1], p[2], BLS.v, 0]);
+    const tr = buildTrack(pts, 1024);
+    const Tc = tr.len / BLS.v + (BLS.acc + BLS.dec) / 2;
+    return { from, to, A, B: Bm, Q, tr, Tc, T: BLS.rev + Tc };
+  }
+  // mooring-mast beacons sit on top of the masts escape/blimp.js builds under these points
+  BM[B.beaconC].makeTranslation(MI.candy.top.x, MI.candy.top.y + 2.35, MI.candy.top.z);
+  BM[B.beaconK].makeTranslation(MI.cat.top.x, MI.cat.top.y + 2.35, MI.cat.top.z);
+  const LEG = {
+    // over open water the gondola stays above ~30 u (the biplane's passenger
+    // runs wave-hop underneath at ~20 u)
+    cat: blimpLeg('candy', 'cat', [[-26, 36, 44], [6, 50, 52], [36, 42, 60]]),
+    candy: blimpLeg('cat', 'candy', [[70, 38, 76], [34, 50, 82], [-4, 50, 74], [-28, 40, 64]]),
+  };
+  const CYC = { dw: BLS.dwell, ab: LEG.cat.T, ba: LEG.candy.T };
+  CYC.P = 2 * CYC.dw + CYC.ab + CYC.ba;
+  CYC.catAt = CYC.dw + CYC.ab;
+  // the first mooring at Sugar Pier comes ~45 s into the game — after the
+  // opening cinematic has landed on the visitor, not in the middle of it
+  let blimpOff = CYC.P - 45;
+  const BS = { phase: 'moored', mast: null, leg: null, dwellT: 0, dwellLeft: 0, ladK: 0, t: 0, x: 0, y: 0, z: 0, heading: 0, pitch: 0, speed: 0, transit: 0, prop: 0 };
+  function blimpSample(tb, o) {
+    const Pc = CYC.P, t = ((tb % Pc) + Pc) % Pc;
+    o.t = t; o.speed = 0; o.transit = 0; o.leg = null; o.mast = null; o.ladK = 0; o.dwellT = 0; o.dwellLeft = 0;
+    let m = null, leg = null, lt = 0;
+    if (t < CYC.dw) { m = MI.candy; o.dwellT = t; }
+    else if (t < CYC.catAt) { leg = LEG.cat; lt = t - CYC.dw; }
+    else if (t < CYC.catAt + CYC.dw) { m = MI.cat; o.dwellT = t - CYC.catAt; }
+    else { leg = LEG.candy; lt = t - CYC.catAt - CYC.dw; }
+    if (m) {
+      o.phase = 'moored'; o.mast = m.name; o.dwellLeft = CYC.dw - o.dwellT;
+      o.ladK = smoothstep(0.8, 3.2, o.dwellT) * (1 - smoothstep(CYC.dw - 2.8, CYC.dw - 0.5, o.dwellT));
+      // weathervaning a hair about the mast head, breathing
+      o.heading = m.heading + 0.02 * Math.sin(tb * 0.37);
+      o.x = m.top.x - Math.sin(o.heading) * NOSE; o.z = m.top.z - Math.cos(o.heading) * NOSE;
+      o.y = m.centre.y + 0.08 * Math.sin(tb * 0.6);
+      o.pitch = 0;
+      return o;
+    }
+    o.leg = leg.to;
+    const A = leg.A;
+    if (lt < BLS.rev) {                        // backing off the mast and climbing, still facing it
+      o.phase = 'unmoor';
+      const k = smoothstep(0, 1, lt / BLS.rev);
+      o.x = lerp(A.centre.x, leg.Q[0], k); o.y = lerp(A.centre.y, leg.Q[1], k); o.z = lerp(A.centre.z, leg.Q[2], k);
+      o.heading = A.heading; o.pitch = 0.04 * Math.sin(Math.PI * k);
+      o.speed = BLS.back / BLS.rev * 6 * k * (1 - k);
+      return o;
+    }
+    o.phase = 'cruise';
+    const tau = lt - BLS.rev, L = leg.tr.len;
+    const s = trap(tau, L, BLS.v, BLS.acc, BLS.dec);
+    o.speed = trapV(tau, L, BLS.v, BLS.acc, BLS.dec);
+    leg.tr.at(s, p0); leg.tr.at(s - 4, pA); leg.tr.at(s + 4, pB);
+    const th = Math.atan2(pB.x - pA.x, pB.z - pA.z);
+    let h = lerpA(A.heading, th, smoothstep(0, BLS.pivot, tau));
+    h = lerpA(h, leg.B.heading, smoothstep(leg.Tc - 7, leg.Tc, tau));
+    o.transit = smoothstep(0, 7, tau) * (1 - smoothstep(leg.Tc - 9, leg.Tc - 1, tau));
+    o.heading = h + 0.05 * Math.sin(tb * 0.23) * o.transit;
+    o.x = p0.x; o.z = p0.z; o.y = p0.y + 0.9 * Math.sin(tb * 0.31) * o.transit;
+    o.pitch = clamp((pB.y - pA.y) / 8, -0.3, 0.3) * 0.4 + 0.03 * Math.sin(tb * 0.27) * o.transit;
+    return o;
+  }
+  function blimpEta(mast) {
+    if (BS.mast === mast) return 0;
+    const Pc = CYC.P, start = mast === 'candy' ? 0 : CYC.catAt;
+    return ((start - BS.t) % Pc + Pc) % Pc;
+  }
+  const blimpLadTop = new THREE.Vector3(), blimpLadBot = new THREE.Vector3();
+  let blimpLadForce = -1;                      // ≥ 0: hold the ladder at this deployment (rides)
+  function flyBlimp(tb, w, dt) {
+    const o = blimpSample(tb, BS);
+    f.set(Math.sin(o.heading) * Math.cos(o.pitch), Math.sin(o.pitch), Math.cos(o.heading) * Math.cos(o.pitch));
+    p0.set(o.x, o.y, o.z);
     pose(BM[B.blimp], p0, f, UP);
     store(air.blimp, p0, f);
-    m1.makeRotationZ(w * 19).setPosition(3.1, -5.15, -4.9); BM[B.blimpPropL].multiplyMatrices(BM[B.blimp], m1);
-    m1.makeRotationZ(-w * 19 + 0.7).setPosition(-3.1, -5.15, -4.9); BM[B.blimpPropR].multiplyMatrices(BM[B.blimp], m1);
+    // props: idle at the mast, spool up to cruise
+    const rate = 3 + 16 * clamp(Math.max(o.transit, o.speed / BLS.v), 0, 1);
+    o.prop = (o.prop + rate * dt) % TAU;
+    m1.makeRotationZ(o.prop).setPosition(3.1, -5.15, -4.9); BM[B.blimpPropL].multiplyMatrices(BM[B.blimp], m1);
+    m1.makeRotationZ(-o.prop + 0.7).setPosition(-3.1, -5.15, -4.9); BM[B.blimpPropR].multiplyMatrices(BM[B.blimp], m1);
     for (let i = 0; i < 2; i++) {
       const bone = EARS[i][0], sx = EARS[i][1], ph = EARS[i][2];
       const flick = Math.pow(Math.max(0, Math.sin(w * 0.83 + ph)), 18);
@@ -1191,7 +2156,171 @@ export function create(ctx) {
       m1.compose(v1.set(sx * r * 0.55, r * 0.8, 5.8), q1, s1.set(1, 1, 1));
       BM[bone].multiplyMatrices(BM[B.blimp], m1);
     }
+    // the rope ladder: unrolls from the balcony to the mast's foot while moored
+    const k = blimpLadForce >= 0 ? blimpLadForce : o.ladK;
+    const mi = MI[o.mast || 'candy'];
+    m1.makeTranslation(0, LAD_TOP.y, LAD_TOP.z);
+    BM[B.ladM0].multiplyMatrices(BM[B.blimp], m1);
+    const e = BM[B.ladM0].elements;
+    blimpLadTop.set(e[12], e[13], e[14]);
+    if (k > 0.01 && o.mast) {
+      blimpLadBot.set(lerp(e[12], mi.foot.x, k), lerp(e[13], mi.foot.y + 0.06, k), lerp(e[14], mi.foot.z, k));
+      BM[B.ladM1].copy(BM[B.ladM0]);
+      BM[B.ladM1].elements[12] = blimpLadBot.x; BM[B.ladM1].elements[13] = blimpLadBot.y; BM[B.ladM1].elements[14] = blimpLadBot.z;
+    } else { blimpLadBot.copy(blimpLadTop); BM[B.ladM0].copy(HIDDEN); BM[B.ladM1].copy(HIDDEN); }
   }
+
+  // ── the pump hose: nozzle → sag → filler cap, only while he is refuelling ────
+  const pumpNozzle = new THREE.Vector3();
+  {
+    const [px, pz] = pumpXZ;
+    const dx = parkXZ[0] + SU.x * 1.3 - px, dz = parkXZ[1] + SU.z * 1.3 - pz, l = Math.hypot(dx, dz) || 1;
+    pumpNozzle.set(px + dx / l * 0.78, restH(px, pz, false) + 1.5, pz + dz / l * 0.78);
+  }
+  const hoseP = new THREE.Vector3(), hoseQ = new THREE.Vector3(), hoseM = new THREE.Vector3();
+  function flyHose() {
+    const on = BP.phase === 'refuel' && BP.refT > 1.4 && BP.refuelLeft + BP.waitLeft > 1.2;
+    if (!on) { BM[B.hoseA].copy(HIDDEN); BM[B.hoseM].copy(HIDDEN); BM[B.hoseB].copy(HIDDEN); return; }
+    hoseP.copy(pumpNozzle);
+    bpLocal(0, 0.95, 1.3, hoseQ);
+    hoseM.addVectors(hoseP, hoseQ).multiplyScalar(0.5);
+    hoseM.y = Math.min(hoseP.y, hoseQ.y) - 0.9;
+    f.subVectors(hoseM, hoseP).normalize(); pose(BM[B.hoseA], hoseP, f, UP);
+    f.subVectors(hoseQ, hoseP).normalize(); pose(BM[B.hoseM], hoseM, f, UP);
+    f.subVectors(hoseQ, hoseM).normalize(); pose(BM[B.hoseB], hoseQ, f, UP);
+  }
+
+  // ── blimp API ─────────────────────────────────────────────────────────────────
+  const blimpApi = {
+    masts: MI,
+    /** 'candy' | 'cat' while moored at that mast, else null. */
+    get moored() { return BS.mast; },
+    /** Seconds until the blimp next moors at `mast` (0 while it is there). */
+    eta: (mast) => blimpEta(mast),
+    /** Seconds until it casts off (0 when not moored). */
+    get departIn() { return BS.mast ? BS.dwellLeft : 0; },
+    get dwellT() { return BS.dwellT; },
+    get dwell() { return CYC.dw; },
+    get cycle() { return CYC.P; },
+    /** Ladder deployment 0..1 (1 = down to the mast's foot). */
+    get ladder() { return blimpLadForce >= 0 ? blimpLadForce : BS.ladK; },
+    /** 'moored' | 'unmoor' | 'cruise' */
+    get phase() { return BS.phase; },
+    /** The mast it is flying to (null while moored). */
+    get leg() { return BS.leg; },
+    get heading() { return BS.heading; },
+    get speed() { return BS.speed; },
+    get altitude() { return BS.y; },
+    /** The passenger's standing spot on the balcony (world), and which way to face. */
+    seat(out) { out.set(0.05, BAL.y + 0.02, BAL.z + 0.2).applyMatrix4(BM[B.blimp]); out.facing = BS.heading + Math.PI / 2; return out; },
+    ladderTop(out) { return out.copy(blimpLadTop); },
+    ladderBottom(out) { return out.copy(blimpLadBot); },
+    foot: (mast) => MI[mast]?.foot || null,
+    /** Hold the ladder at k (0..1) regardless of the schedule, or null to release. */
+    holdLadder(k = null) { blimpLadForce = k == null ? -1 : clamp(k, 0, 1); },
+    get matrix() { return BM[B.blimp]; },
+  };
+
+  // ── biplane API ───────────────────────────────────────────────────────────────
+  let LAND_TD = 0, LAND_T = 0;
+  {
+    const L = tracks.land;
+    for (let s = 0; s < L.len; s += 0.5) { if (L.ground(s) > 0.5) { LAND_TD = s; break; } LAND_T += 0.5 / Math.max(1, L.speed(s)); }
+  }
+  const LAP_T = bLoop.len / ROUTES.biplane.speed;
+  const HOURS_PER_S = HPS;
+  const S_HOME_D = exitDist(S_HOME), S_REJOIN_D = exitDist(S_REJOIN);
+  function biplaneEta() {
+    if (BP.phase === 'refuel') return 0;
+    if (BP.phase === 'approach') {
+      let t = 0; for (let s = BP.u; s < LAND_TD; s += 1) t += 1 / Math.max(1, BP.tr.speed(s));
+      return t;
+    }
+    // back on the loop first (from a departure or a passenger run)
+    let t0 = 0, d0 = exitDist(BP.s), since = BP.sinceStop;
+    if (BP.mode === 'track') {
+      const left = Math.max(0, BP.tr.len - BP.u);
+      const homeT = tracks.home ? tracks.home.len / 12 : 0;
+      t0 = left / 12 + (BP.phase === 'ferry' ? 8 + homeT : BP.phase === 'dropoff' ? 8 + homeT : 0);
+      d0 = BP.phase === 'depart' ? S_REJOIN_D : S_HOME_D; since = 0;
+    }
+    const hour = ctx.state.time ?? 12;
+    if (ctx.state.timeFrozen) {
+      // frozen clock: every lap, while the frozen hour is inside the window
+      if (!(hour >= DAY_FROM && hour <= DAY_TO)) return Infinity;
+      let tc = t0 + d0 / V0;
+      while (since + tc - t0 < STOP_MIN) tc += LAP_T;
+      return tc + LAND_T;
+    }
+    // running clock: the timetable. The soonest he can cross S_EXIT is flat
+    // out from here; on the loop he aims at the slot itself.
+    const tMin = t0 + d0 / VMAX;
+    let best = Infinity;
+    for (let i = 0; i < SLOTS.length; i++) {
+      const d = hdiff(hour, SLOTS[i]);
+      const dueNow = !served[i] && d >= -EARLY && d <= MAX_LATE;
+      let ahead = -d; if (ahead <= 0) ahead += 24;
+      // occurrences: due now (maybe late) · the next one · the one after
+      for (let k = dueNow ? 0 : 1; k < 3; k++) {
+        const ts = k === 0 ? -d / HPS : (ahead + 24 * (k - 1)) / HPS;
+        const tc = Math.max(ts, tMin);
+        const hc = (((hour + tc * HPS) % 24) + 24) % 24, late = hdiff(hc, SLOTS[i]);
+        if (late < -EARLY || late > MAX_LATE || !(hc >= DAY_FROM && hc <= DAY_TO)) continue;
+        if (tc < best) best = tc;
+        break;
+      }
+    }
+    return best < Infinity ? best + LAND_T : Infinity;
+  }
+  const biplaneApi = {
+    /** 'loop' | 'track' */
+    get mode() { return BP.mode; },
+    /** 'loop' | 'approach' | 'refuel' | 'depart' | 'ferry' | 'dropoff' | 'home' */
+    get phase() { return BP.phase; },
+    get stopped() { return BP.phase === 'refuel' || BP.phase === 'dropoff'; },
+    get onGround() { return BP.groundK > 0.5; },
+    get speed() { return BP.v; },
+    get heading() { return air.biplane.heading; },
+    /** Seconds of refuelling (plus any wait he agreed to) left. */
+    get refuelLeft() { return BP.phase === 'refuel' ? BP.refuelLeft + BP.waitLeft : 0; },
+    get passenger() { return BP.passenger; },
+    get stops() { return BP.stops; },
+    /** Seconds to the next touchdown at the fuel stop (0 while there, Infinity: not today). */
+    eta: biplaneEta,
+    /** True while a fuel stop can still start today (approaches start 06:00 – ≈ 14:34). */
+    get flyingToday() { const h = ctx.state.time ?? 12; return h < DAY_TO && !(ctx.systems.sky?.lampsOn ?? ctx.state.isNight); },
+    /** Approach-start window (hours) and the two daily slots he steers for. */
+    window: { from: DAY_FROM, to: DAY_TO, slots: SLOTS.slice() },
+    /** Timetable state (tests): which slots are served, the cruise he is flying. */
+    get timetable() { return { slots: SLOTS.slice(), served: served.slice(), loopV: +BP.loopV.toFixed(2), lastSkip: BP.lastSkip, slot: BP.slot }; },
+    /** He waits (while you talk / climb in): extend the stop, ≤ 40 s per stop,
+     *  and never past lamps-on (the field goes dark; he will not sit there). */
+    wait(sec = 6) {
+      if (BP.phase !== 'refuel') return false;
+      let room = Math.max(0, 40 - BP.waitUsed);
+      if (!ctx.state.timeFrozen) {
+        const toLamps = hdiff(LAMP_ON, ctx.state.time ?? 12) / HPS - BP.refuelLeft - BP.waitLeft;
+        room = Math.min(room, Math.max(0, toLamps));
+      }
+      const add = Math.min(room, Math.max(0, sec - BP.waitLeft - BP.refuelLeft));
+      if (add > 0) { BP.waitLeft += add; BP.waitUsed += add; }
+      return true;
+    },
+    /** A passenger climbs into the deckchair (refuel only): he flies to Wing Nut Field. */
+    board() { if (BP.phase !== 'refuel') return false; BP.passenger = true; if (!tracks.ferry) buildWingnut(); return true; },
+    unboard() { if (BP.phase === 'refuel') BP.passenger = false; return true; },
+    /** The passenger is off at Wing Nut Field: he goes home. */
+    release() { if (BP.phase === 'dropoff') BP.released = true; return true; },
+    /** Rider (feet) position in the deckchair, facing the nose. */
+    seat(out) { bpLocal(0, 0.62 - 0.72, -1.66, out); out.facing = air.biplane.heading; return out; },
+    /** The pilot's head (for talking). */
+    pilot(out) { return bpLocal(0, 1.2, -0.84, out); },
+    park: { x: parkXZ[0], z: parkXZ[1], heading: Math.atan2(SU.x, SU.z) },
+    pump: { x: pumpXZ[0], z: pumpXZ[1], y: restH(pumpXZ[0], pumpXZ[1], false), nozzle: pumpNozzle },
+    /** Wing Nut Field's drop-off: { x, z, off:[x,z], d } (built on first use). */
+    get dropoff() { if (!tracks.stop) buildWingnut(); return tracks.stop; },
+    get tracks() { return tracks; },
+  };
 
   // ── PAPER PLANES ─────────────────────────────────────────────────────────────
   function flyPaper(t, w, cam) {
@@ -1253,7 +2382,7 @@ export function create(ctx) {
     drop.t = k0 * drop.T;
   }
   function releaseFromBiplane() {
-    if (drop.active) return false;
+    if (drop.active || BP.mode !== 'loop') return false;
     if (waiting() >= DROP_MAX_WAITING || dropSeq >= DROP_MAX_TOTAL) return false;
     const a = air.biplane;
     if (world.islandAt(a.x, a.z) !== 'candy') return false;
@@ -1316,9 +2445,12 @@ export function create(ctx) {
   }
 
   // ── per-frame helpers ────────────────────────────────────────────────────────
+  const BLUR = new Float32Array([1, 1, 1]);   // per disc: 0 = blades still (no blur disc)
   function writeProps() {
+    BLUR[0] = smoothstep(7, 16, BP.propRate);
+    BLUR[1] = BLUR[2] = smoothstep(5, 12, 3 + 16 * clamp(Math.max(BS.transit, BS.speed / BLS.v), 0, 1));
     for (let d = 0; d < 3; d++) {
-      const bone = DISCS[d][0], r = DISCS[d][1];
+      const bone = DISCS[d][0], r = DISCS[d][1] * BLUR[d];
       const m = BM[bone].elements;
       const c0 = nTrail + d * nDiscV;
       // a hair in front of the blades so the two never z-fight
@@ -1368,11 +2500,15 @@ export function create(ctx) {
 
   function update(dt, c) {
     const st = c.state;
-    if (!st.paused) { TR += dt; if (!api.hold) T += dt; }
+    const run = !st.paused, adv = run && !api.hold;
+    if (run) { TR += dt; if (!api.hold) T += dt; }
     const t = T, tr = TR;           // tr: rotor / ripple / flutter clock, keeps running under hold
-    flyBiplane(t, tr);
-    flyJet(t);
-    flyBlimp(t, tr);
+    const rdt = run ? dt : 0;
+    stepBiplane(adv ? dt : 0);
+    flyBiplane(t, tr, rdt);
+    flyHose();
+    flyJet(t, adv ? dt : 0);
+    flyBlimp(t + blimpOff, tr, rdt);
     flyPaper(t + tP, tr, c.camera);
     // drops
     if (!st.paused) {
@@ -1445,7 +2581,10 @@ export function create(ctx) {
       if (typeof ui?.addMapMarker === 'function') {
         try {
           mkBiplane.x = air.biplane.x; mkBiplane.z = air.biplane.z; ui.addMapMarker(mkBiplane);
-          mkBlimp.x = air.blimp.x; mkBlimp.z = air.blimp.z; ui.addMapMarker(mkBlimp);
+          mkBlimp.x = air.blimp.x; mkBlimp.z = air.blimp.z;
+          mkBlimp.label = BS.mast === 'candy' ? 'SUGAR blimp · boarding at Sugar Pier' : BS.mast === 'cat' ? 'SUGAR blimp · boarding at Fish Harbor'
+            : BS.leg === 'cat' ? 'SUGAR blimp · bound for Fish Harbor' : 'SUGAR blimp · bound for Sugar Pier';
+          ui.addMapMarker(mkBlimp);
         } catch { /* the map is optional */ }
       }
     }
@@ -1459,8 +2598,8 @@ export function create(ctx) {
     debugTeleport(name, t = 0, hold = false, lane = null) {
       const at = Array.isArray(t) ? t : null;       // jet only: [x, z] = put it abeam of that point
       t = at ? 0 : ((Number(t) % 1) + 1) % 1;
-      if (name === 'biplane') sB = t * bLoop.len - T * ROUTES.biplane.speed;
-      else if (name === 'blimp') sM = t * mLoop.len - T * ROUTES.blimp.speed;
+      if (name === 'biplane') { toLoop(t * bLoop.len); histFill((d, o) => bLoop.at(BP.s - d, o)); }
+      else if (name === 'blimp') blimpOff = t * CYC.P - T;
       else if (name === 'paper') { const w = ROUTES.paper.speed / ROUTES.paper.r; tP = t * TAU / w - T; }
       else if (name === 'jet') {
         const J = ROUTES.jet; const k = lane != null ? Math.max(0, Math.floor(lane)) : Math.max(0, Math.floor((T + jetOff) / J.period));
@@ -1516,7 +2655,8 @@ export function create(ctx) {
     },
     pathPoint(name, t) {
       const o = new THREE.Vector3();
-      if (name === 'biplane') bLoop.at(t * bLoop.len, o); else if (name === 'blimp') mLoop.at(t * mLoop.len, o);
+      if (name === 'biplane') bLoop.at(t * bLoop.len, o);
+      else if (name === 'blimp') { const tmp = blimpSample(t * CYC.P, { prop: 0 }); o.set(tmp.x, tmp.y, tmp.z); }
       else if (name === 'paper') { const w = ROUTES.paper.speed / ROUTES.paper.r; paperPos(t * TAU / w, 0, o); }
       return { x: o.x, y: o.y, z: o.z };
     },
@@ -1535,15 +2675,99 @@ export function create(ctx) {
         out[name] = { min: +min.toFixed(1), at };
       };
       test('biplane', (u) => api.pathPoint('biplane', u), 600, 4);
-      test('blimp', (u) => api.pathPoint('blimp', u), 600, 13);
+      // the blimp is only held to the rule in open cruise (it moors at masts by design)
+      test('blimp', (u) => { const q = blimpSample(u * CYC.P, { prop: 0 }); return q.phase === 'cruise' && q.transit > 0.9 ? q : { x: 0, y: 999, z: 0 }; }, 900, 13);
       test('jet', (u) => ({ x: -560 + 1120 * u, y: ROUTES.jet.alt - 4, z: 0 }), 400, 8);
       return out;
+    },
+    // ── WAVE 4 · Contract L ───────────────────────────────────────────────────
+    air: { masts: MI, strip: { ...STR, along: SU, north: SN, park: { x: parkXZ[0], z: parkXZ[1], heading: Math.atan2(SU.x, SU.z) }, pump: { x: pumpXZ[0], z: pumpXZ[1] }, at: (a, sd) => SP(a, sd), pad: PAD, restH } },
+    blimp: blimpApi,
+    biplane: biplaneApi,
+    summonJet,
+    /** Keep the summoned jet hovering `s` more seconds (from now). */
+    jetHold(sec = 4) { if (SUMN.on && SUMN.phase === 'hover') SUMN.hold = SUMN.holdT + Math.max(0, sec); return SUMN.on; },
+    /** Let the summoned jet go now (once its ladder has reached the point). */
+    jetGo() { if (SUMN.on && SUMN.phase === 'hover') SUMN.hold = 0; return SUMN.on; },
+    jetStateNow() {
+      return {
+        mode: SUMN.on ? SUMN.phase : (air.jet.active ? 'lane' : 'idle'),
+        x: air.jet.x, y: air.jet.y, z: air.jet.z, heading: air.jet.heading, speed: SUMN.on ? SUMN.v : ROUTES.jet.speed,
+        target: SUMN.on ? { x: SUMN.target.x, y: SUMN.target.y, z: SUMN.target.z } : null,
+        holdLeft: SUMN.on && SUMN.phase === 'hover' ? Math.max(0, SUMN.hold - SUMN.holdT) : 0,
+        ladder: { k: SUMN.ladK, top: { x: jetLadTop.x, y: jetLadTop.y, z: jetLadTop.z }, bottom: { x: jetLadBot.x, y: jetLadBot.y, z: jetLadBot.z } },
+      };
+    },
+    /** Views: park the blimp at 'candy' | 'cat' (k = fraction of the mooring),
+     *  'mid' | 'midBack' (k = fraction of the crossing), or a cycle fraction. */
+    debugBlimp(where = 'candy', k = 0.5, hold = true) {
+      let tb;
+      if (where === 'candy') tb = clamp(k, 0, 1) * CYC.dw;
+      else if (where === 'cat') tb = CYC.catAt + clamp(k, 0, 1) * CYC.dw;
+      else if (where === 'mid') tb = CYC.dw + BLS.rev + clamp(k, 0, 1) * LEG.cat.Tc;
+      else if (where === 'midBack') tb = CYC.catAt + CYC.dw + BLS.rev + clamp(k, 0, 1) * LEG.candy.Tc;
+      else tb = (((Number(where) || 0) % 1) + 1) % 1 * CYC.P;
+      blimpOff = tb - T;
+      if (hold) api.hold = true;
+      update(0, ctx);
+      return { t: tb, phase: BS.phase, mast: BS.mast, x: +BS.x.toFixed(1), y: +BS.y.toFixed(1), z: +BS.z.toFixed(1) };
+    },
+    /** Views: put the biplane at 'approach' | 'refuel' | 'ferry' | 'dropoff' |
+     *  'home' | 'depart' (k = fraction of that leg; refuel: of the 25 s). The
+     *  banner history is replayed so it trails (or lies) where it should. */
+    debugBiplane(phase = 'refuel', k = 0.3, hold = true) {
+      const dt = 1 / 30;
+      BP.engine = 1;
+      const replay = (name, ph, uTo) => {
+        startTrack(name, ph, 0);
+        const tr = tracks[name];
+        if (name === 'land') histFill((d, o) => bLoop.at(S_EXIT - d, o));
+        else histFill((d, o) => tr.at(Math.max(0, -d), o), 6);
+        let n = 0;
+        while (BP.u < uTo && n++ < 20000) { BP.v = Math.max(0.45, tr.speed(BP.u)); BP.u = Math.min(uTo, BP.u + BP.v * dt); flyBiplane(T, TR, dt); }
+      };
+      if (phase === 'approach') replay('land', 'approach', clamp(k, 0, 1) * tracks.land.len);
+      else if (phase === 'refuel' || phase === 'dropoff') {
+        if (phase === 'dropoff' && !tracks.ferry) buildWingnut();
+        replay(phase === 'refuel' ? 'land' : 'ferry', phase === 'refuel' ? 'approach' : 'ferry', (phase === 'refuel' ? tracks.land : tracks.ferry).len);
+        BP.u = BP.tr.len; BP.v = 0; BP.phase = phase;
+        // (held views never step the plane: set the engine the stop would have by now,
+        // or the propeller keeps its taxi blur disc — a pink bubble round the nose)
+        if (phase === 'refuel') {
+          BP.refuelLeft = AIR.refuel * (1 - clamp(k, 0, 1)); BP.waitLeft = 0; BP.refT = AIR.refuel - BP.refuelLeft;
+          BP.engine = Math.max(smoothstep(2.5, 0.2, BP.refuelLeft), 1 - smoothstep(0, 1.6, BP.refT));
+        } else { BP.dropT = 0; BP.released = false; BP.passenger = true; BP.engine = 0.35; }
+        ctx.events.emit('planes:biplane', { phase });
+      } else if (phase === 'ferry' || phase === 'home') {
+        if (!tracks.ferry) buildWingnut();
+        replay(phase, phase, clamp(k, 0, 1) * tracks[phase].len);
+        if (phase === 'ferry') BP.passenger = true;
+      } else if (phase === 'depart') replay('depart', 'depart', clamp(k, 0, 1) * tracks.depart.len);
+      else { toLoop(clamp(k, 0, 1) * bLoop.len); histFill((d, o) => bLoop.at(BP.s - d, o)); }
+      if (hold) api.hold = true;
+      update(0, ctx);
+      return { phase: BP.phase, x: +air.biplane.x.toFixed(1), y: +air.biplane.y.toFixed(1), z: +air.biplane.z.toFixed(1), heading: +air.biplane.heading.toFixed(3) };
+    },
+    /** Views: summon the jet to (x, y, z) and run it forward to 'approach' |
+     *  'hover' (ladder down) | 'depart' without rendering. */
+    debugSummon(x = 0, y = 60, z = 22, phase = 'hover', hold = true) {
+      summonJet({ x, y, z });
+      const dt = 1 / 30;
+      let n = 0;
+      const done = () => (phase === 'approach' ? SUMN.u > SUMN.tr.len * 0.6 : phase === 'hover' ? SUMN.phase === 'hover' && SUMN.ladK >= 1 : SUMN.phase === 'depart' && SUMN.depT > 3);
+      while (SUMN.on && !done() && n++ < 6000) { T += dt; TR += dt; flyJet(T, dt); }
+      if (hold) api.hold = true;
+      update(0, ctx);
+      return api.jetStateNow();
     },
     stats() {
       const tris = (g) => (g.index ? g.index.count : g.attributes.position.count) / 3;
       return { calls: [body, decal, fx, navPoints, blobs].filter((m) => m.visible).length, tris: Math.round(tris(bodyGeo) + tris(decalGeo) + fxIdx.length / 3 + NBLOB * 2), bones: nb };
     },
   });
+
+  // (Object.assign would have frozen a getter's first value)
+  Object.defineProperty(api, 'jetState', { get: () => api.jetStateNow(), enumerable: true });
 
   setBannerText(false); bannerNight = false;
   update(0, ctx);

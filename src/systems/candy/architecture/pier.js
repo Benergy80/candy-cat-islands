@@ -1,8 +1,9 @@
 // SUGAR PIER — landmark candy_dock (-42, 22). The player's first sight of
 // Candyland: a candy-cane pier out over the sea toward the ferry route, a
 // striped ticket booth, and a very cheerful welcome arch with a secret.
-import { C, SPRINKLE, lamppost, bench, icingDrip, door } from './kit.js';
+import { C, SPRINKLE, lamppost, bench, icingDrip, door, doorway } from './kit.js';
 import * as IN from './interiors.js';
+import { railRun, caneStyle } from './rails.js';
 
 const Z = 22;               // the pier runs east along z = 22
 const X_ROOT = -47.5;       // shore end of the deck
@@ -76,6 +77,8 @@ export function buildPier(A) {
     }
   }
 
+  pierRails(A, deck, postX, rampX0, gA);
+
   // ── mooring gumdrops + crates at the head ─────────────────────────────────
   for (const s of [-1, 1]) {
     const gz = Z + s * (HALF_WIDE - 1.1);
@@ -140,6 +143,40 @@ export function buildPier(A) {
   beachGrounds(A, deck);
 
   return { head: { x: X_HEAD, y: deck, z: Z }, deck };
+}
+
+/**
+ * HANDRAILS (Contract O). The big candy-cane posts and their licorice swags
+ * were always a railing to look at and never one to lean on: nothing between
+ * them, no colliders, and from x ≈ −36 seaward the deck stands 2.6–6 units over
+ * the surf. Now a striped top rail runs post to post along both sides and round
+ * the step onto the wide head, with a small cane between every pair of big
+ * ones (≈ 1.3–1.4 u apart) and oriented box colliders on the rail line, so the
+ * visitor, and anything else that walks the pier, stays on it.
+ * Where the deck is only 0.6–0.8 over the beach (the landward half) the spans
+ * are measured and left open: you can step off onto the sand, as you always
+ * could. The HEAD is open on purpose: it is the ferry berth, and the
+ * Sugarfin's gangplank lands across that edge (ferry.js pierEnd/footPenalty).
+ */
+function pierRails(A, deck, postX, rampX0, gA) {
+  const { B, ctx } = A;
+  const style = caneStyle({ variant: 0 });
+  const zN = HALF - 0.22, zW = HALF_WIDE - 0.28;       // the big posts' lines
+  const have = [];
+  for (const x of postX) { const pz = x > X_WIDE ? zW : zN; have.push([x, Z + pz], [x, Z - pz]); }
+  const XS = X_WIDE + 0.22;                             // the step onto the wide head
+  for (const s of [1, -1]) {                            // +z is the south side
+    const pts = [[X_ROOT + 0.2, Z + s * zN, deck]];
+    for (const x of postX) if (x < X_WIDE) pts.push([x, Z + s * zN, deck]);
+    pts.push([XS, Z + s * zN, deck], [XS, Z + s * zW, deck]);
+    for (const x of postX) if (x > X_WIDE) pts.push([x, Z + s * zW, deck]);
+    railRun(ctx, B, pts, { site: 'sugar_pier', edge: (s > 0 ? 'south' : 'north') + ' side + step', out: -s, style, have, lead: 1 });
+    // the shore ramp: measured, never more than a stride off the sand
+    railRun(ctx, B, [[rampX0, Z + s * (HALF - 0.1), gA], [X_ROOT, Z + s * (HALF - 0.1), deck]],
+      { site: 'sugar_pier', edge: 'shore ramp ' + (s > 0 ? 'south' : 'north'), out: -s, style, open: 'measured only' });
+  }
+  railRun(ctx, B, [[X_HEAD - 0.1, Z - zW, deck], [X_HEAD - 0.1, Z + zW, deck]],
+    { site: 'sugar_pier', edge: 'head (ferry berth)', out: 1, style, open: 'deliberately open: the ferry gangplank lands here' });
 }
 
 /**
@@ -269,11 +306,14 @@ function beachGrounds(A, deck) {
 function buildBooth(A, x, z, rotY) {
   const { B, world } = A;
   const y = world.height(x, z);
-  const w = 3.8, d = 3.3, h = 2.7, T = 0.3;
+  // h 3.0, not 2.7, and a 1.5 × 2.4 door, not 1.35 × 2.25 (Contract O: a door
+  // that opens is at least 1.4 × 2.3 clear) — at 2.7 the lintel would have
+  // been a 0.3 sliver under the eaves
+  const w = 3.8, d = 3.3, h = 3.0, T = 0.3;
   const cs = Math.cos(rotY), sn = Math.sin(rotY);
   const fwd = (dz, dx = 0) => [x + sn * dz + cs * dx, z + cs * dz - sn * dx];
   const floorY = y + 0.3;
-  const DOORW = 1.35;
+  const DOORW = 1.5, DOORH = 2.4;                   // clear opening above the floor
 
   const E = A.building({ id: 'ticket_booth', name: 'the ticket booth', x, z, w: w - T * 2, d: d - T * 2, rot: rotY, floorY, pad: 0.3 });
   const W = E.wall, R = E.roof;
@@ -297,7 +337,7 @@ function buildBooth(A, x, z, rotY) {
     A.collideBox(px, pz, T, segD, rotY, floorY + h);
   }
   const [lx, lz] = fwd(0, w / 2 - T / 2);
-  W.stripeBox(T, h - 2.25, DOORW, { at: [lx, floorY + 2.25 + (h - 2.25) / 2, lz], rot: [0, rotY, 0], variant: 0, axisH: h - 2.25 });
+  W.stripeBox(T, h - DOORH, DOORW + 0.02, { at: [lx, floorY + DOORH + (h - DOORH) / 2, lz], rot: [0, rotY, 0], variant: 0, axisH: h - DOORH });
   // front: counter below, header above, opening between
   const [fx, fz] = fwd(d / 2 - T / 2);
   W.stripeBox(w, 1.25, T, { at: [fx, floorY + 0.62, fz], rot: [0, rotY, 0], variant: 0, axisH: 1.25 });
@@ -306,11 +346,18 @@ function buildBooth(A, x, z, rotY) {
   const [cx2, cz2] = fwd(d / 2 + 0.25);
   B.waffleBox(w + 0.5, 0.16, 0.95, { at: [cx2, floorY + 1.32, cz2], rot: [0, rotY, 0], color: C.waferPale });
 
-  // the door itself, on the landward side
+  // the door itself, on the landward side: an icing surround on the wall face
+  // (clear opening = the wall gap, DOORW × DOORH), the leaf in the wall's
+  // thickness, and a walkable sill + doorstep at floor level (Contract A)
   const dRot = rotY + Math.PI / 2;
-  const [dx0, dz0] = fwd(0, w / 2 - T * 0.4);
-  door(B, dx0, floorY - 0.3, dz0, dRot, { w: DOORW, h: 2.2, frame: C.icing, color: C.chocolate, leaf: false });
-  E.door({ x: dx0, y: floorY - 0.02, z: dz0, rot: dRot, w: DOORW - 0.1, h: 2.15, color: C.chocolate, swing: -1, r: 2.4, say: 'The hinge screams. Nobody comes.' });
+  const [ox0, oz0] = fwd(0, w / 2);
+  doorway(B, ox0, y, oz0, dRot, { w: DOORW, h: floorY - y + DOORH, frame: C.icing, arch: false, key: false, baseColor: C.icingPink });
+  const [dx0, dz0] = fwd(0, w / 2 - T / 2);
+  E.door({ x: dx0, y: floorY - 0.02, z: dz0, rot: dRot, w: DOORW, h: DOORH + 0.02, color: C.chocolate, swing: -1, r: 2.4, say: 'The hinge screams. Nobody comes.' });
+  { const [sx0, sz0] = fwd(0, w / 2 - T / 2 + 0.1); A.deckRRect(sx0, sz0, DOORW + 0.1, T + 0.3, dRot, floorY); }
+  { const [sx0, sz0] = fwd(0, w / 2 + 0.55);
+    B.waffleBox(DOORW + 0.7, 0.36, 0.7, { at: [sx0, floorY - 0.18, sz0], rot: [0, dRot, 0], color: C.waferPale });
+    A.deckRRect(sx0, sz0, DOORW + 0.7, 0.7, dRot, floorY); }
 
   // wafer roof + icing drip + candy-cane finial
   const [rx, rz] = fwd(0);
@@ -349,7 +396,7 @@ function buildBooth(A, x, z, rotY) {
   // the lost & found
   const hb = IN.hatBin(I, F, -iw / 2 + 0.7, -id / 2 + 0.65, 0);
   A.collide(hb.x, hb.z, 0.55);
-  IN.stool(I, F, iw / 2 - 0.8, id / 2 - 1.1);
+  IN.stool(I, F, iw / 2 - 1.0, -id / 2 + 0.55);        // out of the doorway's path
   const lamp = IN.ceilingLamp(I, F, 0.2, h - 0.85, -0.2, { glow: 1.9, hood: C.icingLemon });
   E.lamp(lamp.x, lamp.y - 0.1, lamp.z, 0xffd2a0);
 

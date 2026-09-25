@@ -37,6 +37,7 @@ const SLAB = 0.8;                   // terrace slab thickness
 const STAIR = { x0: -3.6, x1: -1.0, z0: -6.6, z1: -2.1 };   // cellar stairwell hole
 const CELL = { x0: -7.5, x1: 1.0, z0: -11.0, z1: -6.6 };    // cellar room
 const BRICK_UNIT = 2.4;
+const KH_AT = { x: 3.0, z: 2.7 };    // WAVE 4: the King's-half stool, relative to the throne (south side, clear of the chandelier's shadow in the iso lens)
 
 export function create(ctx, escape) {
   const { world } = ctx;
@@ -495,6 +496,11 @@ export function create(ctx, escape) {
     B.tor('gloss', 0.45, 0.16, 6, 12, { at: at(tx + 2.1, TER + 0.28, tz + 1.4), rot: [1.35, 0.4, 0], color: C.yellow });
     for (let i = 0; i < 6; i++) B.cone('gloss', 0.13, 0.3, 5, { at: at(tx + 2.1 + Math.cos(i) * 0.42, TER + 0.42, tz + 1.4 + Math.sin(i) * 0.42), rot: [1.35, 0.4, 0], color: C.yellow });
     B.signQuad('palace_note', 1.9, 1.3, { at: at(tx - 1.6, TER + 3.0, tz), rot: [0, Math.PI / 2, 0] });
+    // WAVE 4 (bridge builder): a little licorice stool by the throne's left arm,
+    // where the King's half of the boarding pass waits (see KINGS_HALF below)
+    B.cyl('licorice', 0.22, 0.3, 0.86, 8, { at: at(tx + KH_AT.x, TER + 0.43, tz + KH_AT.z), color: C.licorice });
+    B.cyl('gloss', 0.42, 0.36, 0.14, 12, { at: at(tx + KH_AT.x, TER + 0.9, tz + KH_AT.z), color: C.yellow });
+    B.sph('matte', 0.4, 12, 7, { at: at(tx + KH_AT.x, TER + 1.0, tz + KH_AT.z), scale: [1, 0.34, 1], color: C.licoriceRed });
 
     // banners on the wall
     for (let i = 0; i < 6; i++) {
@@ -848,6 +854,54 @@ export function create(ctx, escape) {
   ];
 
   // ═══════════════════════════════════════════════════ interactables ════════
+  // ═══════════════════════════════ THE KING'S HALF (WAVE 4, bridge builder) ═══
+  // Half a MEOW AIR boarding pass on a stool by the Gummy Throne. The Mayor
+  // hands over the other half with the citizenship medal; with both, the flare
+  // at the top of the rainbow bridge calls the jet (escape/ending.js).
+  // Story flag `pass_candy`. One textured quad (one draw call), hidden once taken.
+  const kingsHalf = (() => {
+    const wx = PX + throneAt.x + KH_AT.x, wz = PZ + throneAt.z + KH_AT.z, wy = TER + 1.5;
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+    const g = cv.getContext('2d');
+    const edge = () => { g.beginPath(); g.moveTo(8, 10); g.lineTo(206, 10); for (let k = 0, y = 10; y < 118; y += 12, k++) g.lineTo(k % 2 ? 206 : 220, Math.min(118, y + 6)); g.lineTo(206, 118); g.lineTo(8, 118); g.closePath(); };
+    edge(); g.fillStyle = '#2b2442'; g.fill();
+    g.save(); g.translate(5, 5); g.scale(0.955, 0.92); edge(); g.restore();
+    const gr = g.createLinearGradient(0, 10, 0, 118); gr.addColorStop(0, '#fff1b8'); gr.addColorStop(0.55, '#ffc94a'); gr.addColorStop(1, '#f0a52c');
+    g.fillStyle = gr; g.fill();
+    g.fillStyle = '#ef4f84'; g.fillRect(14, 20, 184, 16);
+    g.fillStyle = '#fff6ec'; g.font = '900 13px "Nunito", sans-serif'; g.textBaseline = 'middle'; g.fillText('BOARDING PASS · HALF', 22, 28.5);
+    g.fillStyle = '#2b2442'; g.font = '900 30px "Baloo 2", "Trebuchet MS", sans-serif'; g.fillText('MEOW AIR', 20, 62);
+    g.font = '800 17px "Nunito", sans-serif'; g.fillText('SEAT 1A · TO: AWAY', 22, 95);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+    const mat = new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.4, roughness: 0.45, metalness: 0.05, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide });
+    const ticket = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.75), mat);
+    ticket.name = 'palace_kings_half';
+    ticket.position.set(wx, wy, wz);
+    ticket.rotation.set(0, Math.PI / 2, 0.0);
+    ticket.rotateX(-0.42);                                            // propped against the pillow, facing the door (+x)
+    ticket.castShadow = true;
+    group.add(ticket);
+    const kh = { x: wx, y: wy, z: wz, ticket, taken: false, entry: null };
+    ctx.colliders.push({ x: wx, z: wz, r: 0.42, h: 1.05 });           // the stool (a low prop you can stand on)
+    const take = (quiet) => {
+      if (kh.taken) return;
+      kh.taken = true; ticket.visible = false;
+      if (kh.entry) kh.entry.enabled = false;
+      if (quiet) return;
+      ctx.systems.particles?.burst?.({ x: wx, y: wy, z: wz, count: 26, color: [0xffd84d, 0xffffff, 0xff8fb6], speed: 3.2, life: 1.1, size: 0.22, gravity: -2, spread: 0.8, shape: 'sparkle', blend: 'add' });
+      ctx.systems.ui?.toast?.('Got: the King\u2019s half of a boarding pass');
+      if (!ctx.systems.story?.get('pass_cat')) ctx.systems.ui?.say?.('Half a boarding pass. MEOW AIR, seat 1A, destination: AWAY. The torn edge has tooth marks. The other half must be somewhere very official.', { speaker: 'The King\u2019s half' });
+    };
+    kh.take = take;
+    interactables.push(kh.entry = {
+      id: 'palace_kings_half', x: wx + 1.3, z: wz, r: 1.9,
+      label: 'Take the King\u2019s half',
+      onInteract(c) { c.systems.story?.set('pass_candy', true); },
+    });
+    ctx.events.on('story:pass_candy', (v) => { if (v) take(false); });
+    return kh;
+  })();
+
   let portOpen = false, doorOpen = false, caveOpen = false;
   const sayLine = (t, speaker) => ctx.systems.ui?.say(t, { speaker, duration: 6 });
 
@@ -934,6 +988,8 @@ export function create(ctx, escape) {
   }
   const api = {
     PX, PZ, GY, TER, CF, PEAK, interiors, cellarDoor,
+    /** WAVE 4: where the King's half of the boarding pass waits ({x,y,z,taken}). */
+    kingsHalf,
     caveDoorPos: { x: PX + caveDoorAt.x, y: CF, z: PZ + CELL.z0 + 1.6 },
     /** Where the cave spits you out (and where you stand to go back). */
     cellarSpawn: { x: PX + CELL_MID.x + 1.6, z: PZ + CELL_MID.z + 0.6 },
@@ -941,6 +997,14 @@ export function create(ctx, escape) {
     update(dt, c) {
       const t = c.state.elapsed;
       const night = 1 - (c.state.daylight ?? 1);
+      // WAVE 4: the King's half glints (a slow gold pulse + a sparkle now and then)
+      if (!kingsHalf.taken) {
+        kingsHalf.ticket.material.emissiveIntensity = 0.32 + 0.22 * (0.5 + 0.5 * Math.sin(t * 2.6));
+        const pp = c.systems.player?.position;
+        if (pp && Math.floor(t / 1.7) !== Math.floor((t - dt) / 1.7) && Math.abs(pp.x - kingsHalf.x) < 20 && Math.abs(pp.z - kingsHalf.z) < 20) {
+          c.systems.particles?.sparkle?.(kingsHalf.x, kingsHalf.y + 0.35, kingsHalf.z, 0xffe38a);
+        }
+      }
       for (const m of matSets) {
         if (m.windowWarm) m.windowWarm.emissiveIntensity = 0.04 + night * 1.3;
         if (m.glowWarm) m.glowWarm.emissiveIntensity = 0.12 + night * 1.8;

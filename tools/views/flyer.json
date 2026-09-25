@@ -1,14 +1,19 @@
 {
  "flyer_pad": {
   "pos": [
-   206.5,
-   9.5
+   217.2,
+   6.1
   ],
-  "az": 3.93,
-  "el": 0.42,
-  "dist": 36,
+  "az": 0.78,
+  "el": 0.55,
+  "dist": 40,
   "time": 12,
-  "frames": 70
+  "frames": 90,
+  "call": {
+   "escape.routes.flyer.debugQuiet": [
+    10
+   ]
+  }
  },
  "flyer_air_strait": {
   "pos": [
@@ -119,6 +124,169 @@
     -65,
     -40,
     -2.26
+   ]
+  }
+ },
+ "flyer_runway_day": {
+  "free": [
+   197.32,
+   8.3
+  ],
+  "y": 4.5,
+  "az": 1.645,
+  "el": 0.6,
+  "dist": 55,
+  "fov": 42,
+  "frames": 150,
+  "call": {
+   "player.teleport": [
+    215.35,
+    9.62
+   ],
+   "escape.routes.flyer.debugQuiet": [
+    10
+   ]
+  },
+  "time": 11
+ },
+ "flyer_runway_dusk": {
+  "free": [
+   197.32,
+   8.3
+  ],
+  "y": 4.5,
+  "az": 1.645,
+  "el": 0.6,
+  "dist": 55,
+  "fov": 42,
+  "frames": 150,
+  "call": {
+   "player.teleport": [
+    215.35,
+    9.62
+   ],
+   "escape.routes.flyer.debugQuiet": [
+    10
+   ],
+   "escape.routes.flyer.debugWatcher": [
+    1
+   ]
+  },
+  "time": 19.6
+ },
+ "flyer_runway_night": {
+  "free": [
+   197.32,
+   8.3
+  ],
+  "y": 4.5,
+  "az": 1.645,
+  "el": 0.6,
+  "dist": 55,
+  "fov": 42,
+  "frames": 150,
+  "call": {
+   "player.teleport": [
+    215.35,
+    9.62
+   ],
+   "escape.routes.flyer.debugQuiet": [
+    10
+   ],
+   "escape.routes.flyer.debugWatcher": [
+    1
+   ]
+  },
+  "time": 22.5
+ },
+ "flyer_watcher_night": {
+  "free": [
+   150,
+   12
+  ],
+  "y": 14,
+  "az": -2.8697,
+  "el": 0.2987,
+  "dist": 108.6,
+  "fov": 55,
+  "frames": 150,
+  "call": {
+   "player.teleport": [
+    215.35,
+    9.62
+   ],
+   "escape.routes.flyer.debugQuiet": [
+    10
+   ],
+   "escape.routes.flyer.debugWatcher": [
+    1
+   ]
+  },
+  "time": 22.5
+ },
+ "flyer_runway_wide": {
+  "free": [
+   170,
+   10
+  ],
+  "y": 20,
+  "az": 1.645,
+  "el": 0.8,
+  "dist": 260,
+  "fov": 42,
+  "time": 12,
+  "frames": 150,
+  "call": {
+   "player.teleport": [
+    217.2,
+    6.1
+   ],
+   "escape.routes.flyer.debugQuiet": [
+    10
+   ]
+  }
+ },
+ "flyer_corridor_debug": {
+  "free": [
+   170,
+   10
+  ],
+  "y": 20,
+  "az": 1.645,
+  "el": 0.8,
+  "dist": 260,
+  "fov": 42,
+  "time": 12,
+  "frames": 90,
+  "call": {
+   "player.teleport": [
+    217.2,
+    6.1
+   ],
+   "escape.routes.flyer.debugCorridorShow": [
+    true
+   ],
+   "escape.routes.flyer.debugQuiet": [
+    10
+   ]
+  }
+ },
+ "flyer_runway_night_game": {
+  "pos": [
+   217.2,
+   6.1
+  ],
+  "az": 1.645,
+  "el": 0.42,
+  "dist": 30,
+  "time": 22.5,
+  "frames": 120,
+  "call": {
+   "escape.routes.flyer.debugQuiet": [
+    10
+   ],
+   "escape.routes.flyer.debugWatcher": [
+    1
    ]
   }
  }

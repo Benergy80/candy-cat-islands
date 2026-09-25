@@ -2,8 +2,20 @@
 // A giant wafer-cone lookout tower, a cherry-on-top monument at the very top,
 // a candy-cane footbridge where the river is born, and a waffle cave (secret)
 // on the north slope.
-import { C, SPRINKLE, windowPane, door, icingDrip, bench, fenceLine, softGlow, lightPool, lamppost, plaque } from './kit.js';
+import { C, SPRINKLE, windowPane, door, doorway, waffleArc, icingDrip, bench, fenceLine, softGlow, lightPool, lamppost, plaque } from './kit.js';
 import * as IN from './interiors.js';
+import { railRun, caneStyle, licoriceStyle, arcPts } from './rails.js';
+
+// The footbridge at the river source (buildRiverBridge): its centre, the unit
+// vector across the river, half its length and its deck's half-width. Shared
+// with summitGrounds(), which keeps its rock-candy drifts off it.
+const BRIDGE = { cx: -170.4, cz: -50.2, ux: 0.79, uz: -0.61, half: 6.4, halfW: 1.45 };
+/** Distance from (x, z) to the bridge's centreline, run on `ext` u past each end (the approaches). */
+function bridgeDist(x, z, ext = 2.0) {
+  const dx = x - BRIDGE.cx, dz = z - BRIDGE.cz;
+  const t = Math.max(-BRIDGE.half - ext, Math.min(BRIDGE.half + ext, dx * BRIDGE.ux + dz * BRIDGE.uz));
+  return Math.hypot(dx - BRIDGE.ux * t, dz - BRIDGE.uz * t);
+}
 
 export function buildPeak(A) {
   const { B, world } = A;
@@ -47,6 +59,11 @@ function buildMonument(A) {
   A.deckRing(X, Z, 0, 5.7, y + 1.05);
   A.deckRing(X, Z, 0, 4.5, y + 2.0);
   A.deckRing(X, Z, 0, 3.4, y + 2.95);
+  // Contract O audit: the summit falls away under the bottom tier (drops up to
+  // 2.2), but the plinth is SOLID out to its drawn edge (the six discs below +
+  // the tier-edge ring after them) — nobody can stand on a tier, so there is no
+  // edge to fall off and no rail. Measured for the table.
+  railRun(A.ctx, B, arcPts(X, Z, 5.55, 0, Math.PI * 2, y + 1.05), { site: 'cherry_monument', edge: 'bottom tier', out: 1, open: 'not standable: the plinth is solid to its edge (tier-edge ring + six r 2.4 discs)' });
   // ── the column, and what is on top of it ─────────────────────────────────
   // ROUND 3: "the cherry must sit ON the tower, no black rod poking out." Both
   // faults were here. The monument carried a 3.4-unit cherry on a 6-unit column
@@ -117,7 +134,47 @@ function buildMonument(A) {
   B.signQuad('peak', 3.3, 1.32, { at: [ppx + Math.sin(pRot) * 0.14, ppy + 2.15, ppz + Math.cos(pRot) * 0.14], rot: [0, pRot, 0] });
   A.collide(ppx, ppz, 0.9);
   A.readSign('peak', ppx + Math.cos(APP) * 1.6, ppz + Math.sin(APP) * 1.6, 3.4, 'Read the summit plaque');
-  for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; A.collide(X + Math.cos(a) * 3.0, Z + Math.sin(a) * 3.0, 2.4); }
+  // The plinth is solid (six fat discs): nobody stands on the tiers. A disc has
+  // no top, so the west one also stood in the lookout's gallery sixteen units
+  // up and shoved you off it into the stairwell (Contract O). They stop being
+  // solid while the visitor is above the cherry — a live rule on `solid`, not an
+  // `h`: an absolute h makes the camera's density pass see a 45-unit pillar.
+  {
+    const top = y + 12.5;
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2, c = { x: X + Math.cos(a) * 3.0, z: Z + Math.sin(a) * 3.0, r: 2.4 };
+      let P = null;
+      Object.defineProperty(c, 'solid', {
+        configurable: true, enumerable: true, set(v) { void v; },
+        get() { if (!P) { P = A.ctx.systems?.player?.position || null; if (!P) return true; } return P.y < top; },
+      });
+      A.ctx.colliders.push(c);
+    }
+    // …and SOLID OUT TO THE TIER EDGE (Contract O re-audit). Between the discs
+    // (they cover to r ≈ 4.5 there) a strip of the bottom tier, r ≈ 4.8–5.7,
+    // could be stood on — one hop from the uphill side — with a 1.3–2.2 drop
+    // off its downhill rim. A ring of short wall boxes on the tier's drawn
+    // edge closes it: no top (solid, never a perch), ≤ 1.2 u long (the camera
+    // never dollies for one), solid below the cherry like the discs — and
+    // never while the visitor is inside the lookout, whose drum stands on the
+    // plinth's west flank: in there the ring would be a wall across his stair.
+    const LX = -181.5, LZ = -57.5, LR2 = 5.6 * 5.6, RE = 5.9, N = 34;
+    const seg = (2 * Math.PI * RE) / N + 0.06;
+    for (let i = 0; i < N; i++) {
+      const a = ((i + 0.5) / N) * Math.PI * 2;
+      const c = { x: X + Math.cos(a) * RE, z: Z + Math.sin(a) * RE, w: 0.3, d: seg, rot: a, box: true, h: 1e4, plinth: 'cherry_monument' };
+      let P = null;
+      Object.defineProperty(c, 'solid', {
+        configurable: true, enumerable: true, set(v) { void v; },
+        get() {
+          if (!P) { P = A.ctx.systems?.player?.position || null; if (!P) return true; }
+          const dx = P.x - LX, dz = P.z - LZ;
+          return P.y < top && dx * dx + dz * dz > LR2;
+        },
+      });
+      A.ctx.colliders.push(c);
+    }
+  }
   // keep the canes off the summit so the silhouette is whole from the path
   A.claimApron(X, Z, 4.2, 19.0, { r: 3.2 });
   summitGrounds(A, X, Z, y, APP);
@@ -157,28 +214,39 @@ function summitGrounds(A, X, Z, y, APP) {
   }
 
   // ── drifts of rock candy pushed up out of the frosting ───────────────────
+  // None on the peak bridge (Contract O re-audit): two of these — r 2.0, no
+  // top — stood on its deck, poking up through the planks. Before the bridge
+  // was railed a walker got shoved round them into the river bed and out; with
+  // the rails holding him on the deck nobody could cross at all. A drift whose
+  // disc comes within 3 u of the bridge or its approaches is not built; its
+  // random draws still are, so every other drift stays exactly where it was.
   const CRYST = [0xffd6e8, 0xd2f7e6, 0xfff0b0, 0xe6d4ff, 0xffffff];
   for (let k = 0; k < 7; k++) {
     const a = (k / 7) * Math.PI * 2 + 0.45, rad = 10.5 + r.range(0, 7);
     const cx = X + Math.cos(a) * rad, cz = Z + Math.sin(a) * rad;
     if (!clearOfTower(cx, cz) || !(world.height(cx, cz) > 0.4)) continue;
+    const keep = bridgeDist(cx, cz) > 2.0 + 3.0;
     for (let i = 0; i < 5; i++) {
       const aa = r.range(0, 6.283), dd = r.range(0.3, 2.3);
       const qx = cx + Math.cos(aa) * dd, qz = cz + Math.sin(aa) * dd;
       const s = r.range(0.42, 1.35);
-      B.cyl('gloss', s * 0.24, s * 0.62, s * 2.5, 6, {
-        at: [qx, world.height(qx, qz) + s * 1.05, qz],
-        rot: [r.range(-0.26, 0.26), r.range(0, 3), r.range(-0.26, 0.26)], color: CRYST[(k + i) % CRYST.length],
-      });
+      const rot = [r.range(-0.26, 0.26), r.range(0, 3), r.range(-0.26, 0.26)];
+      if (keep) B.cyl('gloss', s * 0.24, s * 0.62, s * 2.5, 6, { at: [qx, world.height(qx, qz) + s * 1.05, qz], rot, color: CRYST[(k + i) % CRYST.length] });
     }
-    A.collide(cx, cz, 2.0);
+    if (keep) A.collide(cx, cz, 2.0);
   }
 
   // ── the warming hut: a wafer lean-to with a cocoa urn ────────────────────
+  // Beside the path, just below the bridge's east end, facing the summit. (It
+  // stood at APP + 1.05, 10.6 out — under the peak bridge's east end, where its
+  // striped roof came up through the planks and its r 2.0 collider stood on
+  // the deck, the second of the two walls the railed bridge could not get
+  // round. Nothing nearer the summit is clear of the bridge, the benches, the
+  // banner poles, the tower's stoop and the cave.)
   {
-    const a = APP + 1.05, rad = 10.6;
+    const a = APP + 0.3, rad = 14.4;
     const hx = X + Math.cos(a) * rad, hz = Z + Math.sin(a) * rad, hy = world.height(hx, hz);
-    if (hy > 0.4 && clearOfTower(hx, hz)) {
+    if (hy > 0.4 && clearOfTower(hx, hz) && bridgeDist(hx, hz) > 2.0 + 2.4) {
       const rot = Math.atan2(X - hx, Z - hz);
       const cs2 = Math.cos(rot), sn2 = Math.sin(rot);
       const P = (lx, ly, lz) => [hx + lx * cs2 + lz * sn2, hy + ly, hz - lx * sn2 + lz * cs2];
@@ -258,7 +326,18 @@ function buildLookout(A) {
   });
   const W = E.wall, I = E.in;
 
-  W.waffleCyl(RT, RB, H, 18, { at: [X, y + H / 2, Z], color: C.wafer });
+  // THE DOOR (Contract O) is a real hole in the drum: the wafer wall below the
+  // first hoop band is an ARC with a wedge missing at the door, the band itself
+  // is the lintel, and the drum above it is whole. The clear opening is
+  // LK_W wide (the icing pilasters' inner faces) and runs from the sill to the
+  // underside of the band.
+  const da = Math.PI * 0.35;
+  const LK_W = 1.6, LK_R = 5.0;                        // clear width · the door plane's radius
+  const hBand = H / 6;                                 // the first hoop band (centre)
+  const cutA = Math.asin((LK_W / 2 + 0.15) / LK_R);    // the wedge edge hides behind a pilaster
+  const rBand = RB + (RT - RB) * (hBand / H);
+  waffleArc(W, rBand, RB, hBand, 18, da + cutA, da + Math.PI * 2 - cutA, { at: [X, y + hBand / 2, Z], color: C.wafer, open: true });
+  waffleArc(W, RT, rBand, H - hBand, 18, 0, Math.PI * 2, { at: [X, y + hBand + (H - hBand) / 2, Z], color: C.wafer, vOff: hBand, capTop: true });
   // hoop bands — licorice-red, fat enough to see from the path
   for (let i = 1; i < 6; i++) {
     const t = i / 6, rr = RB + (RT - RB) * t;
@@ -270,32 +349,59 @@ function buildLookout(A) {
     const rr = RB + (RT - RB) * t + 0.2;
     windowPane(W, X + Math.cos(a) * rr, y + H * t, Z + Math.sin(a) * rr, Math.atan2(Math.cos(a), Math.sin(a)), { w: 0.6, h: 0.9, frame: C.icing, pink: i % 2 === 1, sill: false });
   }
-  // door at the base
-  const da = Math.PI * 0.35;
-  const dx = X + Math.cos(da) * (RB - 0.15), dz = Z + Math.sin(da) * (RB - 0.15);
+  // door at the base: pilasters straddling the tapering wall, the licorice
+  // band for a lintel, a gumdrop keystone on the band
+  const dx = X + Math.cos(da) * LK_R, dz = Z + Math.sin(da) * LK_R;
   const dy = world.height(dx, dz);
   const dRot = Math.atan2(Math.cos(da), Math.sin(da));
-  door(B, dx, dy, dz, dRot, { w: 1.3, h: 2.3, frame: C.icing, color: C.chocolate, knob: C.red, leaf: false });
-  E.door({ x: dx, y: dy - 0.02, z: dz, rot: dRot, w: 1.25, h: 2.25, color: C.chocolate, swing: 1, r: 2.6, say: 'The card in the window still says CLOSED FOR COUNTING. The door was never locked.' });
+  const lkH = y + hBand - 0.22 - dy;                  // ground → underside of the band (the pilasters)
+  const leafH = y + hBand - 0.22 - FLOOR;             // SILL → underside of the band: the clear height
+  const lkP = (lx, lz) => [dx + lx * Math.cos(dRot) + lz * Math.sin(dRot), dz - lx * Math.sin(dRot) + lz * Math.cos(dRot)];
+  const o0 = lkP(0, -0.12);
+  doorway(B, o0[0], dy, o0[1], dRot, { w: LK_W, h: lkH, jamb: 0.3, depth: 0.66, frame: C.icing, head: false, arch: false, key: false, baseColor: C.icingMint });
+  { const kp = lkP(0, 0.5); B.sph('gloss', 0.26, 8, 6, { at: [kp[0], y + hBand + 0.08, kp[1]], scale: [1, 0.9, 0.8], color: C.red }); }
+  E.door({ x: dx, y: FLOOR - 0.02, z: dz, rot: dRot, w: LK_W, h: leafH + 0.02, color: C.chocolate, swing: 1, r: 2.6, say: 'The card in the window still says CLOSED FOR COUNTING. The door was never locked.' });
   A.collideRing(X, Z, RB - 0.05, 14, y + H, da, 0.2);
+  // the ring's gap is ~2.4 u and off-centre; the jamb colliders close it to
+  // exactly LK_W, on the pilasters' inner faces, through the wall's thickness
+  for (const s2 of [-1, 1]) {
+    const c = lkP(s2 * (LK_W / 2 + 0.7), 0.3);
+    A.collideBox(c[0], c[1], 1.4, 1.3, dRot, y + H);
+  }
+  // THE STOOP. The summit falls away from the drum, so the door's ground sits
+  // ~0.6 under the floor inside: a wafer sill through the wall at floor level,
+  // a landing, then risers of ≤ 0.3 down to the snow — all walkable decks
+  // (Contract A), so nobody pops half a metre up in the doorway.
+  {
+    const c = lkP(0, 0.38), sillD = 1.5, hh = FLOOR - dy + 0.2;
+    B.waffleBox(LK_W + 0.9, hh, sillD, { at: [c[0], FLOOR - hh / 2, c[1]], rot: [0, dRot, 0], color: C.waferPale });
+    A.deckRRect(c[0], c[1], LK_W + 0.1, sillD, dRot, FLOOR);
+    const gEnd = world.height(...lkP(0, 2.9));
+    const rise = FLOOR - gEnd, n = Math.max(0, Math.round(rise / 0.28) - 1), dep = n ? 1.8 / n : 0;
+    for (let k = 1; k <= n; k++) {
+      const top = FLOOR - (k * rise) / (n + 1), q = lkP(0, 1.13 + (k - 0.5) * dep);
+      const gq = world.height(q[0], q[1]), sh = Math.max(0.12, top - gq + 0.2);
+      B.waffleBox(2.4 - k * 0.12, sh, dep + 0.02, { at: [q[0], top - sh / 2, q[1]], rot: [0, dRot, 0], color: k % 2 ? C.wafer : C.waferPale });
+      A.deckRRect(q[0], q[1], 2.4 - k * 0.12, dep, dRot, top);
+    }
+  }
   A.claimCircle(X, Z, RB + 0.3);
   A.claimApron(X, Z, RB + 1.6, 15.5, { r: 3.2 });
 
   // ── platform: an ANNULUS, so the stair can come up through the middle ─────
-  for (let i = 0; i < 16; i++) {
-    const a = (i / 16) * Math.PI * 2, r0 = RT + 0.15, r1 = 4.35, rm = (r0 + r1) / 2;
-    B.waffleBox(r1 - r0, 0.32, 2 * Math.PI * rm / 16 + 0.3, { at: [X + Math.cos(a) * rm, PY + 0.16, Z + Math.sin(a) * rm], rot: [0, -a, 0], color: i % 2 ? C.waferPale : C.wafer });
+  // GALLERY_R1 5.1, not 4.35 (Contract O): at 4.35 the walk was 0.7 wide —
+  // one visitor exactly — and a rail on either edge left nowhere to stand. It
+  // still sits well under the roof's 5.7 eave.
+  const GR1 = GALLERY_R1;
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 20) * Math.PI * 2, r0 = RT + 0.15, r1 = GR1, rm = (r0 + r1) / 2;
+    B.waffleBox(r1 - r0, 0.32, 2 * Math.PI * rm / 20 + 0.3, { at: [X + Math.cos(a) * rm, PY + 0.16, Z + Math.sin(a) * rm], rot: [0, -a, 0], color: i % 2 ? C.waferPale : C.wafer });
   }
-  B.tor('gloss', 4.35, 0.2, 6, 22, { at: [X, PY + 0.3, Z], rot: [Math.PI / 2, 0, 0], color: C.icingPink });
+  B.tor('gloss', GR1, 0.2, 6, 26, { at: [X, PY + 0.3, Z], rot: [Math.PI / 2, 0, 0], color: C.icingPink });
   B.tor('gloss', RT + 0.15, 0.14, 5, 16, { at: [X, PY + 0.36, Z], rot: [Math.PI / 2, 0, 0], color: C.icingPink });
-  A.deckRing(X, Z, RT + 0.25, 4.15, PLAT);
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2;
-    const px = X + Math.cos(a) * 4.1, pz = Z + Math.sin(a) * 4.1;
-    B.stripeCyl(0.12, 0.13, 1.1, { at: [px, PY + 0.85, pz], variant: 0, seg: 6 });
-    B.sph('gloss', 0.18, 6, 5, { at: [px, PY + 1.42, pz], color: SPRINKLE[i % SPRINKLE.length] });
-  }
-  B.tor('licorice', 4.1, 0.09, 5, 24, { at: [X, PY + 1.3, Z], rot: [Math.PI / 2, 0, 0], color: C.licorice });
+  A.deckRing(X, Z, RT + 0.25, GR1 - 0.15, PLAT);
+  // (the gallery's railing — outer ring and stairwell — is built with the
+  // stair's, in lookoutRails(), so they meet at the stair head)
   for (let i = 0; i < 4; i++) {
     const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
     B.stripeCyl(0.15, 0.16, 2.4, { at: [X + Math.cos(a) * 3.5, PY + 1.5, Z + Math.sin(a) * 3.5], variant: 2, seg: 7 });
@@ -330,8 +436,13 @@ function buildLookout(A) {
   B.sph('gloss', 0.3, 8, 6, { at: [X + 1.85, PY + 12.7, Z], color: 0xa8f07f });
   A.mark('cherry_tower', X, PY + 7.9, Z);
   // a scoop of ice cream leaning on the rail, because it is a cone after all
-  B.sph('icing', 1.5, 12, 9, { at: [X + 2.6, PY + 1.4, Z - 2.0], scale: [1, 0.85, 1], color: C.icingMint });
-  B.sph('icing', 1.0, 10, 8, { at: [X + 3.0, PY + 2.3, Z - 2.5], color: C.icingMint });
+  // (dropped on the ROOF now: on the gallery it sat across the whole walk and
+  // you walked through it — Contract O widened the walk and railed it)
+  {
+    const sa = Math.atan2(-2.0, 2.6), sr = 4.3, ry = PY + 2.75 + ((5.7 - sr) / 5.54) * 3.1;
+    B.sph('icing', 1.1, 12, 9, { at: [X + Math.cos(sa) * sr, ry + 0.55, Z + Math.sin(sa) * sr], scale: [1, 0.8, 1], color: C.icingMint });
+    B.sph('icing', 0.72, 10, 8, { at: [X + Math.cos(sa + 0.12) * (sr - 0.3), ry + 1.35, Z + Math.sin(sa + 0.12) * (sr - 0.3)], color: C.icingMint });
+  }
   // a big wind-spinner off the eaves (motion on the skyline)
   A.inst.spinners.push({ x: X + 4.4, y: PY + 3.2, z: Z + 1.2, ry: 0.4, ph: 0, spd: 1.8, s: 2.1, color: C.yellow });
 
@@ -351,9 +462,9 @@ function buildLookout(A) {
       at: [X + Math.cos(a) * rc, ty, Z + Math.sin(a) * rc], rot: [0, -a, 0],
       color: i % 2 ? C.wafer : C.waferPale,
     });
-    if (i % 3 === 0) I.cyl('licorice', 0.05, 0.05, 0.85, 5, { at: [X + Math.cos(a) * (rc + hw - 0.12), ty + 0.5, Z + Math.sin(a) * (rc + hw - 0.12)], color: C.licorice });
   }
   A.stairSpiral(X, Z, da, TURNS, rA, rB, HALF, FLOOR, PLAT, HALF_B);
+  lookoutRails(A, I, { X, Z, da, TURNS, rA, rB, HALF, HALF_B, FLOOR, PLAT, RT, NT });
   // the newel the stair winds around
   I.cyl('matte', 0.3, 0.34, H, 8, { at: [X, FLOOR + H / 2, Z], color: C.waferDark });
   // the counting: a slate, a stub of chalk, and a crate to sit on
@@ -380,12 +491,101 @@ function buildLookout(A) {
   E.finish();
 }
 
+/**
+ * HANDRAILS (Contract O) — the lookout. The gallery sixteen units up had a
+ * ring of canes and a licorice hoop with no collider under them, the hole the
+ * stair comes up through had no rail at all, and the stair itself (treads out
+ * to the cone wall, three turns of them stacked in the drum) had licorice
+ * balusters every third tread and nothing to stop you stepping through the
+ * wall between them. Now:
+ *   · the gallery: sixteen canes (≈ 1.6 apart) and a striped rail all round;
+ *   · the stairwell: a rail round the hole, open where the stair arrives;
+ *   · the stair: licorice balusters and a red licorice handrail + mid rail up
+ *     the wall side, open over the last stride where it meets the gallery,
+ *     a rail across its head, and a collider for the newel.
+ * Stacked flights share an x,z footprint, so every one of these colliders is
+ * GATED to the level it guards (rails.js).
+ */
+function lookoutRails(A, I, G) {
+  const { B, ctx } = A;
+  const { X, Z, da, TURNS, rA, rB, HALF, HALF_B, FLOOR, PLAT, RT, NT } = G;
+  const total = TURNS * Math.PI * 2, aTop = da + total;
+  const at = (u) => { const t = u / total; return { y: FLOOR + (PLAT - FLOOR) * t, rc: rA + (rB - rA) * t, hw: HALF + (HALF_B - HALF) * t }; };
+  // the highest tread under (x, z) below `yy` (else the drum floor)
+  const stairBelow = (x, z, yy) => {
+    const dx = x - X, dz = z - Z, r = Math.hypot(dx, dz);
+    let a = Math.atan2(dz, dx) - da; a = ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    let best = FLOOR;
+    for (let u = a; u <= total; u += Math.PI * 2) {
+      const s = at(u);
+      if (Math.abs(r - s.rc) <= s.hw && s.y < yy + 0.3 && s.y > best) best = s.y;   // level with the deck counts: you step across
+    }
+    return best;
+  };
+  const RO = GALLERY_R1 - 0.25, RH = RT + 0.1;           // gallery rail · stairwell rail (on the lip)
+  const inRing = (x, z) => { const r = Math.hypot(x - X, z - Z); return r >= RT + 0.05 && r <= GALLERY_R1; };
+  // off the stair's wall side: the flight below — or the gallery, once it is a stride away
+  const offStair = (x, z, yy) => (inRing(x, z) && PLAT - yy <= 1.2 ? PLAT : stairBelow(x, z, yy));
+  const base = { site: 'lookout_tower', gate: true };
+
+  // the gallery: all round
+  railRun(ctx, B, arcPts(X, Z, RO, 0, Math.PI * 2, PLAT), { ...base, edge: 'gallery outer', out: 1, force: true, style: caneStyle({ variant: 0 }) });
+  // the stairwell: measured, so it opens where the stair arrives
+  const well = railRun(ctx, B, arcPts(X, Z, RH, aTop, aTop + Math.PI * 2, PLAT), { ...base, edge: 'gallery stairwell', out: -1, below: stairBelow, style: caneStyle({ variant: 0 }), note: 'open where the stair arrives; the stair-head lip fills tread → gallery there' });
+  // THE STAIR HEAD'S LIP (Contract O re-audit). Over that opening the top
+  // treads end at r ≈ 2.9–3.1 and the gallery starts at 3.45: a 0.4-unit
+  // sliver of air along the whole unrailed arc, and anybody who walked along
+  // it rather than straight across dropped sixteen units to the drum floor.
+  // The treads now run on out to the gallery over the opening — a wafer lip
+  // on the stair's own helix (walkable: deckSpiral, so it is exactly as high
+  // as the tread beside it), from just past the stairwell rail's last post to
+  // the head of the stair — and the gap is gone. The lowest point of the lip is
+  // the tread there, ≈ 1.05 under the gallery: a step down, not a fall.
+  {
+    let nOpen = 0;
+    for (let i = well.drops.length - 1; i >= 0 && well.drops[i][0] === '·'; i--) nOpen++;
+    if (nOpen) {
+      const a1 = aTop, a0 = aTop - (Math.PI * 2 * nOpen) / well.spans - 0.06;
+      const yAt = (a) => FLOOR + (PLAT - FLOOR) * ((a - da) / total);
+      A.deckSpiral(X, Z, 2.8, RT + 0.3, a0, a1 - a0, yAt(a0), PLAT);
+      // drawn as the treads are drawn (one wafer board per tread, at the
+      // tread's own height), from the tread's end out under the gallery's slab
+      const R0 = 2.75, R1 = RT + 0.2, rm = (R0 + R1) / 2, step = total / NT;
+      for (let i = Math.ceil((a0 - da) / step - 0.5); i <= NT; i++) {
+        const a = da + i * step, ty = FLOOR + (PLAT - FLOOR) * (i / NT);
+        const w = Math.min(a1, a + step / 2) - Math.max(a0, a - step / 2);
+        if (w <= 0.02) continue;
+        const am = (Math.min(a1, a + step / 2) + Math.max(a0, a - step / 2)) / 2;
+        I.waffleBox(R1 - R0, 0.16, w * rm + 0.12, {
+          at: [X + Math.cos(am) * rm, ty, Z + Math.sin(am) * rm], rot: [0, -am, 0],
+          color: i % 2 ? C.wafer : C.waferPale,
+        });
+      }
+    }
+  }
+  // the stair's wall side, its head, the newel
+  const lic = licoriceStyle();
+  const pts = [];
+  for (let k = 0, n = 60; k <= n; k++) {
+    const u = total * (k / n), s = at(u), r = s.rc + s.hw - 0.12, a = da + u;
+    pts.push([X + Math.cos(a) * r, Z + Math.sin(a) * r, s.y]);
+  }
+  railRun(ctx, I, pts, { ...base, edge: 'interior stair, wall side', out: 1, mid: true, lead: 1, leadBack: true, below: offStair, style: lic });
+  const top = at(total);
+  railRun(ctx, I, [[X + Math.cos(aTop) * 0.4, Z + Math.sin(aTop) * 0.4, PLAT], [X + Math.cos(aTop) * RH, Z + Math.sin(aTop) * RH, PLAT]],
+    { ...base, edge: 'interior stair, head', out: -1, force: true, below: stairBelow, style: lic });
+  void top;
+  ctx.colliders.push({ x: X, z: Z, r: 0.36 });            // the newel
+}
+
+const GALLERY_R1 = 5.1;
+
 // ── candy-cane footbridge at the river source ────────────────────────────────
 function buildRiverBridge(A) {
   const { B, world } = A;
-  const CX = -170.4, CZ = -50.2;
-  const px = 0.79, pz = -0.61;     // across the river
-  const half = 6.4;
+  const CX = BRIDGE.cx, CZ = BRIDGE.cz;
+  const px = BRIDGE.ux, pz = BRIDGE.uz;     // across the river
+  const half = BRIDGE.half;
   const ax = CX - px * half, az = CZ - pz * half;
   const bx = CX + px * half, bz = CZ + pz * half;
   const yA = world.height(ax, az) + 0.55, yB = world.height(bx, bz) + 0.55;
@@ -400,12 +600,16 @@ function buildRiverBridge(A) {
     const yy = yA + (yB - yA) * t + crown * Math.sin(Math.PI * t);
     B.waffleBox(3.6, 0.22, (half * 2) / N + 0.12, { at: [x, yy, z], rot: [0, rotY, 0], color: i % 2 ? C.wafer : C.waferPale });
   }
-  for (const s of [-1, 1]) for (let i = 0; i <= 6; i++) {
-    const t = i / 6;
-    const x = ax + (bx - ax) * t - pz * s * 1.7, z = az + (bz - az) * t + px * s * 1.7;
-    const yy = yA + (yB - yA) * t + crown * Math.sin(Math.PI * t);
-    B.stripeCyl(0.17, 0.19, 1.5, { at: [x, yy + 0.75, z], variant: 0, seg: 7 });
-    B.sph('gloss', 0.3, 7, 6, { at: [x, yy + 1.58, z], color: SPRINKLE[i % SPRINKLE.length] });
+  // HANDRAILS (Contract O): the canes used to stand OUTSIDE the deck (±1.7)
+  // with a red rail inside them (±1.4) and no collider; they now stand on the
+  // rail line, ≈ 1.6 apart, and carry colliders. Gated: the river bed runs under.
+  for (const s of [-1, 1]) {
+    const pts = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8;
+      pts.push([ax + (bx - ax) * t - pz * s * 1.4, az + (bz - az) * t + px * s * 1.4, yA + (yB - yA) * t + crown * Math.sin(Math.PI * t)]);
+    }
+    railRun(A.ctx, B, pts, { site: 'peak_bridge', edge: s > 0 ? 'east rail' : 'west rail', out: -s, force: true, gate: true, style: caneStyle({ variant: 0, postR: 0.13, top: C.licoriceRed }) });
   }
   // A CANDY-CANE ARCH over the crown of the bridge. From the approach the
   // bridge is a flat ribbon lying in white snow and reads as nothing at all;
@@ -423,16 +627,19 @@ function buildRiverBridge(A) {
     B.sph('gloss', 0.5, 9, 7, { at: [CX, my + 6.7, CZ], color: C.red });
     for (const s of [-1, 1]) B.sph('gloss', 0.34, 7, 6, { at: [CX - pz * s * 2.0, my + 4.75, CZ + px * s * 2.0], color: s > 0 ? C.yellow : C.teal });
   }
-  // rails follow the arch
-  for (const s of [-1, 1]) for (let i = 0; i < 12; i++) {
-    const t0 = i / 12, t1 = (i + 1) / 12, tm = (t0 + t1) / 2;
-    const x = ax + (bx - ax) * tm - pz * s * 1.4, z = az + (bz - az) * tm + px * s * 1.4;
-    const y0 = yA + (yB - yA) * t0 + crown * Math.sin(Math.PI * t0);
-    const y1 = yA + (yB - yA) * t1 + crown * Math.sin(Math.PI * t1);
-    const seg = (half * 2) / 12;
-    B.box('matte', 0.15, 0.15, seg + 0.1, { at: [x, (y0 + y1) / 2 + 1.05, z], rot: [-Math.atan2(y1 - y0, seg), rotY, 0], color: C.licoriceRed });
+  A.deckSeg(ax, az, bx, bz, BRIDGE.halfW, yA, yB, crown);
+  // NOTHING STANDS ON THE DECK (Contract O re-audit). Vegetation is placed
+  // before architecture; the monument's apron then blanks any plant under it —
+  // its instance, not its collider — so an invisible rock-candy crystal (r 0.8,
+  // its top 0.7 over the planks) stood on the walk by the west end. Disarm any
+  // foreign circle that reaches in between the rails: the rule
+  // candy/architecture.js applies to its rooms and doorways.
+  for (const c of A.ctx.colliders) {
+    if (!c || c.box || c.rail || !(c.r > 0) || Math.abs(c.x - CX) > half + 4 || Math.abs(c.z - CZ) > half + 4) continue;
+    const dx = c.x - ax, dz = c.z - az, t = dx * px + dz * pz;
+    if (t < -0.5 || t > half * 2 + 0.5 || Math.abs(-dx * pz + dz * px) >= 1.28 + c.r) continue;
+    if (c.solid !== false) c.solid = false;
   }
-  A.deckSeg(ax, az, bx, bz, 1.45, yA, yB, crown);
   A.readSign('bridge', bx + px * 1.6, bz + pz * 1.6, 2.8, 'Read the bridge sign');
   B.stripeCyl(0.1, 0.12, 1.8, { at: [bx + px * 1.8, world.height(bx + px * 1.8, bz + pz * 1.8) + 0.9, bz + pz * 1.8], variant: 1, seg: 6 });
   plaque(B, 'bridge', 1.1, 0.8, { at: [bx + px * 1.82, world.height(bx + px * 1.8, bz + pz * 1.8) + 2.1, bz + pz * 1.82], rot: [0, rotY + Math.PI / 2, 0] });
@@ -462,6 +669,9 @@ function buildReveal(A) {
   B.waffleCyl(3.3, 3.5, 0.5, 12, { at: [x, y + 0.25, z], color: C.waferPale });
   B.tor('icing', 3.3, 0.16, 5, 20, { at: [x, y + 0.48, z], rot: [Math.PI / 2, 0, 0], color: C.icingPink });
   A.deckRing(x, z, 0, 3.2, y + 0.5);
+  // HANDRAIL (Contract O): the slope falls away under the terrace's downhill
+  // side (up to ~1.5); a candy-cane rail there, measured, open on the road side
+  railRun(A.ctx, B, arcPts(x, z, 3.05, 0, Math.PI * 2, y + 0.5), { site: 'peak_viewpoint', edge: 'terrace rim', out: 1, gate: true, lead: 1, style: caneStyle({ variant: 1 }) });
   // two candy-cane posts framing the summit like a gunsight
   const fx = Math.cos(dir + Math.PI / 2), fz = Math.sin(dir + Math.PI / 2);
   for (const s of [-1, 1]) {

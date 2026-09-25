@@ -41,6 +41,7 @@ import {
   B as PB, paint, place, colorGlowMat, nightSign, poolMesh, decorTris, rockUnder, clearanceAt,
 } from './parts.js';           // vehicles' kit; shared on purpose
 import { clearanceClaim } from './ride.js';
+import { railRun, ropeStyle } from '../candy/architecture/rails.js';
 
 const CX = 1400, CZ = 0;            // diorama origin
 // CORRIDOR FLOOR DATUM. Two hard engine limits pin this number:
@@ -462,6 +463,33 @@ export function create(ctx, escape) {
     const far = dir > 0 ? p.z1 + 1.7 : p.z0 - 1.7;
     B.box('matteFlat', p.hw * 2 + 3.2, WALL_H + 1.2, 1.8, { at: at(p.x, top + (WALL_H + 1.2) / 2 - 0.5, far), color: ROCK[2] });
     wallCol(p.x, far, p.hw * 2 + 3.2, 1.8, 0, top + WALL_H + 2.4);
+  }
+
+  // ── HANDRAILS (Contract O): the two end stairs ────────────────────────────
+  // Each stair climbs ~3 units out of its chamber to the landing under the
+  // hatch/door, and its sides were open: step off the top third and you drop
+  // onto the chamber floor. The landings were already walled by the rock
+  // cheeks above; the stairs now get rope and licorice stakes up both sides,
+  // from where they stand more than 1.2 over the chamber to the cheeks, with a
+  // second rope lower down. Nothing walks under a solid stair, so the
+  // colliders are plain (never gated).
+  {
+    const rope = ropeStyle({ cap: RIM });
+    const flights = [
+      // [pad, x inset, z from, z to, chamber floor, name]
+      [pads[0], 2.8, pads[0].z1 - 0.2, pads[1].z1 + 0.4, catY, 'cat-end stair'],
+      [pads[2], 2.62, pads[2].z0 + 0.2, pads[3].z0 - 0.4, palY, 'palace-end stair'],
+    ];
+    for (const [p, inset, zFrom, zTo, floorY, nm] of flights) {
+      const yAt = (lz) => p.yA + (p.yB - p.yA) * ((lz - p.z0) / (p.z1 - p.z0));
+      const up = zTo > zFrom ? 1 : -1;                       // direction of travel along z
+      for (const sd of [-1, 1]) {
+        const lx = p.x + sd * inset;
+        const pts = [[CX + lx, CZ + zFrom, yAt(zFrom)], [CX + lx, CZ + zTo, yAt(zTo)]];
+        // travelling +z the right-hand side is +x (rails.js): out = +1 there
+        railRun(ctx, B, pts, { site: 'undersea_cave', edge: `${nm}, ${sd * up > 0 ? 'right' : 'left'} side`, out: sd * up, style: rope, mid: true, lead: 1, below: () => floorY });
+      }
+    }
   }
 
   // ═══════════════════════════════════════════════ CAT END (the hatch) ══════

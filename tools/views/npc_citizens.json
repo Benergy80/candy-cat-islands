@@ -1,130 +1,20 @@
 {
- "npc_cit_day_square": {
-  "pos": [
-   148,
-   22
-  ],
-  "free": [
-   154.5,
-   10.5
-  ],
-  "y": 6.8,
-  "az": 0.8,
-  "el": 0.78,
-  "dist": 28,
-  "time": 12,
-  "frames": 60
- },
- "npc_cit_night_street": {
-  "pos": [
-   116,
-   1
-  ],
-  "az": 0.8,
-  "el": 0.62,
-  "dist": 31,
-  "time": 22,
-  "frames": 90
- },
- "npc_cit_night_close": {
-  "pos": [
-   112,
-   6
-  ],
-  "free": [
-   114,
-   1
-  ],
-  "y": 5.6,
-  "az": 0.9,
-  "el": 0.7,
-  "dist": 24,
-  "time": 22.5,
-  "frames": 90
- },
- "npc_cit_gym_deck": {
-  "pos": [
-   190,
-   -12
-  ],
-  "free": [
-   194,
-   -27
-  ],
-  "y": 7.2,
-  "az": 2.4,
-  "el": 0.75,
-  "dist": 18,
-  "time": 12,
-  "frames": 40
- },
- "npc_cit_night_gym_top": {
-  "free": [
-   203,
-   -18
-  ],
-  "y": 6.5,
-  "az": 0.6,
-  "el": 1.2,
-  "dist": 22,
-  "time": 22,
-  "frames": 150
- },
- "npc_cit_night_street_top": {
-  "free": [
-   132,
-   0
-  ],
-  "y": 6.5,
-  "az": 0.6,
-  "el": 1.2,
-  "dist": 26,
-  "time": 22,
-  "frames": 150
- },
- "npc_cit_night_welcome_bench": {
-  "free": [
-   80,
-   23
-  ],
-  "y": 5.4,
-  "az": 0.75,
-  "el": 0.72,
-  "dist": 17,
-  "time": 22,
-  "frames": 300
- },
- "npc_cit_night_square": {
-  "pos": [
-   150,
-   14
-  ],
-  "az": 0.8,
-  "el": 0.62,
-  "dist": 31,
-  "time": 22.3,
-  "frames": 300
- },
- "npc_cit_night_town_overview": {
-  "free": [
-   125,
-   8
-  ],
-  "az": 0.7,
-  "el": 0.95,
-  "dist": 75,
-  "time": 22,
-  "frames": 300
- },
- "npc_cit_night_ring": {
-  "pos": [
-   116,
-   1
-  ],
-  "az": 1.57,
-  "el": 0.8,
-  "dist": 30,
-  "time": 22.2,
-  "frames": 240
- }
+  "npc_cit_day_square": {"pos": [148, 22], "free": [154.5, 10.5], "y": 6.8, "az": 0.8, "el": 0.78, "dist": 28, "time": 12, "frames": 60},
+  "npc_cit_night_street": {"pos": [116, 1], "az": 0.8, "el": 0.62, "dist": 31, "time": 22, "frames": 90},
+  "npc_cit_night_close": {"pos": [112, 6], "free": [114, 1], "y": 5.6, "az": 0.9, "el": 0.7, "dist": 24, "time": 22.5, "frames": 90},
+  "npc_cit_gym_deck": {"pos": [190, -12], "free": [194, -27], "y": 7.2, "az": 2.4, "el": 0.75, "dist": 18, "time": 12, "frames": 40},
+  "npc_cit_night_gym_top": {"free": [203, -18], "y": 6.5, "az": 0.6, "el": 1.2, "dist": 22, "time": 22, "frames": 150},
+  "npc_cit_night_street_top": {"free": [132, 0], "y": 6.5, "az": 0.6, "el": 1.2, "dist": 26, "time": 22, "frames": 150},
+  "npc_cit_night_welcome_bench": {"free": [80, 23], "y": 5.4, "az": 0.75, "el": 0.72, "dist": 17, "time": 22, "frames": 300},
+  "npc_cit_night_square": {"pos": [150, 14], "az": 0.8, "el": 0.62, "dist": 31, "time": 22.3, "frames": 300},
+  "npc_cit_night_town_overview": {"free": [125, 8], "az": 0.7, "el": 0.95, "dist": 75, "time": 22, "frames": 300},
+  "npc_cit_night_ring": {"pos": [116, 1], "az": 1.57, "el": 0.8, "dist": 30, "time": 22.2, "frames": 240},
+  "tigerraid_gumdrop_stalk": {"pos": [-140, 40], "az": 1.3, "el": 0.5, "dist": 22, "time": 23, "frames": 75, "call": {"catCitizens.raidDebug": {"phase": "hunt", "n": 4, "r": 7}}},
+  "tigerraid_cross_night": {"free": [-14, -6], "y": 30, "az": -0.62, "el": 0.1, "dist": 100, "time": 21.0, "frames": 40, "call": {"catCitizens.raidDebug": {"phase": "cross", "t": 0.74, "n": 5, "park": [-55, 21]}}},
+  "tigerraid_cross_from_pier": {"free": [-31, -2], "y": 20, "az": -0.12, "el": 0.06, "dist": 44, "time": 21.0, "frames": 40, "call": {"catCitizens.raidDebug": {"phase": "cross", "t": 0.78, "n": 5, "park": [-55, 21], "frame": {"frames": 40, "dist": 15, "el": 0.08, "az": 0.5, "fov": 34}}}},
+  "tigerraid_carry_bridge": {"pos": [-48, 25], "time": 23, "frames": 90, "call": {"catCitizens.raidDebug": {"phase": "carry", "t": 0.3, "n": 4}}},
+  "tigerraid_dawn_home": {"free": [16, -8], "y": 24, "az": 0.66, "el": 0.1, "dist": 44, "time": 5.9, "frames": 50, "call": {"catCitizens.raidDebug": {"phase": "retreat", "n": 5, "t": 0.45, "park": [-55, 21], "frame": {"frames": 50, "who": 2, "dist": 17, "el": 0.05, "az": 1.35, "fov": 34}}}},
+  "tigerraid_pier_start": {"pos": [-47, 19], "az": -1.75, "el": 0.56, "dist": 22, "time": 23, "frames": 150, "call": {"catCitizens.raidDebug": {"phase": "hunt", "n": 4, "r": 8}}},
+  "tigerraid_cupcake_ring": {"pos": [-74, -34], "az": 2.75, "el": 0.66, "dist": 25, "time": 23, "frames": 60, "call": {"catCitizens.raidDebug": {"phase": "hunt", "n": 4, "r": 9}}},
+  "tigerraid_under_deck": {"pos": [-117.6, 39.2], "time": 23, "frames": 60, "call": {"catCitizens.raidDebug": {"phase": "hide", "az": 2.88, "dist": 9}}}
 }

@@ -252,6 +252,24 @@ function kerbSpot(ctx, claims, pathId, t0, t1, need, offsets = [3.0, 4.3, 5.7, 7
   return best;
 }
 
+/**
+ * clearance() that also sees BOX colliders (oriented, rot = −yaw, the ground
+ * core's convention). clearance() reads c.r only, so a box (no r) gave NaN and
+ * never counted: Whisker Heights' picket fences, garden walls and the Guest
+ * House are all boxes, and the guest-room search walked straight into them.
+ */
+function clearanceBoxes(ctx, x, z, extra = null) {
+  let m = clearance(ctx, x, z, extra);
+  for (const c of (ctx.colliders || [])) {
+    if (!c || c.r != null || c.w == null || c.d == null) continue;
+    const rot = c.rot || 0, cs = Math.cos(rot), sn = Math.sin(rot), dx = x - c.x, dz = z - c.z;
+    const lx = dx * cs + dz * sn, lz = -dx * sn + dz * cs;
+    const d = Math.hypot(Math.max(Math.abs(lx) - c.w / 2, 0), Math.max(Math.abs(lz) - c.d / 2, 0));
+    if (d < m) m = d;
+  }
+  return m;
+}
+
 /** Widest genuinely-open patch near (cx,cz) — used when a road kerb is not enough. */
 function freeSpot(ctx, claims, cx, cz, rMax, need) {
   let best = null;
@@ -263,7 +281,7 @@ function freeSpot(ctx, claims, cx, cz, rMax, need) {
       if (ctx.world.height(x, z) < 1.8 || ctx.world.slope(x, z) > 0.25) continue;
       if (ctx.world.nearestPath(x, z, 'cat').d < 2.8) continue;
       if (blocksSign(x, z)) continue;
-      const cl = clearance(ctx, x, z, claims);
+      const cl = clearanceBoxes(ctx, x, z, claims);
       if (cl < need) continue;
       const score = Math.min(cl, need + 4) - r * 0.055;
       if (!best || score > best.score) best = { x, z, cl, score, r };
@@ -343,17 +361,42 @@ export function buildScenery(ctx) {
   kerb('busStop',   'cat_main',       0.57, 0.70, 2.9, 2.5);   // 3.8-wide shelter
   addSignFace(SPOTS.busStop.x - Math.sin(SE) * 0.7, SPOTS.busStop.z - Math.cos(SE) * 0.7, SE, 2.6, 1.8);
 
-  // ── the guest room needs a garden-sized gap in the built-out Heights ──────
+  // ── the guest room: IN THE GUEST HOUSE (Contracts O + N) ─────────────────
+  // catArchitecture builds the Guest House around "your" bed (outskirts.js
+  // buildGuestHouse; interiors.js guestInterior leaves the middle of the room
+  // for it) and the scruff-carry ends at that house's door, so when the house
+  // is there the guest room moves in: its walls, roof and door are the house's,
+  // and the bed goes against the back wall beside the interior's bedside
+  // cabinet (room-local lx 2.0). The free-ground search is only the fallback.
+  // It used to count circle colliders only, drifted the nook out of the house
+  // and into the garden of the cat house at (201, 48), and left a picket fence
+  // across its open front.
+  let guestHost = null;
   {
-    const s = freeSpot(ctx, claims, 178, 48, 34, 4.6) || freeSpot(ctx, claims, 178, 48, 40, 3.4);
-    if (s) {
-      const dx = SPOTS.bed.x - SPOTS.guestNook.x, dz = SPOTS.bed.z - SPOTS.guestNook.z;
-      SPOTS.guestNook.x = +s.x.toFixed(2); SPOTS.guestNook.z = +s.z.toFixed(2);
-      SPOTS.bed.x = +(s.x + dx).toFixed(2); SPOTS.bed.z = +(s.z + dz).toFixed(2);
+    const room = (ctx.systems?.catArchitecture?.interiors || []).find((r) => r && r.id === 'guest');
+    if (room && Number.isFinite(room.x) && Number.isFinite(room.z) && Number.isFinite(room.floorY) && room.w > 5 && room.d > 5) {
+      const ry = room.rot || 0, c = Math.cos(ry), s = Math.sin(ry);
+      const hw = room.w / 2, hd = room.d / 2;
+      // room-local (lx along the front wall, lz out of it) → world, catArchitecture's frame()
+      const wx = (lx, lz) => room.x + lx * c + lz * s, wz = (lx, lz) => room.z - lx * s + lz * c;
+      const BED_LX = Math.min(0.35, hw - 1.6), BED_LZ = -hd + 1.7;   // 3.0 long, headboard on the back wall
+      guestHost = { x: room.x, z: room.z, ry, floorY: room.floorY, hw, hd, wx, wz, bedLx: BED_LX, bedLz: BED_LZ };
+      SPOTS.guestNook.x = +room.x.toFixed(2); SPOTS.guestNook.z = +room.z.toFixed(2);
+      SPOTS.bed.x = +wx(BED_LX, BED_LZ).toFixed(2); SPOTS.bed.z = +wz(BED_LX, BED_LZ).toFixed(2);
+      claims.push({ x: SPOTS.guestNook.x, z: SPOTS.guestNook.z, r: Math.hypot(hw, hd) + 0.5 });
+      moves.push({ key: 'guestNook', at: [SPOTS.guestNook.x, SPOTS.guestNook.z], host: 'guest', need: 0, hard: 0, moved: 0,
+        clear: +clearanceBoxes(ctx, SPOTS.guestNook.x, SPOTS.guestNook.z, []).toFixed(2) });
+    } else {
+      const s = freeSpot(ctx, claims, 178, 48, 34, 4.6) || freeSpot(ctx, claims, 178, 48, 40, 3.4);
+      if (s) {
+        const dx = SPOTS.bed.x - SPOTS.guestNook.x, dz = SPOTS.bed.z - SPOTS.guestNook.z;
+        SPOTS.guestNook.x = +s.x.toFixed(2); SPOTS.guestNook.z = +s.z.toFixed(2);
+        SPOTS.bed.x = +(s.x + dx).toFixed(2); SPOTS.bed.z = +(s.z + dz).toFixed(2);
+      }
+      claims.push({ x: SPOTS.guestNook.x, z: SPOTS.guestNook.z, r: 4.6 });
+      moves.push({ key: 'guestNook', at: [SPOTS.guestNook.x, SPOTS.guestNook.z], need: 4.6, hard: 3.9, moved: 0,
+        clear: +clearanceBoxes(ctx, SPOTS.guestNook.x, SPOTS.guestNook.z, []).toFixed(2) });
     }
-    claims.push({ x: SPOTS.guestNook.x, z: SPOTS.guestNook.z, r: 4.6 });
-    moves.push({ key: 'guestNook', at: [SPOTS.guestNook.x, SPOTS.guestNook.z], need: 4.6, hard: 3.9, moved: 0,
-      clear: +clearance(ctx, SPOTS.guestNook.x, SPOTS.guestNook.z, []).toFixed(2) });
   }
 
   // ── the ferry office: off the arrivals road, clear of the customs booth and
@@ -622,7 +665,33 @@ export function buildScenery(ctx) {
   }
 
   // ═══ 7. GUEST NOOK + "YOUR" BED (Whisker Heights) ═══════════════════════════
-  {
+  if (guestHost) {
+    // IN THE GUEST HOUSE (see the placement pass). The house is the room, so
+    // this draws only what containment owns: the bed made up weeks ago, its
+    // lamp, and the GUEST ROOM sign over it, on the house's own floor. No hut,
+    // no walls and no wall colliders: a hut inside the house stood in its
+    // doorway and buried its ceiling lamp. The way in is the house's door.
+    const h = guestHost, y = h.floorY, ry = h.ry;
+    const fx = Math.sin(ry), fz = Math.cos(ry);          // out of the front wall
+    const lx = Math.cos(ry), lz = -Math.sin(ry);          // along it (room-local +x)
+    const bd = SPOTS.bed;
+    const hx = -fx, hz = -fz;                             // bed axis, towards the headboard
+    B.box(2.0, 0.45, 3.0, CAT.wood, bd.x, y + 0.3, bd.z, ry);
+    B.box(1.9, 0.35, 2.8, 0xf2e3cf, bd.x, y + 0.68, bd.z, ry);
+    B.box(1.9, 0.34, 1.7, 0x7fbfb2, bd.x - hx * 0.6, y + 0.9, bd.z - hz * 0.6, ry);  // blanket
+    B.box(1.2, 0.3, 0.55, 0xffffff, bd.x + hx * 1.1, y + 0.95, bd.z + hz * 1.1, ry); // pillow
+    B.box(2.2, 1.5, 0.2, CAT.wood, bd.x + hx * 1.6, y + 1.1, bd.z + hz * 1.6, ry);   // headboard
+    pawHeadboard(B, bd.x + hx * 1.48, y + 1.45, bd.z + hz * 1.48, ry);              // on the room side
+    // bedside lamp on the far side from the interior's cabinet
+    const lpx = bd.x - lx * 1.55 + hx * 1.05, lpz = bd.z - lz * 1.55 + hz * 1.05;
+    B.cyl(0.25, 0.3, 0.5, 6, CAT.wood, lpx, y + 0.25, lpz);
+    G.cone(0.34, 0.45, 6, 0xffe1a0, lpx, y + 0.75, lpz);
+    // GUEST ROOM · YOURS! on the back wall, over the headboard
+    board('guest', h.wx(h.bedLx, -h.hd + 0.16), y + 2.55, h.wz(h.bedLx, -h.hd + 0.16), ry, 1.7, 0.5, CAT.gold);
+    // a footprint claim for later clearance searches (never solid: the house's
+    // walls and the interior's furniture are the colliders here)
+    colliders.push({ x: bd.x, z: bd.z, r: 1.6, solid: false });
+  } else {
     const { x, z } = SPOTS.guestNook, y = H(x, z), ry = SE;
     const fx = Math.sin(ry), fz = Math.cos(ry);   // opening faces SE
     B.box(5.2, 3.2, 0.4, CAT.terracotta, x - fx * 2.0, y + 1.6, z - fz * 2.0, ry);
@@ -643,8 +712,18 @@ export function buildScenery(ctx) {
     G.cone(0.34, 0.45, 6, 0xffe1a0, bd.x - fz * 1.6, y + 0.75, bd.z + fx * 1.6);
     B.cyl(1.3, 1.3, 0.04, 10, 0xc96a5a, x + fx * 1.3, y + 0.09, z + fz * 1.3);
     board('guest', x - fx * 1.78, y + 2.5, z - fz * 1.78, ry, 1.7, 0.5, CAT.gold);
-    colliders.push({ x: x - fx * 2.1, z: z - fz * 2.1, r: 1.5 });
-    for (const s of [-1, 1]) colliders.push({ x: x + fz * 2.5 * s, z: z - fx * 2.5 * s, r: 1.3 });
+    // THE WAY IN (Contract O). The room's open front IS its door: 4.4 clear
+    // between the side walls, 3.2 to the roof slab. Its colliders are the three
+    // walls exactly (oriented boxes, the ground core's convention: rot = −yaw),
+    // so the collider gap is the drawn gap. The old circles (r 1.3 on each side
+    // wall, 1.5 on the back) bulged 1.1 u into the room and left the front
+    // metre of both side walls walk-through. The same circles stay behind as
+    // solid:false footprint claims, so every clearance search still sees the room.
+    const wall = (lx, lz, w, d) => colliders.push({ x: x + fz * lx + fx * lz, z: z - fx * lx + fz * lz, w, d, rot: -ry, h: y + 3.4, box: true });
+    wall(0, -2.0, 5.2, 0.4);                                         // back
+    for (const s of [-1, 1]) wall(2.4 * s, 0, 0.4, 4.2);             // sides
+    colliders.push({ x: x - fx * 2.1, z: z - fz * 2.1, r: 1.5, solid: false });
+    for (const s of [-1, 1]) colliders.push({ x: x + fz * 2.5 * s, z: z - fx * 2.5 * s, r: 1.3, solid: false });
   }
 
   // ═══ 8. SMOOTHIE STAND + THE TUNNEL UNDER MUSCLE BEACH GYM ══════════════════
