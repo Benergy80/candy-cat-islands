@@ -427,3 +427,47 @@ LANDMARK ids stay as they are ('candy', 'candy_village', island: 'candy'). Comme
 "Candyland" src/ --include=*.js` shows only comments and identifiers; a scripted tour reads the HUD, map, objective and three NPC lines at
 six spots and finds no "Candyland"; renders of the biplane banner, the welcome arch/sign, the map footer READ. Builders CURRENTLY running
 (WAVE 4) should use "the Candy Kingdom" in any NEW text they write.
+
+## WAVE 5 — Ben's second list (added 2026-09-26)
+### Contract Q (each line = one owner; disjoint files)
+- **blimp-remote (escape/blimp.js, planes.js):** Ben: "the sugar blimp cannot land at Sugar Pier on the Candy Island, it should be in a more
+  remote part of the island." Move the Candy Kingdom mast ≥ 90 u from Sugar Pier to a remote, flat, clear spot with a path nearby (candidates:
+  the west coast beyond the Gummy Forest, the north shore past Frosting Peak, the lake's far shore) — a proper little "Sugar Mooring" with
+  the mast, a lamp, a bench and a signpost; re-route the blimp loop through it; the Fish Harbor mast stays; map marker + the mast sign ETA.
+- **stars-look (powerups.js, ui/glyphs.js 'star' glyph):** Ben: "The stars look too much like Mario stars, make them look more unique to our
+  game." Redesign the invincibility pickup as something of this world (e.g. a faceted ROCK-CANDY CRYSTAL "Sugar Star" with a swirl core and a
+  candy-striped sparkle tail, or a wrapped-candy comet — no five-point gold star with eyes): design 3 variants, render each at the game
+  camera by day and night, pick with a critic, keep the sparkle trail/glow/collect behaviour, update the HUD timer pill icon and the map glyph.
+- **flyer-controls (escape/flyer.js):** Ben: "The flying machine needs control instructions and should be able to gain altitude quickly."
+  A control card on boarding (keys AND the touch buttons: Space/A flap, W/S pitch, A/D bank, Shift/B boost, E land — dismiss with any input,
+  once per session, "?" reopens) plus a compact hint row while flying; climb rate: Space flaps gain ≈ 2× today's altitude, W-climb ×1.5,
+  reach 100 u in ≈ 15 s of reasonable play; keep the energy model but never so punishing that the visitor cannot climb at all.
+- **birds-flicker (cat/nature/birds.js, cat/nature.js):** Ben: "rainbow colored birds that fly over the water were disappearing and
+  reappearing." Reproduce over the strait (render a sequence of stepped frames from the ferry and from the shore), find the cause (stale
+  bounding sphere / frustumCulled on the instanced flock, the tile culler, a fade LOD, a near/far cull, sprite depth) and fix; prove with
+  a 300-frame sequence where every bird's visibility flag never toggles while inside the frustum.
+- **cat-arrival-cinematic (intro.js):** Ben: "There should be a cinema fly through of Cat island when you first reach cat island." On the
+  first 'ferry:arrive' to Cat Island (story `cat_intro_seen`), a 20–25 s flyover in the opening cinematic's language: the Arrivals Pier →
+  Main Street → Purrliament Square → Whisker Heights → the Watchtower and the lighthouse → back to the gangway where the visitor stands,
+  landing in camera mode 2; HUD hidden; any key/tap skips (with the 1 s grace); the greeter's first line plays after it ends.
+- **artifacts (diagnose first; may fix in candy/architecture/*, terrain/instcull.js, escape/palace.js, camera/cutout.js):** Ben: "There are
+  some graphic junk artifacts in front of the palace and in other areas as well." Render the palace approach from 6 angles day + night, and
+  the arrival arch, the village and Main Street; identify every artifact (stray triangles from the tiled index culler, floating icing strips,
+  z-fighting decals, shadow acne, cutout speckle, sprite halos); fix the ones in the listed files; document any owned elsewhere with exact
+  coordinates and a frame.
+- **camera (camera.js, core/input.js, ui/hotbar.js):** (a) Ben: "there should also be a 1st person view option" — mode 4 FIRST PERSON on key
+  4 and in the chip: lens at the visitor's eyes (1.55 u), mouse/touch-drag look (no pointer lock needed; right-drag or plain drag), WASD
+  relative to the look, the visitor's head/hat hidden (body optional), the silhouette and cutout off, interactions and weapons still work,
+  the HUD's mode chip gains a 4th segment, the help card row updated (text handed to ui owner in the report); camvis modes 1–3 unchanged.
+  (b) Ben: "Don't have the view shift to the moon every night it interrupts the player." Remove the automatic moon moment (tryMoonMoment
+  never fires on its own; moonMoment() stays for views and the viewpoints system).
+- **viewpoints (viewpoints.js — new system, registered in main.js; ui/glyphs.js 'view' glyph):** Ben: "Instead there can be more places
+  to take in the view." ≥ 8 "Take in the view" spots: benches and lookouts (Frosting Peak's viewpoint, the Great Cupcake balcony, the pier
+  end, the palace terrace, Whisker Heights green, the Watchtower deck, Smuggler's Cove rock, the Fish Harbor quay) registered via
+  interaction.register; E → an 8 s camera.cinematic pan authored per spot (the moon in frame when it is up, the rainbow when it exists),
+  any key returns; a small plaque mesh per spot (≤ 2 draw calls total, merged); map glyph 'view'; a toast the first time ("Sit. Look.").
+- QUEUED behind WAVE 4c (files held): **bed-overhead (cat/citizens/carry.js):** Ben: "The view when a tiger puts the player to bed should be
+  overhead so the player can see the room they are in" — the tuck-in and wake-up shots become a high overhead (elevation ≈ 1.1, the whole
+  guest room in frame, the lamp, the wardrobe, the cat). **lighthouse (cat/architecture/outskirts.js):** Ben: "The player should be able to
+  reach the lighthouse beacon" — a walkable spiral stair inside (or an iron ladder + gallery), handrails, the gallery walkable with the
+  beacon lens turning, a viewpoint plaque up top (hand the spot to viewpoints), the door open-able per Contract O.

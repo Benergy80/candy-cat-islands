@@ -17,7 +17,7 @@ const SYSTEM_FILES = [
   ['particles', './systems/particles.js'],
   ['inventory', './systems/inventory.js'], ['weapons', './systems/weapons.js'], ['powerups', './systems/powerups.js'],
   ['interaction', './systems/interaction.js'], ['story', './systems/story.js'],
-  ['ui', './systems/ui.js'], ['intro', './systems/intro.js'], ['audio', './systems/audio.js'],
+  ['ui', './systems/ui.js'], ['intro', './systems/intro.js'], ['viewpoints', './systems/viewpoints.js'], ['audio', './systems/audio.js'],
 ];
 const SYSTEMS = [];
 // LOADING-SCREEN HOOK. index.html owns the loading screen and may define

@@ -242,7 +242,9 @@ export function create(ctx) {
       tint: spec.tint ?? null,
       y: spec.y ?? null,
       isAmmo: d.kind === 'ammo' && !!V.ammo,
-      auto: spec.auto ?? (d.kind === 'ammo' && !!V.ammo),
+      // candy and ammo are scooped by walking through them (Ben 2026-09-26: 'all the
+      // different candy is picked up just by touching it'); weapons and tools still take E
+      auto: spec.auto ?? ((d.kind === 'ammo' && !!V.ammo) || d.kind === 'candy'),
       _pos: { x: 0, z: 0, y: 0 },
     };
     if (d.kind === 'weapon' && spec.where) where[spec.itemId] = spec.where;
@@ -460,7 +462,7 @@ export function create(ctx) {
       }
       const pool_ = pools.get(p.key); if (!pool_?.geo) continue;
       let d2 = (p.x - px) * (p.x - px) + (p.z - pz) * (p.z - pz);
-      if (p.isAmmo && canScoop && Math.abs(p.x - sx) < AUTO_R && Math.abs(p.z - sz) < AUTO_R
+      if ((p.isAmmo || p.auto) && canScoop && Math.abs(p.x - sx) < AUTO_R && Math.abs(p.z - sz) < AUTO_R
         && (p.x - sx) * (p.x - sx) + (p.z - sz) * (p.z - sz) < AUTO_R * AUTO_R
         && Math.abs(pl.y - p.discY) < 2.2) { take(p); continue; }
       // cull by where the camera LOOKS (not where it stands): the far side of
