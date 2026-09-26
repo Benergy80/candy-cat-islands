@@ -353,5 +353,83 @@
   "dist": 26,
   "time": 13,
   "frames": 30
+ },
+ "heights_top": {
+  "free": [
+   180,
+   44
+  ],
+  "az": 0,
+  "el": 1.5,
+  "dist": 112,
+  "time": 13,
+  "frames": 30
+ },
+ "heights_ring": {
+  "pos": [
+   185,
+   39.4
+  ],
+  "az": 0.78,
+  "el": 0.55,
+  "dist": 36,
+  "time": 16,
+  "frames": 40
+ },
+ "heights_night": {
+  "free": [
+   185,
+   49
+  ],
+  "y": 6,
+  "az": 0.78,
+  "el": 0.9,
+  "dist": 62,
+  "time": 21.5,
+  "frames": 40
+ },
+ "heights_west_lane": {
+  "pos": [
+   170.8,
+   35.5
+  ],
+  "az": 0.15,
+  "el": 0.62,
+  "dist": 28,
+  "time": 11,
+  "frames": 40
+ },
+ "heights_ring_hi": {
+  "free": [
+   184,
+   45
+  ],
+  "az": 0.3,
+  "el": 0.74,
+  "dist": 42,
+  "time": 15,
+  "frames": 40
+ },
+ "heights_kerb": {
+  "pos": [
+   187.8,
+   71.0
+  ],
+  "az": 1.3,
+  "el": 0.55,
+  "dist": 18,
+  "time": 14,
+  "frames": 40
+ },
+ "heights_door_white": {
+  "pos": [
+   181.5,
+   59.0
+  ],
+  "az": 2.2,
+  "el": 0.35,
+  "dist": 14,
+  "time": 11,
+  "frames": 40
  }
 }

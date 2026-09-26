@@ -58,7 +58,8 @@ function mapTexture() {
   blob(74, 122, 46, 40, '#f2a6c4', '#b8567f');
   blob(238, 118, 50, 42, '#c7dba0', '#6f8f45');
   g.fillStyle = '#7a4a2a'; g.font = 'bold 17px Georgia'; g.textAlign = 'center';
-  g.fillText('CANDYLAND', 74, 78);
+  g.fillText('THE CANDY', 74, 60);
+  g.fillText('KINGDOM', 74, 78);
   g.fillText('HERE (bad)', 238, 74);
   g.font = 'italic 13px Georgia';
   g.fillText('they eat you at night', 74, 176);

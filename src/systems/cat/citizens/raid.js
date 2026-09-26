@@ -194,6 +194,23 @@ export function createRaid(ctx, H) {
     }
     return Math.max(world.height(x, z), 0.15);
   }
+  /** Where a walker EXPECTED at height yw has his feet at (x,z): the deck
+   *  walkables asked for a walker at yw (the pier's planks, not the sea bed
+   *  under them — groundH lends the terrain's height, and at the pier end,
+   *  over the water, that found the bottom: the landing leg of the route
+   *  dipped 6 u through Sugar Pier into the sea between the planks and the
+   *  rainbow's foot). Nothing within a stride of yw: the straight line. */
+  function walkH(x, z, yw) {
+    const p = pl();
+    if (p && typeof p.groundInfo === 'function') {
+      const P = p.position, keep = P ? P.y : 0;
+      if (P) P.y = yw;
+      try { p.groundInfo(x, z, _gi); } finally { if (P) P.y = keep; }
+      if (Number.isFinite(_gi.h) && _gi.h > yw - 0.9) return _gi.h;
+    }
+    const g = world.height(x, z);
+    return g > yw - 0.9 ? Math.max(g, 0.15) : yw;
+  }
   /** The bridge deck's height at (x,z), NaN off it. (Its heightAt returns null
    *  off the deck, and +null is 0: a raider at sea level.) */
   function deckY(x, z) {
@@ -305,7 +322,7 @@ export function createRaid(ctx, H) {
     // that has just come down to it sat a quarter of a unit low)
     let y = deckY(out.x, out.z);
     if (!Number.isFinite(y) && b.deck && a.deck) y = deckY(a.x + dx * k, a.z + dz * k);
-    if (!Number.isFinite(y)) y = b.deck && a.deck ? a.y + (b.y - a.y) * k : groundH(out.x, out.z);
+    if (!Number.isFinite(y)) y = b.deck && a.deck ? a.y + (b.y - a.y) * k : walkH(out.x, out.z, a.y + (b.y - a.y) * k);
     out.y = y;
     out.yaw = Math.atan2(dx, dz);
     out.slope = Math.atan2(b.y - a.y, dl);
@@ -586,6 +603,9 @@ export function createRaid(ctx, H) {
   }
   /** Everyone home, now (dawn, a jumped clock, the carry's lights-out). */
   function end() {
+    // (a carry ended in its dark — a skip's, a cut's — must not leave the
+    //  screen black now that ui.fade really shows: lift it)
+    if (R.carry && (R.carry.stage === 'dark' || R.carry.cut === 1)) { try { ui()?.fade?.(false, 0.4); } catch (e) { /* no ui */ } }
     endHush(false);
     for (const c of party) { resetBody(c); hide(c); }
     if (R.phase !== 'home') ctx.events.emit('raid:home', {});
@@ -936,44 +956,78 @@ export function createRaid(ctx, H) {
   // The pivot is the grip, so the swing turns him about his neck, not his feet.
   const NECK = 1.24, NECK_BACK = 0.10;
   const _hang = new THREE.Vector3(), _hLow = new THREE.Vector3(), _hEu = new THREE.Euler(0, 0, 0, 'YXZ');
-  const HANG_LOW = { x: 0, y: 0.19, z: 0.28 };   // his lowest point in the 'sit' pose (tucked feet), from his origin
-  /** The floor under a point of the carry: the rainbow's deck, or the ground. */
-  function carryFloor(x, z) {
+  // his body's box in the 'sit' pose (knees up), his own frame: its eight
+  // corners, turned with him, are how low he reaches (as citizens/carry.js —
+  // one point at the toes let a heel or the seat through the planks)
+  const SIT_BOX = [-0.57, 0.14, -0.44, 0.58, 1.89, 0.56];
+  /** The floor under a point of the carry at height y: the rainbow's deck,
+   *  or whatever a walker there stands on (Sugar Pier's planks, the ground). */
+  function carryFloor(x, z, y) {
     const d = deckY(x, z);
-    return Number.isFinite(d) ? d : world.height(x, z);
+    if (Number.isFinite(d)) return d;
+    const p = pl();
+    if (p && typeof p.groundInfo === 'function') {
+      const P = p.position, keep = P ? P.y : 0;
+      if (P) P.y = y + 0.35;
+      try { p.groundInfo(x, z, _gi); } finally { if (P) P.y = keep; }
+      if (Number.isFinite(_gi.h)) return _gi.h;
+    }
+    return world.height(x, z);
   }
+  /** Where the jaws REALLY are this frame: the rig's own head (tiger.js
+   *  posed it — the 'carry' pose's lifted head and pitch, the gallop's bob,
+   *  the deck's pitch), the grip a touch under and ahead of the muzzle, as
+   *  citizens/carry.js mouthOf. The static mouth() is the rig at rest: the
+   *  'carry' pose holds the head ~1 u higher than that, and hung from it he
+   *  dangled a metre under the teeth for the whole grab. */
+  const _jv = new THREE.Vector3();
+  function jaws(c, out) {
+    const TG = c.TG || c.rig?.tiger;
+    if (TG && TG.headPivot && TG.root && TG.root.scale.x > 1e-3) {
+      TG.headPivot.updateWorldMatrix(true, false);
+      _jv.set(0, TP.muzzleY - 0.06, TP.muzzleZ + 0.14).applyMatrix4(TG.headPivot.matrixWorld);
+      out.x = _jv.x; out.y = _jv.y; out.z = _jv.z;
+      return out;
+    }
+    return mouth(c, out);
+  }
+  const HEEL_MAX = 0.42;                          // the most his collar may ride over the teeth (a pounce's first frames)
   function placeCarried(k = 1) {
     const C = R.carry, p = pl(); if (!C || !p) return;
     const c = C.cat;
-    mouth(c, _mouth);
-    const el = ctx.state.elapsed, g = p.group;
+    jaws(c, _mouth);
+    const el = C.clk || 0, g = p.group;             // (the carry's own clock: it stops when paused)
     const amp = c.moving ? 1 : 0.55;
     const swing0 = (-0.05 + Math.sin(el * 2.3 + c.ph) * 0.11 * amp) * k;      // fore / aft about the grip
     const sway = Math.sin(el * 1.6 + c.ph * 0.7) * 0.06 * amp * k;           // a slow side roll
     const f0 = C.face0 ?? c.yaw;
     const yaw = f0 + wrapPi(c.yaw - f0) * k;
-    // (a big tiger holds him a little lower in its jaws, so his hat sits under
-    //  its eyes rather than over them; a small one cannot: his heels clear the deck)
-    const drop = clamp(_mouth.y - (c.air || 0) - c.y - NECK + 0.2 - 0.35, 0, 0.3);
-    // Climbing the rainbow the deck ahead rises to meet his feet: he swings
-    // back under its chin (feet toward its chest, never through the planks) —
-    // the first of a few steps back that clears the floor by a hand.
-    let fx = 0, fy = 0, fz = 0;
+    // The collar IS the grip, from the grab's first frame (the pounce is the
+    // contact: k only turns him from his own facing to the tiger's). Climbing
+    // the rainbow the deck ahead rises to meet his feet: he swings back under
+    // its chin (feet toward its chest, never through the planks) — the first
+    // of a few steps back that clears the floor by a hand; and while the
+    // head is still coming up out of the spring his heels stay on the ground
+    // (the collar a hand over the teeth, never his shoes through the planks).
+    let fx = 0, fy = 0, fz = 0, gap = 0;
     for (let i = 0; i < 7; i++) {
-      _hEu.set(swing0 + i * 0.11 * k, yaw, sway);
+      _hEu.set(swing0 + i * 0.11, yaw, sway);
       if (g) g.quaternion.setFromEuler(_hEu);
       _hang.set(0, NECK, -NECK_BACK);
       if (g) _hang.applyQuaternion(g.quaternion); else _hang.set(0, NECK, 0);
-      fx = _mouth.x - _hang.x; fy = _mouth.y - drop - _hang.y; fz = _mouth.z - _hang.z;
-      if (!g || k < 0.99) break;
-      _hLow.set(HANG_LOW.x, HANG_LOW.y, HANG_LOW.z).applyQuaternion(g.quaternion);
-      if (fy + _hLow.y >= carryFloor(fx + _hLow.x, fz + _hLow.z) + 0.08) break;
+      fx = _mouth.x - _hang.x; fy = _mouth.y - _hang.y; fz = _mouth.z - _hang.z;
+      if (!g) break;
+      gap = Infinity;
+      for (let q = 0; q < 8; q++) {
+        _hLow.set(q & 1 ? SIT_BOX[3] : SIT_BOX[0], q & 2 ? SIT_BOX[4] : SIT_BOX[1], q & 4 ? SIT_BOX[5] : SIT_BOX[2]).applyQuaternion(g.quaternion);
+        if (_hLow.y > 0.7) continue;                 // (the head end: never the lowest)
+        const gq = fy + _hLow.y - carryFloor(fx + _hLow.x, fz + _hLow.z, fy + _hLow.y) - 0.08;
+        if (gq < gap) gap = gq;
+      }
+      if (gap >= 0) break;
     }
-    p.position.set(
-      p.position.x + (fx - p.position.x) * k,
-      p.position.y + (fy - p.position.y) * k,
-      p.position.z + (fz - p.position.z) * k,
-    );
+    if (gap < 0) fy -= Math.max(gap, -HEEL_MAX);
+    p.position.set(fx, fy, fz);
     p.velocity?.set?.(0, 0, 0);
     if (g) g.position.copy(p.position);
   }
@@ -1000,7 +1054,9 @@ export function createRaid(ctx, H) {
       distance: 12.0, elevation: 0.34, duration: 3600, in: 0.7, hold: 3598, out: 0.9,
     };
     C.cine = ctx.systems.camera?.cinematic?.(o) || null;
-    ctx.systems.particles?.burst?.({ x: p.position.x, y: p.position.y + 1.2, z: p.position.z, count: 24, color: [0xffe9a8, 0xffffff, 0xf2900f], speed: 3.2, life: 0.8, size: 0.19, gravity: -2.4, spread: 1.3 });
+    // (a scuff of dust and a few glints — the old 24-puff white cloud hid the grab)
+    ctx.systems.particles?.dust?.(p.position.x, p.position.y + 0.05, p.position.z, { count: 5, size: 0.3, alpha: 0.3 });
+    ctx.systems.particles?.burst?.({ x: p.position.x, y: p.position.y + 1.3, z: p.position.z, count: 7, shape: 'sparkle', blend: 'add', color: [0xffe9a8, 0xfff4e0], speed: 1.4, life: 0.45, size: 0.12, gravity: 0, spread: 0.25 });
     ctx.events.emit('cats:caught', { cat: c, name: c.tiger.full, raid: true });
     const st = story(); st?.set?.('carried_home', (st.get?.('carried_home') || 0) + 1);
     // the escort: the two nearest fall in behind
@@ -1042,14 +1098,26 @@ export function createRaid(ctx, H) {
     }
     R.carry = null;
   }
+  /** Give the carrier (and him, in its jaws) to the town's bedtime. The two
+   *  escorts peel off at the pier; the rest of the party hunts on. */
+  function handOff(C, dark) {
+    const bt = H.bedtime, c = C.cat;
+    if (!bt || typeof bt.fromRaid !== 'function' || bt.active) return false;
+    for (const o of party) if (o !== c && o.escort) { o.escort = 0; o.think = 0; if (o.mode === 'path' || o.mode === 'land') { o.mode = 'fade'; o.fadeT = 1; } }
+    const mode0 = c.mode;
+    c.carryTo = null; c.moving = false; c.mode = 'rail';
+    R.carry = null;
+    if (!bt.fromRaid(c, { dark })) { c.mode = mode0; R.carry = C; return false; }
+    return true;
+  }
   function updateCarry(dt) {
     const C = R.carry; if (!C) return;
     const c = C.cat;
-    C.t += dt;
+    C.t += dt; C.clk = (C.clk || 0) + dt;
     // skip: any key once he is in the jaws → straight to lights-out (still in the jaws)
     C.age = (C.age || 0) + dt;
     const inp = ctx.input;
-    if (C.age > 1.2 && (C.stage === 'land' || C.stage === 'bridge') && !C.cut && inp && inp.pressed && inp.pressed.size > 0) {
+    if (C.age > 1.2 && !ctx.state.paused && (C.stage === 'land' || C.stage === 'bridge') && !C.cut && inp && inp.pressed && inp.pressed.size > 0) {
       C.stage = 'dark'; C.t = 0; C.skipped = true; ui()?.fade?.(true, 0.8);
     }
     if (C.stage === 'grab') {
@@ -1068,7 +1136,11 @@ export function createRaid(ctx, H) {
         if (C.cutT > 0.5) {
           C.cut = 2;
           c.x = landX(); c.z = landZ(); c.y = groundH(c.x, c.z); resetBody(c); c.carryTo = { x: c.x, z: c.z };
-          ctx.systems.camera?.snap?.();
+          // the cut: the carry's shot re-issued with in: 0.01 (camera.snap()
+          // drops a running cinematic outright — the bridge was then filmed
+          // by the follow lens, and enterBridge's framing went nowhere)
+          if (C.o) { const o2 = Object.assign({}, C.o); o2.in = 0.01; C.o = o2; C.cine = ctx.systems.camera?.cinematic?.(o2) || C.cine; }
+          else ctx.systems.camera?.snap?.();
           ui()?.fade?.(false, 0.5);
           enterBridge(C);
         }
@@ -1085,9 +1157,13 @@ export function createRaid(ctx, H) {
         C.side = wrapPi(C.side + wrapPi(want - C.side) * (1 - Math.exp(-1.2 * dt)));
         C.o.azimuth = C.side;
       }
-      if (c.s >= route.L - 0.05) { C.stage = 'dark'; C.t = 0; ui()?.fade?.(true, 1.1); }
+      // the Cat end of the rainbow: the town's bedtime (citizens/carry.js)
+      // takes him from here — a dip to black, the last stretch to the guest
+      // house, the tuck-in; he stays in these jaws all the way
+      if (c.s >= route.L - 0.05) { if (!handOff(C, false)) { C.stage = 'dark'; C.t = 0; ui()?.fade?.(true, 1.1); } }
     } else if (C.stage === 'dark') {
       placeCarried(1);                              // still in the jaws until the lights are out
+      if (C.t > 1.2 && handOff(C, true)) return;
       if (C.t > 1.2) {
         const name = c.tiger;
         endCarry();
@@ -1406,7 +1482,9 @@ export function createRaid(ctx, H) {
     H.settle(c, dt, plan);
     c.pose = pose;
     c.gaitK = c.moving ? gaitFor(pose, plan.speed ?? 1.8) : 1;
-    c.lookAt = P && (c.x - P.x) ** 2 + (c.z - P.z) ** 2 < 225 ? P : null;
+    // (never the one holding him: he hangs from that head, and a head turned to
+    //  look at what hangs from it chases its own tail)
+    c.lookAt = P && !c.carryTo && (c.x - P.x) ** 2 + (c.z - P.z) ** 2 < 225 ? P : null;
     if (c.yawLock !== undefined) { c.yaw = wrapPi(c.yawLock); c.yawLock = undefined; if (c.spinning) c.faceDir = c.yaw; }
     else if (c.spinning) { c.yaw = wrapPi(c.yaw + dt * 12); c.faceDir = c.yaw; }
     else c.yaw = dampAngle(c.yaw, c.faceDir, c.moving ? 7 : 5, dt);
@@ -1425,7 +1503,7 @@ export function createRaid(ctx, H) {
     if (c.vis < 1) { c.TG.root.scale.multiplyScalar(smoothstep(0, 1, c.vis)); c.TG.root.updateMatrixWorld(true); }
     // the contact blob: under it on the ground, never on the deck (the deck glows)
     const T = tigerScale(c), n = c.blobN;
-    if (c.mode === 'land' && c.vis > 0) {
+    if ((c.mode === 'land' || c.mode === 'rail') && c.vis > 0) {
       const g = Number.isFinite(c.gy) ? c.gy : c.y;
       n.position.set(c.x + Math.sin(c.yaw) * 0.18 * T, g + 0.035, c.z + Math.cos(c.yaw) * 0.18 * T);
       n.rotation.set(0, c.yaw, 0);
@@ -1500,6 +1578,9 @@ export function createRaid(ctx, H) {
   // the bridge's 25-s raise) rather than at the first sundown
   ctx.events.on('story:rainbow_bridge', (v) => { if (v) R.navSoon = 2; });
   function update(dt) {
+    // (Contract N: the carry survives a paused game — while he is in these
+    //  jaws a pause stops the raid where it stands, the carrier and him too)
+    if (R.carry && ctx.state.paused) dt = 0;
     R.frame++;
     if (R.navSoon > 0 && --R.navSoon === 0) { try { syncRoute(); candyNav(); } catch (e) { /* retried at the raid */ } }
     if (navDirty && (R.frame & 31) === 0 && navQuiet()) { try { candyNav(); } catch (e) { /* retried */ } }
@@ -1625,7 +1706,13 @@ export function createRaid(ctx, H) {
   const byRank = (a, b) => a.rankK - b.rankK;
 
   /** camera:update — the last word on where the carried visitor hangs. */
-  function late() { const C = R.carry; if (C) placeCarried(C.stage === 'grab' ? C.k : 1); }
+  function late() {
+    const C = R.carry; if (!C) return;
+    placeCarried(C.stage === 'grab' ? C.k : 1);
+    // (in the jaws he is meant to be behind its head: no amber ghost of him
+    //  painted over the muzzle — the player re-arms it every frame)
+    if (C.stage !== 'grab' || C.k > 0.5) pl()?.setSilhouette?.(false);
+  }
 
   /** DEBUG: the hush, staged — him crouched in the dark under a footbridge,
    *  a raider on the planks over him, the shot already framed.
@@ -1719,6 +1806,7 @@ export function createRaid(ctx, H) {
     if (o.raise !== false && !o.mock && b && !b.up && typeof b.debugRaise === 'function') { try { b.debugRaise(true); } catch (e) { /* bridge builder's */ } }
     route.ref = undefined; syncRoute();
     if (R.carry) endCarry();
+    H.bedtime?.reset?.();                            // (a town carry or a tuck-in still running)
     R.lastH = ctx.state.time;
     const P = pl()?.position;
     const n = o.n ?? 4;

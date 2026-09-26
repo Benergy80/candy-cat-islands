@@ -126,16 +126,124 @@ export function doorLeaf(b, f, lx, lz, W, H, leaf, o = {}) {
 }
 
 /** The Cat Island doorway: a generous cat door with a cat-flap, plus the
- *  small, grudging human door beside it. */
+ *  small, grudging human door beside it.
+ *  An ENTERABLE doorway (leaf:false + recess:false: architecture.js door()
+ *  hangs a real leaf in the wall's gap and swings it in) is a hole you walk
+ *  through, so it is dressed with a CASING instead of a solid surround:
+ *    o.clear, o.clearH  the wall gap it lines (width; head height above f.y)
+ *    o.casing, o.casingW  casing colour (the building's trim) and width (0.24)
+ *    o.lintelH, o.headOver  the lintel's height (0.24) and overhang (0.1)
+ *    o.head             'arch' (fanlight in a stone archivolt; o.surround is
+ *                       the stone, o.band its width; o.fanGlass, o.fanBars,
+ *                       o.fanBar, o.fanBarW, o.fanHub, o.fanHubR dress the
+ *                       fanlight) or 'transom' (a shop
+ *                       door under a fascia: o.transomH, o.transomCell +
+ *                       o.transomGlow, or glass; o.arches = golden arches)
+ *    o.sill             world y of the threshold the jambs stand on
+ *    o.humanGap         plain wall between the dressing and the human door (0.5)
+ *    o.humanAt, o.humanY  or put the human door at this lx / on this world y
+ *  It draws no step and no mat: T.stoop's steps and threshold are its floor.
+ *  It registers SOLID colliders for what stands proud of the wall (the casing,
+ *  an archivolt's stone legs, the HUMANS door), each starting exactly at the
+ *  gap's edge, so the collider gap is C through the whole reveal. */
 export function doorUnit(b, f, lx, lz, o = {}) {
   const { ry } = f;
   const X = (a, c) => f.px(a, c), Z = (a, c) => f.pz(a, c);
   const W = o.w ?? 2.5, H = o.h ?? 3.5;
   const leaf = o.color ?? PAL.trim[4];
-  // surround
-  b.box(X(lx, lz + 0.02), f.y, Z(lx, lz + 0.02), W + 0.5, H + 0.45, 0.24, o.surround ?? PAL.stoneLight, { ry, ao: 0.5, aoBase: f.y });
-  // arch head
-  b.cyl(X(lx, lz + 0.08), f.y + H + 0.2, Z(lx, lz + 0.08), (W + 0.5) / 2, (W + 0.5) / 2, 0.24, o.surround ?? PAL.stoneLight, { ry, rx: Math.PI / 2, seg: 14, theta: Math.PI, thetaStart: 0, ao: 0 });
+  const sur = o.surround ?? PAL.stoneLight;
+  const walk = o.leaf === false && o.recess === false;
+  let edge = 0;                                  // half-width the human door stands clear of
+  if (walk) {
+    // An ENTERABLE doorway is a hole you walk through (Contract O: the gap you
+    // see is the gap you walk, so nothing below the head stands inside C). It is
+    // dressed in layers, the way the town's solid doors always were:
+    //   · a CASING in the building's trim: jambs with a bead down the opening,
+    //     plinth blocks, and a LINTEL with a cap that overhangs the jambs;
+    //   · over it (o.head 'arch') a fanlight: a trim ring round lit glass, bars
+    //     and a hub, set in a stone ARCHIVOLT that comes down both sides as a
+    //     stone surround and is locked by a keystone — the island's arched
+    //     doorway scaled up to a human; or (o.head 'transom', a shopfront with a
+    //     fascia over it) a rectangular TRANSOM light: a painted cell, or glass,
+    //     or Meow Donald's arches;
+    //   · nothing on the threshold: T.stoop's steps and sill are its floor.
+    // (thetaStart PI/2 is the UPPER half of the disc once rx has turned it into
+    // the wall plane; 0 is the half beside the centre, which is how an arch once
+    // hung 1.25 u down into the Guest House doorway.)
+    const C = o.clear ?? W, CH = o.clearH ?? H, cw = o.casingW ?? 0.24, cas = o.casing ?? sur;
+    const head = o.head ?? 'arch', over = o.headOver ?? 0.1, LH = o.lintelH ?? 0.24;
+    const yH = f.y + CH, yL = yH + LH + 0.07, Rc = C / 2 + cw, LW = C + cw * 2 + over * 2;
+    // the jambs go down to the ground (behind the steps, where a stoop climbs to
+    // a raised floor); their plinth blocks sit on the top step, under the sill
+    const yb = Math.min(yH - 1.0, Math.max(f.y, (o.sill ?? f.y) - 0.24));
+    for (const s of [-1, 1]) {
+      const jx = lx + s * (C / 2 + cw / 2), bx = lx + s * (C / 2 + 0.04), qx = lx + s * (C / 2 + (cw + 0.06) / 2);
+      b.box(X(jx, lz + 0.03), f.y, Z(jx, lz + 0.03), cw, yH - f.y, 0.34, cas, { ry, ao: 0.4, aoBase: yb });                          // jamb (face lz + 0.2)
+      b.box(X(bx, lz + 0.2), yb + 0.46, Z(bx, lz + 0.2), 0.08, yH - yb - 0.46, 0.08, cas, { ry, ao: 0, shade: 0.74 });              // bead on its inner arris
+      b.box(X(qx, lz + 0.05), yb, Z(qx, lz + 0.05), cw + 0.06, 0.46, 0.42, cas, { ry, ao: 0.3, aoBase: yb, shade: 0.84 });          // plinth block
+      // THE CASING IS SOLID. The wall's collider stops at the wall's face, and
+      // the casing stands 0.2-0.6 proud of it (on a shopfront's facade slab):
+      // a visitor coming in at an angle walked his shoulder through the jamb.
+      // From the gap's edge (C/2: the bead's inner face, so the collider gap is
+      // still exactly C) out over jamb and plinth block, and from behind the
+      // jamb to the plinth block's proud face; it overlaps the wall's collider.
+      const e1 = C / 2 + cw + 0.06, cm = lx + s * (C / 2 + e1) / 2;
+      colBox(X(cm, lz + 0.05), Z(cm, lz + 0.05), e1 - C / 2, 0.42, ry);
+    }
+    b.box(X(lx, lz + 0.05), yH, Z(lx, lz + 0.05), LW, LH, 0.42, cas, { ry, ao: 0, shade: 0.94 });                                  // lintel
+    b.box(X(lx, lz + 0.06), yH + LH, Z(lx, lz + 0.06), LW + 0.1, 0.07, 0.48, cas, { ry, ao: 0, shade: 1.1 });                      // its cap
+    edge = LW / 2 + 0.05;
+    const arc = { ry, rx: Math.PI / 2, seg: 16, theta: Math.PI, thetaStart: Math.PI / 2, ao: 0 };
+    if (head === 'arch') {
+      const sw = o.band ?? 0.26, Rs = Rc + sw, Rg = Rc - 0.2;
+      b.cyl(X(lx, lz - 0.14), yL, Z(lx, lz - 0.14), Rs, Rs, 0.26, sur, arc);                                                      // archivolt (face lz + 0.12)
+      b.cyl(X(lx, lz - 0.14), yL, Z(lx, lz - 0.14), Rc, Rc, 0.34, cas, arc);                                                      // trim ring (face lz + 0.2)
+      // the fanlight: a half-round of glass, lit from inside after dark like
+      // every window in town, three radiating bars and a hub
+      // (o.fanBars radiating bars in o.fanBar, a hub of o.fanHubR in o.fanHub:
+      // a big fanlight in shade needs a gilt sunburst, or it reads as a hole)
+      b.cyl(X(lx, lz - 0.13), yL, Z(lx, lz - 0.13), Rg, Rg, 0.34, o.fanGlass ?? PAL.glass, { ...arc, mat: 'win' });
+      const nb = o.fanBars ?? 3, barC = o.fanBar ?? cas, barW = o.fanBarW ?? 0.06;
+      for (let i = 1; i <= nb; i++) {
+        const ang = (Math.PI * i) / (nb + 1);
+        b.box(X(lx, lz + 0.215), yL, Z(lx, lz + 0.215), barW, Rg, 0.03, barC, { ry, rz: ang - Math.PI / 2, ao: 0 });
+      }
+      const hubR = o.fanHubR ?? 0.24;
+      b.cyl(X(lx, lz - 0.12), yL, Z(lx, lz - 0.12), hubR, hubR, 0.345, o.fanHub ?? cas, arc);
+      // the keystone: from the glass up through ring and archivolt, proud of both
+      b.box(X(lx, lz + 0.05), yL + Rg - 0.06, Z(lx, lz + 0.05), 0.36, Rs - Rg + 0.14, 0.46, sur, { ry, ao: 0, shade: 1.03 });
+      // the stone surround down both sides, from the ground to the springing
+      for (const s of [-1, 1]) {
+        const sx = lx + s * (Rc + sw / 2);
+        b.box(X(sx, lz - 0.01), f.y, Z(sx, lz - 0.01), sw, yL - f.y, 0.26, sur, { ry, ao: 0.4, aoBase: f.y });
+        colBox(X(sx, lz - 0.01), Z(sx, lz - 0.01), sw, 0.26, ry);          // …solid too (face lz + 0.12)
+      }
+      edge = Math.max(edge, Rs);
+    } else {
+      // the transom light over a shop door: stiles on the jambs, a top rail and
+      // a cornice, and in it a painted cell (gilt on glass), or plain glass
+      const TH = o.transomH ?? 0.6, yT = yL + TH;
+      b.box(X(lx, lz + 0.03), yL, Z(lx, lz + 0.03), C + 0.02, TH, 0.3, 0x1b1410, { ry, ao: 0 });                                  // back (face lz + 0.18)
+      for (const s of [-1, 1]) { const jx = lx + s * (C / 2 + cw / 2); b.box(X(jx, lz + 0.03), yL, Z(jx, lz + 0.03), cw, TH, 0.34, cas, { ry, ao: 0 }); }
+      b.box(X(lx, lz + 0.04), yT, Z(lx, lz + 0.04), C + cw * 2, 0.12, 0.36, cas, { ry, ao: 0 });                                  // top rail
+      b.box(X(lx, lz + 0.07), yT + 0.12, Z(lx, lz + 0.07), LW + 0.1, 0.09, 0.5, cas, { ry, ao: 0, shade: 1.1 });                  // cornice
+      if (o.transomCell) b.sign(o.transomCell, X(lx, lz + 0.19), yL + TH / 2, Z(lx, lz + 0.19), C, TH, { ry, glow: !!o.transomGlow });
+      else {
+        b.quad(X(lx, lz + 0.19), yL + TH / 2, Z(lx, lz + 0.19), C, TH, o.fanGlass ?? PAL.glass, { ry, mat: 'win' });
+        if (!o.arches) b.box(X(lx, lz + 0.2), yL, Z(lx, lz + 0.2), 0.06, TH, 0.04, cas, { ry, ao: 0 });
+      }
+      // two golden arches standing on the lintel, in front of the glass
+      if (o.arches) for (const s of [-1, 1]) {
+        const ax = lx + s * C / 4, R = Math.min(C / 4 - 0.08, TH - 0.14);
+        b.torus(X(ax, lz + 0.26), yL + 0.02, Z(ax, lz + 0.26), R, 0.08, o.arches, { ry, arc: Math.PI, seg: 12, tseg: 5 });
+      }
+    }
+  } else {
+    // surround
+    b.box(X(lx, lz + 0.02), f.y, Z(lx, lz + 0.02), W + 0.5, H + 0.45, 0.24, sur, { ry, ao: 0.5, aoBase: f.y });
+    // arch head
+    b.cyl(X(lx, lz + 0.08), f.y + H + 0.2, Z(lx, lz + 0.08), (W + 0.5) / 2, (W + 0.5) / 2, 0.24, sur, { ry, rx: Math.PI / 2, seg: 14, theta: Math.PI, thetaStart: 0, ao: 0 });
+  }
   // dark recess then the leaf (an ENTERABLE door leaves the leaf to door.js,
   // which hangs it on a hinge and swings it)
   if (o.recess !== false) b.box(X(lx, lz + 0.12), f.y, Z(lx, lz + 0.12), W, H, 0.1, 0x1b1410, { ry, ao: 0 });
@@ -144,17 +252,103 @@ export function doorUnit(b, f, lx, lz, o = {}) {
     // handle, at cat height
     b.sph(X(lx + W * 0.32, lz + 0.3), f.y + 1.5, Z(lx + W * 0.32, lz + 0.3), 0.13, PAL.gold, { seg: 6, rings: 4 });
   }
-  // the human door
+  // the human door (beside an enterable doorway it keeps half a metre of plain
+  // wall between itself and the casing: butted up against it, the pair read as
+  // one cramped double door and the joke was lost)
   if (o.human !== false) {
-    const hx = lx + (o.humanSide ?? 1) * (W / 2 + 0.75);
-    b.box(X(hx, lz + 0.02), f.y, Z(hx, lz + 0.02), 1.02, 2.0, 0.2, o.surround ?? PAL.stoneLight, { ry, ao: 0.4, aoBase: f.y });
-    b.box(X(hx, lz + 0.14), f.y, Z(hx, lz + 0.14), 0.78, 1.82, 0.12, o.humanColor ?? 0xb8552f, { ry, ao: 0.4, aoBase: f.y });
-    b.sph(X(hx + 0.26, lz + 0.22), f.y + 1.0, Z(hx + 0.26, lz + 0.22), 0.07, PAL.chrome, { seg: 6, rings: 4, mat: 'metal' });
-    if (o.humanSign !== false && o.humanSignCell) b.sign(o.humanSignCell, X(hx, lz + 0.24), f.y + 2.16, Z(hx, lz + 0.24), 1.0, 0.3, { ry });
+    const side = o.humanSide ?? 1;
+    const hx = o.humanAt ?? (walk ? lx + side * (edge + (o.humanGap ?? 0.5) + 0.51) : lx + side * (W / 2 + 0.75));
+    const hy = o.humanY ?? f.y;
+    b.box(X(hx, lz + 0.02), hy, Z(hx, lz + 0.02), 1.02, 2.0, 0.2, sur, { ry, ao: 0.4, aoBase: hy });
+    b.box(X(hx, lz + 0.14), hy, Z(hx, lz + 0.14), 0.78, 1.82, 0.12, o.humanColor ?? 0xb8552f, { ry, ao: 0.4, aoBase: hy });
+    b.sph(X(hx + 0.26, lz + 0.22), hy + 1.0, Z(hx + 0.26, lz + 0.22), 0.07, PAL.chrome, { seg: 6, rings: 4, mat: 'metal' });
+    if (o.humanSign !== false && o.humanSignCell) b.sign(o.humanSignCell, X(hx, lz + 0.24), hy + 2.16, Z(hx, lz + 0.24), 1.0, 0.3, { ry });
+    // beside an enterable doorway it stands on the approach: solid from the
+    // wall out to its knob (lz + 0.29), or the visitor's shoulder goes into it
+    if (walk) colBox(X(hx, lz + 0.095), Z(hx, lz + 0.095), 1.02, 0.39, ry);
   }
-  // step + doormat
-  b.box(X(lx, lz + 0.62), f.y - 0.02, Z(lx, lz + 0.62), W + 1.0, 0.16, 1.0, PAL.stone, { ry, ao: 0 });
-  if (o.mat !== false) b.box(X(lx, lz + 0.72), f.y + 0.14, Z(lx, lz + 0.72), W * 0.7, 0.05, 0.6, 0x6b5a3e, { ry, ao: 0 });
+  // step + doormat (an enterable doorway stands on T.stoop's steps and
+  // threshold: a second slab here lay under them at ground level, a grey edge
+  // and a loose brown plank poking out from under the Guest House stoop)
+  if (!walk) {
+    b.box(X(lx, lz + 0.62), f.y - 0.02, Z(lx, lz + 0.62), W + 1.0, 0.16, 1.0, PAL.stone, { ry, ao: 0 });
+    if (o.mat !== false) b.box(X(lx, lz + 0.72), f.y + 0.14, Z(lx, lz + 0.72), W * 0.7, 0.05, 0.6, 0x6b5a3e, { ry, ao: 0 });
+  }
+}
+
+/**
+ * A HUNG LEAF for an enterable doorway: architecture.js door() hangs it in the
+ * wall's gap and swings it IN. Authored in its hinge frame: the pivot is the
+ * origin, the leaf runs away from it along u·X (u = ±1) starting at x = u·a
+ * (the pivot sits a behind the jamb line, so the open leaf stands clear of the
+ * opening), its inner face on z = 0 and its outer face on z = th.
+ * It is the joinery the little HUMANS door always had, scaled up: moulded,
+ * raised panels (or, on a shopfront, a glazed upper half with muntins), a brass
+ * knob and rose on both faces, two hinge knuckles, and the cat flap: the part
+ * of any door on this island that actually gets used.
+ *   o = { W, H, u, a, th, color, field, trim, style: 'panel' | 'glazed',
+ *         glassFrom (y the glass starts at, as a fraction of H), glass (colour),
+ *         glassMat ('win': lit from inside at night), flap, brass, rows,
+ *         z0 (shifts the whole leaf along z) }
+ */
+export function hungLeaf(p, o) {
+  const u = o.u ?? 1, a = o.a ?? 0.1, th = o.th ?? 0.1, W = o.W, H = o.H;
+  const col = o.color ?? PAL.wood, field = o.field ?? col, brass = o.brass ?? 0xd2a445;
+  const X = (x) => u * (a + x);                       // x: along the leaf from its hinge edge
+  const Z0 = o.z0 ?? 0;                               // the whole leaf shifted along z (the old outward-swinging door's plane)
+  const box = (x, y, z, w, h, d, c, e) => p.box(X(x), y, z + Z0, w, h, d, c, { ao: 0, ...e });
+  const S = 0.15, FACES = [th, 0];                      // stile/rail width; outer, inner face z
+  const on = (zf, k) => (zf > 0 ? zf + k : -k);         // k proud of face zf
+  // a raised, moulded panel on both faces: a dark bead round a lighter field
+  const panel = (cx, y0, w, h) => {
+    for (const zf of FACES) {
+      box(cx, y0, on(zf, 0.006), w, h, 0.012, field, { shade: 0.6 });
+      box(cx, y0 + 0.055, on(zf, 0.018), w - 0.11, h - 0.11, 0.03, field, { shade: 1.14 });
+    }
+  };
+  const FLAP = 0.8;                                    // the bottom rail carries the cat flap
+  if (o.style === 'glazed') {
+    const yg = Math.max(FLAP + 0.35, H * (o.glassFrom ?? 0.45)), top = H - S;
+    box(W / 2, 0, th / 2, W, yg, th, col);                                  // lower leaf
+    box(W / 2, top, th / 2, W, S, th, col);                                  // top rail
+    for (const x of [S / 2, W - S / 2]) box(x, yg, th / 2, S, top - yg, th, col);   // stiles
+    // the glass, a pane each way (the 'win' material is single-sided)
+    const gy = (yg + top) / 2, gw = W - S * 2, gh = top - yg;
+    const gm = { mat: o.glassMat ?? 'matte', ao: 0 };
+    p.quad(X(W / 2), gy, Z0 + th / 2 + 0.004, gw, gh, o.glass ?? PAL.glass, gm);
+    p.quad(X(W / 2), gy, Z0 + th / 2 - 0.004, gw, gh, o.glass ?? PAL.glass, { ...gm, ry: Math.PI });
+    // muntins through the glass (a cross: a door with a window in it, not a
+    // window with a door frame) and a glazing bead along its sill, both faces
+    const tr = o.trim ?? col;
+    box(W / 2, yg, th / 2, 0.07, gh, th + 0.03, tr);
+    box(W / 2, gy - 0.035, th / 2, gw, 0.07, th + 0.03, tr);
+    for (const zf of FACES) box(W / 2, yg - 0.05, on(zf, 0.012), W - 0.08, 0.1, 0.024, tr);
+    if (yg - FLAP - 0.25 >= 0.3) panel(W / 2, FLAP + 0.1, W - S * 2 - 0.1, yg - FLAP - 0.25);   // a kick panel, if there is room for one
+  } else {
+    box(W / 2, 0, th / 2, W, H, th, col);
+    const cols = W > 1.15 ? 2 : 1, rows = o.rows ?? (H > 3.9 ? 3 : 2), gap = 0.14;
+    const x0 = S, fw = (W - S * 2 - gap * (cols - 1)) / cols;
+    const y0 = FLAP + 0.1, fh = (H - S - y0 - gap * (rows - 1)) / rows;
+    for (let i = 0; i < cols; i++) for (let k = 0; k < rows; k++) {
+      // the top pair of panels is the taller one on a real door; here the
+      // bottom pair gives a little to it
+      panel(x0 + fw / 2 + i * (fw + gap), y0 + k * (fh + gap), fw, fh);
+    }
+  }
+  // the cat flap, low and centred, a hood over it on the outside
+  const fx = W / 2, fwid = Math.min(0.62, W * 0.34);
+  for (const zf of FACES) box(fx, 0.12, on(zf, 0.01), fwid + 0.1, 0.58, 0.02, 0x2a2119);
+  box(fx, 0.17, on(th, 0.024), fwid, 0.48, 0.02, o.flap ?? 0xe8d9b8, { rz: 0.0 });
+  box(fx, 0.69, on(th, 0.04), fwid + 0.16, 0.05, 0.08, o.trim ?? col, { shade: 0.8 });
+  // brass: a rose and a knob on each face at the latch edge, hand height
+  const kx = W - 0.17, ky = 1.02;
+  for (const zf of FACES) {
+    box(kx, ky - 0.15, on(zf, 0.01), 0.11, 0.3, 0.02, brass);
+    p.sph(X(kx), ky, Z0 + on(zf, 0.085), 0.075, brass, { seg: 8, rings: 6, ao: 0 });
+    p.cyl(X(kx), ky, Z0 + on(zf, 0.01) + (zf > 0 ? 0 : -0.07), 0.028, 0.028, 0.07, brass, { seg: 6, rx: Math.PI / 2, ao: 0 });
+  }
+  // two hinge knuckles on the hinge edge, on the side it swings to
+  for (const ky2 of [0.32, H - 0.62]) p.cyl(X(0), ky2, Z0 - 0.02, 0.055, 0.055, 0.3, brass, { seg: 8, ao: 0 });
 }
 
 // ── masses ───────────────────────────────────────────────────────────────────
@@ -235,7 +429,34 @@ export function block(b, f, w, h, d, color, o = {}) {
   const base = o.sink ?? 0.9;
   const segs = o.hollow ? roomShell(b, f, w, h, d, color, { ...o.hollow, sink: base }) : null;
   if (!segs) b.box(f.x, f.y - base, f.z, w, h + base, d, color, { ry, ao: 0.9, aoBase: f.y, aoH: 2.4 });
-  if (o.plinth !== false) b.box(f.x, f.y - base, f.z, w + 0.3, base + 0.55, d + 0.3, o.plinthColor ?? PAL.stone, { ry, ao: 0.7, aoBase: f.y - base, aoH: 1.6 });
+  if (o.plinth !== false) {
+    const pc = o.plinthColor ?? PAL.stone, py = f.y - base, ph = base + 0.55;
+    const pAO = { ao: 0.7, aoBase: py, aoH: 1.6 };
+    if (segs) {
+      // A HOLLOW block's plinth is a ring, with its doorways cut out of it. As
+      // one solid box it filled the room to f.y + 0.55: 5 cm over the Guest
+      // House boards (so the room seen through its open door was a slab of
+      // stone) and a ledge straight across every threshold.
+      const t = o.hollow.t ?? 0.5, rt = 0.15 + t * 0.6;
+      const doors = (o.hollow.gaps || []).filter((g) => !g.y0);
+      const sides = [[w + 0.3, d / 2 + 0.15, 0], [d + 0.3 - rt * 2, w / 2 + 0.15, Math.PI / 2], [w + 0.3, d / 2 + 0.15, Math.PI], [d + 0.3 - rt * 2, w / 2 + 0.15, -Math.PI / 2]];
+      sides.forEach(([len, off, rot], i) => {
+        const cs = Math.cos(rot), sn = Math.sin(rot);
+        const put = (a0, a1) => {
+          if (a1 - a0 < 0.05) return;
+          const a2 = (a0 + a1) / 2, out = off - rt / 2;
+          const px = a2 * cs + out * sn, pz = -a2 * sn + out * cs;
+          b.box(X(px, pz), py, Z(px, pz), a1 - a0, ph, rt, pc, { ry: ry + rot, ...pAO });
+          // solid: it stands 0.15 proud of the wall, 0.1 past the wall's own
+          // collider, at the knee (cut at the doorways' edges, like the walls)
+          colBox(X(px, pz), Z(px, pz), a1 - a0, rt, ry + rot);
+        };
+        let cur = -len / 2;
+        for (const g of doors.filter((g2) => (g2.face ?? 0) === i).sort((m, n) => m.lx - n.lx)) { put(cur, g.lx - g.w / 2); cur = g.lx + g.w / 2; }
+        put(cur, len / 2);
+      });
+    } else b.box(f.x, py, f.z, w + 0.3, ph, d + 0.3, pc, { ry, ...pAO });
+  }
   if (o.quoins) for (const sx of [-1, 1]) for (let i = 0; i < Math.floor(h / 1.55); i++) {
     const qw = i % 2 ? 0.55 : 0.85;
     b.box(X(sx * (w / 2 - qw / 2 + 0.06), 0), f.y + 0.6 + i * 1.55, Z(sx * (w / 2 - qw / 2 + 0.06), 0), qw, 0.72, d + 0.12, o.quoinColor ?? PAL.stoneLight, { ry, ao: 0.3, aoBase: f.y });
@@ -679,26 +900,146 @@ export function bunting(b, ax, ay, az, bx, by, bz, colors, o = {}) {
 
 /** A flat stone paving disc with a border ring (thick, so sloping ground buries the rim). */
 export function paving(b, x, y, z, r, o = {}) {
-  const dep = o.depth ?? 1.6;
-  b.cyl(x, y + 0.1 - dep, z, r, r, dep, o.color ?? CAT.cobble, { seg: o.seg ?? 28, ao: 0 });
-  b.torus(x, y + 0.06, z, r - 0.3, 0.22, o.border ?? CAT.cobbleDark, { rx: -Math.PI / 2, seg: o.seg ?? 28, tseg: 5, ao: 0 });
+  const dep = o.depth ?? 1.6, seg = o.seg ?? 28, TSEG = 5;
+  b.cyl(x, y + 0.1 - dep, z, r, r, dep, o.color ?? CAT.cobble, { seg, ao: 0 });
+  b.torus(x, y + 0.06, z, r - 0.3, 0.22, o.border ?? CAT.cobbleDark, { rx: -Math.PI / 2, seg, tseg: TSEG, ao: 0 });
   const rings = o.rings ?? 2;
   for (let k = 1; k <= rings; k++) b.torus(x, y + 0.09, z, r * (k / (rings + 1)), 0.1, o.border ?? CAT.cobbleDark, { rx: -Math.PI / 2, seg: 24, tseg: 4, ao: 0 });
+  // the surface it draws, for T.paved (the disc top, and the raised border
+  // ring's faceted top; the inner rings are 0.01 proud and not worth a step)
+  return discSurface(x, z, r, y + 0.1, r - 0.3, y + 0.06, 0.22, seg, TSEG);
 }
 
-/** A raised paved ribbon following a polyline (street / quay / path). */
+/**
+ * The walkable top of a paving() disc, AS DRAWN. The disc is an n-gon, not a
+ * circle (CylinderGeometry: vertices at world angle π/2 − k·σ, σ = 2π/n), and
+ * its border a faceted torus (TorusGeometry laid flat by rx −π/2: vertices at
+ * −j·σ, a TSEG-gon cross-section). Tested against the true circle, the sliver
+ * between each edge and the circle (0.12 u at the forecourt) read as paving
+ * over terrain up to 1.47 u lower, and the rim as a round tube 0.1–0.16 over
+ * the flat facets actually there. `at(x, z)` → the top there, or null. The
+ * angle is only computed near the edge or the rim; nothing is allocated.
+ */
+function discSurface(cx, cz, r, top, R, rimY, tube, n, ts) {
+  const SIG = (Math.PI * 2) / n, KN = Math.cos(Math.PI / n), rIn = r * KN, r2 = r * r;
+  // the tube's cross-section: vertex i at (out, up) = tube·(cos v, sin v), v = i·2π/ts
+  const PX = new Float64Array(ts + 1), PY = new Float64Array(ts + 1);
+  for (let i = 0; i <= ts; i++) { const v = (i / ts) * Math.PI * 2; PX[i] = tube * Math.cos(v); PY[i] = tube * Math.sin(v); }
+  let pMin = Infinity, pMax = -Infinity;
+  for (let i = 0; i < ts; i++) { pMin = Math.min(pMin, PX[i]); pMax = Math.max(pMax, PX[i]); }
+  // the highest facet over an offset `off` from the ring's centreline (a
+  // point in a torus sector sits on a planar trapezoid whose horizontal edges
+  // are its chords, so the height is linear in the distance to the chord)
+  const rimAt = (off) => {
+    let best = -Infinity;
+    for (let i = 0; i < ts; i++) {
+      const a = PX[i], c = PX[i + 1];
+      if (a === c || off < Math.min(a, c) || off > Math.max(a, c)) continue;
+      const yy = PY[i] + ((PY[i + 1] - PY[i]) * (off - a)) / (c - a);
+      if (yy > best) best = yy;
+    }
+    return best;
+  };
+  return {
+    x: cx, z: cz, r, top,
+    at(x, z) {
+      const dx = x - cx, dz = z - cz, d2 = dx * dx + dz * dz;
+      if (d2 > r2) return null;
+      const d = Math.sqrt(d2);
+      const nearEdge = d > rIn, nearRim = d / KN >= R + pMin && d <= R + pMax;
+      if (!nearEdge && !nearRim) return top;
+      const phi = Math.atan2(dz, dx);
+      if (nearEdge) {
+        // the disc's n-gon: distance along the normal of the edge we are over
+        let a = (Math.PI / 2 - phi) / SIG; a -= Math.floor(a);
+        if (d * Math.cos((a - 0.5) * SIG) > rIn) return null;
+      }
+      let y = top;
+      if (nearRim) {
+        let q = -phi / SIG; q -= Math.floor(q);
+        const hh = rimY + rimAt((d * Math.cos((q - 0.5) * SIG)) / KN - R);
+        if (hh > y) y = hh;
+      }
+      return y;
+    },
+  };
+}
+
+/**
+ * A raised paved ribbon following a polyline (street / quay / path).
+ *  o.cuts  [{ f, x0, x1, z }]: a building face the paving STOPS at. Where a
+ *          piece runs along f's local x in [x0, x1] it is trimmed back to the
+ *          face (f-local z = z) on the building's side and has no kerb there.
+ *          (Main Street's sidewalk ran 1.4 u under every shop: inside a hollow
+ *          shop it stood through the threshold and 0.23 over the boards.)
+ *  o.out   an array: every paved piece and kerb is pushed as
+ *          { x, z, c, s, hw, hd, top } (centre, kit-yaw cos/sin, half extents
+ *          across / along, top y), so the caller can make it WALKABLE (T.paved).
+ */
 export function ribbon(b, pts, width, yAt, color, o = {}) {
-  const th = o.th ?? 0.32, lift = o.lift ?? 0.1;
+  const th = o.th ?? 0.32, lift = o.lift ?? 0.1, out = o.out, cuts = o.cuts, KW = 0.34;
+  const kerbColor = o.kerbColor ?? CAT.cobbleDark;
   for (let i = 0; i < pts.length - 1; i++) {
     const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
     const len = Math.hypot(bx - ax, bz - az), ry = Math.atan2(bx - ax, bz - az);
+    const c = Math.cos(ry), s = Math.sin(ry);            // across = (c, -s), along = (s, c)
     const segs = Math.max(1, Math.round(len / (o.seg ?? 5)));
     for (let k = 0; k < segs; k++) {
       const t0 = k / segs, t1 = (k + 1) / segs, tm = (t0 + t1) / 2;
       const mx = ax + (bx - ax) * tm, mz = az + (bz - az) * tm;
       const y = Math.max(yAt(mx, mz), yAt(ax + (bx - ax) * t0, az + (bz - az) * t0), yAt(ax + (bx - ax) * t1, az + (bz - az) * t1)) + lift;
-      b.box(mx, y - th, mz, width, th, len / segs + 0.35, color, { ry, ao: 0 });
-      if (o.kerb) for (const s of [-1, 1]) b.box(mx + s * width / 2 * Math.cos(ry), y - th + 0.06, mz - s * width / 2 * Math.sin(ry), 0.34, th + 0.16, len / segs + 0.35, o.kerbColor ?? CAT.cobbleDark, { ry, ao: 0 });
+      const L = len / segs + 0.35;
+      // pieces along the run: [v0, v1] along, [u0, u1] across, kerb flags
+      let pcs = [[-L / 2, L / 2, -width / 2, width / 2, !!o.kerb, !!o.kerb]];
+      if (cuts) for (const q of cuts) {
+        const e0x = q.f.px(q.x0, q.z), e0z = q.f.pz(q.x0, q.z), e1x = q.f.px(q.x1, q.z), e1z = q.f.pz(q.x1, q.z);
+        const v0q = (e0x - mx) * s + (e0z - mz) * c, v1q = (e1x - mx) * s + (e1z - mz) * c;
+        const u0q = (e0x - mx) * c - (e0z - mz) * s, u1q = (e1x - mx) * c - (e1z - mz) * s;
+        const va = Math.min(v0q, v1q), vb = Math.max(v0q, v1q);
+        if (vb <= -L / 2 || va >= L / 2 || vb - va < 1e-6) continue;
+        const uAt = (v) => u0q + (u1q - u0q) * (v - v0q) / (v1q - v0q);
+        const xAt = (v) => q.x0 + (q.x1 - q.x0) * (v - v0q) / (v1q - v0q);
+        const side = ((q.f.x - mx) * c - (q.f.z - mz) * s) > (u0q + u1q) / 2 ? 1 : -1;
+        const next = [];
+        for (const p of pcs) {
+          const lo = Math.max(p[0], va), hi = Math.min(p[1], vb);
+          if (hi <= lo) { next.push(p); continue; }
+          // the face is rarely square to the run (a lot is turned to the
+          // street's slope at its middle, the run to its own segment's): the
+          // piece stops at the NEARER end of the face, and a FILLER laid square
+          // to the face paves the sliver between (same top, same colour)
+          const uL = uAt(lo), uH = uAt(hi), uF = side > 0 ? Math.min(uL, uH) : Math.max(uL, uH);
+          // (the face must actually cross this piece: the far sidewalk of the
+          // street is in the same span but nowhere near the building)
+          if (side > 0 ? uF >= p[3] : uF <= p[2]) { next.push(p); continue; }
+          if (lo > p[0]) next.push([p[0], lo, p[2], p[3], p[4], p[5]]);
+          const tr = side > 0 ? [lo, hi, p[2], uF, p[4], false] : [lo, hi, uF, p[3], false, p[5]];
+          const room = side > 0 ? p[3] - uF : uF - p[2];
+          if (tr[3] - tr[2] > 0.05) { tr.push({ q, xL: xAt(lo), xH: xAt(hi), dep: Math.min(room, Math.abs(uL - uH) + 0.03) }); next.push(tr); }
+          if (hi < p[1]) next.push([hi, p[1], p[2], p[3], p[4], p[5]]);
+        }
+        pcs = next;
+      }
+      for (const [v0, v1, u0, u1, k0, k1, cut] of pcs) {
+        const cv = (v0 + v1) / 2, cu = (u0 + u1) / 2, pl = v1 - v0;
+        const px = mx + s * cv + c * cu, pz = mz + c * cv - s * cu;
+        b.box(px, y - th, pz, u1 - u0, th, pl, color, { ry, ao: 0 });
+        if (out) out.push({ x: px, z: pz, c, s, hw: (u1 - u0) / 2, hd: pl / 2, top: y });
+        if (cut) {
+          const { q, xL, xH, dep } = cut, fw = Math.abs(xH - xL);
+          if (fw > 0.02 && dep > 0.02) {
+            const xm = (xL + xH) / 2, zm = q.z + dep / 2, fx = q.f.px(xm, zm), fz = q.f.pz(xm, zm);
+            b.box(fx, y - th, fz, fw, th, dep, color, { ry: q.f.ry, ao: 0 });
+            if (out) out.push({ x: fx, z: fz, c: Math.cos(q.f.ry), s: Math.sin(q.f.ry), hw: fw / 2, hd: dep / 2, top: y });
+          }
+        }
+        for (const [on, u] of [[k0, -width / 2], [k1, width / 2]]) {
+          if (!on) continue;
+          const kx = mx + s * cv + c * u, kz = mz + c * cv - s * u;
+          b.box(kx, y - th + 0.06, kz, KW, th + 0.16, pl, kerbColor, { ry, ao: 0 });
+          if (out) out.push({ x: kx, z: kz, c, s, hw: KW / 2, hd: pl / 2, top: y + 0.22 });
+        }
+      }
     }
   }
 }

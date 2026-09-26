@@ -17,13 +17,13 @@ export const HOUSE_NAMES = ["Sourly's", 'The Puckers', 'Fizzwick End', 'Chewbert
 export const SIGNS = {
   welcome: {
     cw: 8, ch: 3,
-    say: 'WELCOME TO CANDYLAND — population: delicious. Someone has painted over a line at the bottom: "do not stay past dark". It has been crossed out. Twice.',
+    say: 'WELCOME TO THE CANDY KINGDOM — population: delicious. Someone has painted over a line at the bottom: "do not stay past dark". It has been crossed out. Twice.',
     draw(g, w, h) {
       plate(g, w, h, {
         bg: cream, edge: red, borderW: 6, dots: true, dotColor: '#ffd1e6',
         lines: [
-          { text: 'WELCOME  TO', size: 0.13, y: 0.17, color: deepPink, fat: true, maxW: 0.5 },
-          { text: 'CANDYLAND', size: 0.36, y: 0.45, color: red, fat: true },
+          { text: 'WELCOME  TO  THE', size: 0.13, y: 0.17, color: deepPink, fat: true, maxW: 0.62 },
+          { text: 'CANDY KINGDOM', size: 0.36, y: 0.45, color: red, fat: true, maxW: 0.86 },
           { text: 'population: delicious', size: 0.11, y: 0.69, color: ink },
         ],
       });
@@ -186,8 +186,9 @@ export const SIGNS = {
   donut: {
     ...WIDE, say: 'THE GREAT DONUT ARCH — erected by the village, in honour of the village. Mind the sprinkles, they roll.',
     draw: (g, w, h) => plate(g, w, h, { bg: pink, edge: deepPink, borderW: 5, dots: true, lines: [
-      { text: 'CANDYLAND', size: 0.34, y: 0.35, color: deepPink, fat: true },
-      { text: 'mind the sprinkles — they roll', size: 0.13, y: 0.73, color: ink },
+      { text: 'THE', size: 0.13, y: 0.17, color: deepPink, fat: true },
+      { text: 'CANDY KINGDOM', size: 0.30, y: 0.45, color: deepPink, fat: true, maxW: 0.9 },
+      { text: 'mind the sprinkles — they roll', size: 0.13, y: 0.76, color: ink },
     ] }),
   },
   shrine: {
@@ -233,7 +234,7 @@ export const SIGNS = {
     ] }),
   },
   candybar: {
-    ...SQ, say: 'THE LEANING BAR OF CANDYLAND — structurally fine. Structurally FINE. Do not push.',
+    ...SQ, say: 'THE LEANING BAR OF THE CANDY KINGDOM — structurally fine. Structurally FINE. Do not push.',
     draw: (g, w, h) => plate(g, w, h, { bg: '#f0ddc0', edge: '#5e3a14', borderW: 5, lines: [
       { text: 'THE LEANING', size: 0.14, y: 0.19, color: '#5e3a14', fat: true },
       { text: 'BAR', size: 0.26, y: 0.47, color: '#5e3a14', fat: true },

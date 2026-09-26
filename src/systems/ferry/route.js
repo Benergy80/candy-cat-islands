@@ -15,7 +15,7 @@ export const DOCKS = {
   // island each time; `gang` says which flank the plank swings from, because the
   // pier is to port at one end of the run and to starboard at the other. Both
   // piers are open only at their seaward end, so she lies across it.
-  candy: { id: 'candy', x: -24, z: 22, yaw: Math.PI, gang: 1, dir: 1, shoreX: -36, pier: 'Sugar Pier', island: 'Candyland' },
+  candy: { id: 'candy', x: -24, z: 22, yaw: Math.PI, gang: 1, dir: 1, shoreX: -36, pier: 'Sugar Pier', island: 'the Candy Kingdom' },
   cat: { id: 'cat', x: 24, z: 22, yaw: Math.PI, gang: -1, dir: -1, shoreX: 36, pier: 'Arrivals Pier', island: 'Cat Island' },
 };
 

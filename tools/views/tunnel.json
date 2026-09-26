@@ -1,0 +1,78 @@
+{
+ "tunnel_stand_day": {
+  "pos": [
+   215.5,
+   -20.5
+  ],
+  "time": 11,
+  "frames": 50
+ },
+ "tunnel_stand_free": {
+  "free": [
+   215.5,
+   -24.5
+  ],
+  "el": 0.58,
+  "dist": 38,
+  "az": 0.78,
+  "time": 11,
+  "frames": 50
+ },
+ "tunnel_open_day": {
+  "pos": [
+   217.2,
+   -22.6
+  ],
+  "time": 15,
+  "frames": 330,
+  "call": {
+   "catContainment.debugTunnel": "open"
+  }
+ },
+ "tunnel_open_night": {
+  "pos": [
+   217.2,
+   -22.6
+  ],
+  "time": 22.5,
+  "frames": 330,
+  "call": {
+   "catContainment.debugTunnel": "open"
+  }
+ },
+ "tunnel_counter_sardine": {
+  "pos": [
+   208.4,
+   -16.6
+  ],
+  "az": -0.9,
+  "el": 0.5,
+  "time": 15,
+  "frames": 330,
+  "call": {
+   "catContainment.debugTunnel": "open"
+  }
+ },
+ "tunnel_prompt_counter": {
+  "pos": [
+   209.6,
+   -17.3
+  ],
+  "time": 11,
+  "frames": 12,
+  "call": {
+   "ui.clear": []
+  }
+ },
+ "tunnel_stand_night": {
+  "free": [
+   215.5,
+   -24.5
+  ],
+  "el": 0.58,
+  "dist": 38,
+  "az": 0.78,
+  "time": 21.5,
+  "frames": 50
+ }
+}

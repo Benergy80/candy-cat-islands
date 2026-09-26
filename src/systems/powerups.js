@@ -850,6 +850,8 @@ export function create(ctx) {
     const pl = ctx.systems.player;
     const pp = pl?.position;
     const riding = !!(pl && (pl.onVehicle || pl.onFerry || st.flying || st.vehicle));
+    // in a tiger's jaws (the scruff-carry, the raid's rainbow carry: onFerry, but not riding) — no star
+    const held = !!(ctx.systems.catCitizens?.carrier || ctx.systems.catCitizens?.raid?.carrying);
     const cam = ctx.camera.position;
     const p = P();
 
@@ -876,7 +878,7 @@ export function create(ctx) {
 
       // pickup test (body centre ↔ star centre)
       let nearK = 1;
-      if (pp && !st.paused) {
+      if (pp && !st.paused && !held) {
         const dx = s.x + s.dx - bx, dy = s.y + s.dy - by, dz = s.z + s.dz - bz;
         const d2 = dx * dx + dy * dy + dz * dz;
         const R = riding ? RIDE_R : COLLECT_R;

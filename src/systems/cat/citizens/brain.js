@@ -447,8 +447,11 @@ export function updateCat(c, dt, ctx, S) {
   if (c.think <= 0) {
     c.think = c.tigerK > 0.5 ? 0.12 : 0.35 + c.seed * 0.4;
     let plan = null;
+    // a scripted beat owns the cat outright (citizens/carry.js: the carrier on
+    // its rail, the escort, the cat asleep on the visitor's feet at dawn)
+    if (c.scriptPlan) plan = c.scriptPlan;
     // after dark the tiger brain owns the cat completely
-    if (c.tigerK > 0.55 && S.tigerPlan) plan = S.tigerPlan(c, h, ctx, S);
+    if (!plan && c.tigerK > 0.55 && S.tigerPlan) plan = S.tigerPlan(c, h, ctx, S);
     if (!plan && c.fxUntil > S.elapsed) plan = hitPlan(c, S);
     if (!plan && c.talkUntil > S.elapsed) plan = { act: 'talk', pose: c.talkPose || 'stand' };
     // authored social staging wins: pairs, queues, the gym crew, the night watch
@@ -543,6 +546,14 @@ export function updateCat(c, dt, ctx, S) {
       break;
     }
     case 'sprint': break;
+    case 'rail': {
+      // the body is moved along its route by citizens/carry.js (x, z set
+      // before this runs); the plan only says how it looks doing it
+      c.moving = !!plan.moving;
+      if (plan.face !== undefined) c.faceDir = plan.face;
+      if (plan.speed) c.gaitSpeed = plan.speed;
+      break;
+    }
     case 'kitten': {
       // A proper game of tag: every kitten runs the same ring at the same speed,
       // staggered by index, so they chase each other's tails in a line.

@@ -136,7 +136,7 @@ const HUD_READ = 0.25;          // s: the minimap / map chip / hotbar boxes are 
 // What an ellipsis-only line ('...') shows instead of three dots in a speech box.
 const BEATS = ['stares at you.', 'says nothing. Loudly.', 'just watches you.', 'looks you up and down.'];
 
-const OBJ_DAY = 'Explore Candyland. Be home before dark.';
+const OBJ_DAY = 'Explore the Candy Kingdom. Be home before dark.';
 const OBJ_NIGHT = 'It is dark. They are hungry. Get to the pier.';
 
 // Flavour text for automatic landmark banners (explicit banner() calls win).
@@ -378,7 +378,7 @@ export function create(ctx) {
   const banSub = banEl.querySelector('.cci-banner-sub');
   const banIco = banEl.querySelector('.cci-banner-ico');
   const banAnim = panel(banEl, { rise: 0.24, fall: 0.4, y: -18, s: 0.86 });
-  let banTimer = 0, lastTopW = -1, lastVW = -1;
+  let banTimer = 0, lastTopW = -1, lastVW = -1, lastOW = -1, lastOH = -1, lastDH = -1;
 
   // ── interaction prompt ─────────────────────────────────────────────────────
   // The pill carries a LEADER TAIL: a notch off whichever edge faces the thing
@@ -1275,11 +1275,33 @@ export function create(ctx) {
       // 'BILLIONS SERVED' band lives up there). Toasts and the banner dock
       // top-centre; if the column ever grew wide enough to reach into that
       // band, it slides right instead of covering it.
+      // Nor does it cover the objective card or the clock: it slides into the
+      // gap between them when it fits there, and on a window too narrow for
+      // that (a narrow desktop window) it drops below whichever of the two it
+      // would cover. Touch layouts dock it themselves (touch.js).
       const vw = window.innerWidth, tw = topCol.offsetWidth || 0;
-      if (tw !== lastTopW || vw !== lastVW) {
-        lastTopW = tw; lastVW = vw;
-        const want = Math.max(vw * 0.5, Math.min(vw - tw / 2 - 12, vw * 0.3 + tw / 2 + 14));
+      const ow = objEl.offsetWidth, oh = objEl.offsetHeight, dh = dial.el.offsetHeight;
+      if (tw !== lastTopW || vw !== lastVW || ow !== lastOW || oh !== lastOH || dh !== lastDH) {
+        lastTopW = tw; lastVW = vw; lastOW = ow; lastOH = oh; lastDH = dh;
+        let want = Math.max(vw * 0.5, Math.min(vw - tw / 2 - 12, vw * 0.3 + tw / 2 + 14));
+        let top = 0;
+        if (!ctx.state.touch && !document.body.classList.contains('cci-touch')) {
+          // layout boxes (offsets up the parent chain: the panels' animation transforms don't count)
+          let oL = 0, oT = 0, dL = 0, dT = 0;
+          for (let e = objEl; e; e = e.offsetParent) { oL += e.offsetLeft; oT += e.offsetTop; }
+          for (let e = dial.el; e; e = e.offsetParent) { dL += e.offsetLeft; dT += e.offsetTop; }
+          const oR = oL + ow, dR = dL + dial.el.offsetWidth;
+          const gL = (oh ? oR : 0) + 10, gR = (dh ? dL : vw) - 10;
+          if (gR - gL >= tw) want = Math.min(Math.max(want, gL + tw / 2), gR - tw / 2);
+          else {
+            const l = want - tw / 2 - 8, r = want + tw / 2 + 8;
+            if (oh && l < oR && r > oL) top = Math.max(top, oT + oh + 8);
+            if (dh && l < dR && r > dL) top = Math.max(top, dT + dh + 8);
+          }
+        }
         topCol.style.left = Math.round(want) + 'px';
+        const tt = top > 16 ? Math.round(top) + 'px' : '';
+        if (topCol.style.top !== tt) topCol.style.top = tt;
       }
 
       // toasts — one on screen; the queue feeds the next as this one clears
@@ -1303,7 +1325,7 @@ export function create(ctx) {
       if (tNow < 12 && prevTime >= 12) warnedTonight = false;   // new day rolled over
       if (!warnedTonight && prevTime < 19 && tNow >= 19 && tNow < 20 && st.island === 'candy') {
         warnedTonight = true;
-        makeToast('The Sour Patch Kids are heading home. You should too.', 7, { warn: true, icon: 'warn' });
+        makeToast('The Sourlings are heading home. You should too.', 7, { warn: true, icon: 'warn' });
       }
       prevTime = tNow;
 
@@ -1377,7 +1399,9 @@ export function create(ctx) {
       // fade
       if (fadeVal !== fadeTo) {
         fadeVal = fadeTo > fadeVal ? Math.min(fadeTo, fadeVal + dt * fadeRate) : Math.max(fadeTo, fadeVal - dt * fadeRate);
-        fadeEl.style.display = fadeVal > 0.001 ? '' : 'none';
+        // ('block', not '': the stylesheet's `.cci-fade { display: none }`
+        //  would take an empty inline display back, and no fade was ever seen)
+        fadeEl.style.display = fadeVal > 0.001 ? 'block' : 'none';
         fadeEl.style.opacity = fadeVal.toFixed(3);
         if (fadeVal === fadeTo && fadeResolve) { const r = fadeResolve; fadeResolve = null; r(); }
       }

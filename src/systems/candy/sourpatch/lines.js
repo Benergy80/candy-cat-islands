@@ -358,3 +358,37 @@ export const HOMEWARD = [
   'the rainbow is much steeper going home.',
   'see you tonight! same time!',
 ];
+
+// ── Contract O: THE DUSK RITUAL (sourpatch/ritual.js) ──────────────────────────
+// the chant round the Sour Shrine, captioned when the visitor is near enough to
+// hear it (speaker: all of them). Freaky, sweet, never gory.
+export const CHANT = [
+  'mmmmmmmmmmmmmmmmmm.',
+  'hee. hee. hee. hee.',
+  'sweet, sweeter, sweetest. sour, sourer, SOUREST.',
+  'mmm-hee. mmm-hee. mmm-hee.',
+  'one more for the lost and found. one more for the lost and found.',
+  'we are so glad you came. we are so glad you came.',
+  'the sun goes down. the sugar comes off.',
+  'mmmmmmmmm. hee.',
+];
+// Violet, the royal one, as they turn their backs to the stone
+export const HUSH = [
+  'shhhhh. now.',
+  'eyes closed, everyone. eyes CLOSED.',
+  'it\'s time to be hungry.',
+];
+// the visitor steps inside the outer ring: every head, all at once
+export const SNAP = [
+  'oh! a volunteer.',
+  'you\'re in the circle.',
+  'you weren\'t supposed to see this part.',
+  'hi. you\'re early. that\'s fine. that\'s FINE.',
+];
+// the reveal: the nearest one, already looking at him
+export const REVEAL = [
+  'ready or not.',
+  'ok. NOW we can play.',
+  'we missed you. all day.',
+  'it\'s dinner o\'clock.',
+];

@@ -96,7 +96,7 @@ export function buildShrine(A) {
       const lines = [
         'The face is beaming. It has far too many teeth and all of them are very clean.',
         'Wax has run down the stone in eight lines, one from each figure. It is not wax.',
-        'Carved underneath, in a careful childish hand: "THANK YOU FOR COMING TO CANDYLAND".',
+        'Carved underneath, in a careful childish hand: "THANK YOU FOR COMING TO THE CANDY KINGDOM".',
       ];
       const n = (ctx.systems.story?.get('shrine_reads') || 0) % lines.length;
       ctx.systems.story?.set('shrine_reads', n + 1);

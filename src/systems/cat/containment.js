@@ -71,7 +71,7 @@ export function create(ctx) {
   // ── persistent state ───────────────────────────────────────────────────────
   const S = {
     arrived: false, escorted: false, ticketAttempts: 0, signed: false,
-    escapeAttempts: 0, crateTaps: 0, hasFish: false, tunnelOpen: false, napperGone: false,
+    escapeAttempts: 0, crateTaps: 0, hasFish: false, tunnelOpen: false, napperGone: false, tunnelUsed: false,
     waveTriggers: 0, rescues: 0,
     boardStage: 0, posterUpdated: false, nightsSlept: 0, medal: false,
     curfewNight: -1, phase: 'arriving', arrowsRead: [false, false, false, false, false, false],
@@ -287,7 +287,7 @@ export function create(ctx) {
     // only fill in if it didn't (flag: escape_card_shown_<route>)
     cardCheck = { route, t: 0.9 };
     // (post-medal the objective is the real way out — the boarding pass, the flare — and stays)
-    if (!S.medal) ui()?.setObjective('Enjoy Candyland. The arrivals ferry runs every three hours.');
+    if (!S.medal) ui()?.setObjective('Enjoy the Candy Kingdom. The arrivals ferry runs every three hours.');
   }
 
   /**
@@ -410,51 +410,216 @@ export function create(ctx) {
     env.toast('Somebody has pinned a very detailed poster of you to the wall.');
   }
 
-  // ── tunnel ─────────────────────────────────────────────────────────────────
+  // ── tunnel: THE SMOOTHIE STAND (Contract O) ─────────────────────────────────
+  // Ben: "something is preventing the player from looking behind the smoothie
+  // stand (E not working)". There were two smoothie stands 20 u apart, and the
+  // one with the sign only had a menu. Now: the gym's GAINS SHAKE stand is THE
+  // stand, the tunnel is dug in behind it (scenery.js placeTunnel), and it has
+  // ONE prompt — ours, registered under the stand's own id 'cat_smoothie' so it
+  // REPLACES catArchitecture's menu chatter (the joke is folded into our first
+  // line). Its trigger is the stand's own FOOTPRINT plus the lawn from the stand
+  // to the tunnel mouth: getPos is the nearest point on (stand box ∪ segment to
+  // the mouth), so it answers from every side of the stand and at the mouth, is
+  // measured from the counter's edge rather than the stand's middle (a pickup
+  // dropped at the stand's foot no longer out-ranks it), and the E pill sits on
+  // the part of the stand you are standing at.
+  const TUN = SPOTS.tunnel, STAND = SPOTS.smoothie;
+  const tnx = Math.sin(TUN.ry ?? 0), tnz = Math.cos(TUN.ry ?? 0);   // the way the mouth faces
+  const APRON = { x: TUN.x + tnx * 2.4, z: TUN.z + tnz * 2.4 };       // where you stand to look in
+  const MOUTH = { x: TUN.x + tnx * 0.6, z: TUN.z + tnz * 0.6 };
+  const LABEL_LOOK = 'Look behind the smoothie stand', LABEL_CRAWL = 'Crawl through the tunnel';
+  const sc = Math.cos(STAND.ry ?? 0), ss = Math.sin(STAND.ry ?? 0);
+  const SHW = STAND.hw ?? 2.7, SHD = STAND.hd ?? 1.9;
+  const capPos = { x: STAND.x, z: STAND.z };                          // getPos scratch (no per-frame garbage)
+  function standGetPos() {
+    const p = ctx.systems.player?.position;
+    if (!p) { capPos.x = STAND.x; capPos.z = STAND.z; return capPos; }
+    // nearest point on the stand's box (kit frame: local +x = (c, −s), +z = (s, c))
+    const dx = p.x - STAND.x, dz = p.z - STAND.z;
+    const lx = clamp(dx * sc - dz * ss, -SHW, SHW), lz = clamp(dx * ss + dz * sc, -SHD, SHD);
+    const bx = STAND.x + lx * sc + lz * ss, bz = STAND.z - lx * ss + lz * sc;
+    // …and on the lawn from the stand to the mouth
+    const sx = MOUTH.x - STAND.x, sz = MOUTH.z - STAND.z;
+    const t = clamp((dx * sx + dz * sz) / (sx * sx + sz * sz || 1), 0, 1);
+    const qx = STAND.x + sx * t, qz = STAND.z + sz * t;
+    if (Math.hypot(p.x - bx, p.z - bz) <= Math.hypot(p.x - qx, p.z - qz)) { capPos.x = bx; capPos.z = bz; }
+    else { capPos.x = qx; capPos.z = qz; }
+    return capPos;
+  }
+  let standEntry = null, standLooks = 0, menuLine = 0;
+  const MENU = [
+    'The menu has one other item: “WATER (for guests, we worry about you)”.',
+    'The blender is the size of a bathtub. Round the back, something is snoring.',
+    'Today’s special: GAINS SHAKE. Yesterday’s special: GAINS SHAKE. There is a pattern.',
+  ];
+  function refreshStandLabel() {
+    if (!standEntry) return;
+    const l = S.tunnelOpen ? LABEL_CRAWL : LABEL_LOOK;
+    if (standEntry.label === l) return;
+    standEntry.label = l;
+    if (ctx.systems.interaction?.nearest?.() === standEntry) ui()?.prompt(l, standEntry);
+  }
+  /** E while one of OUR cards is up: press its safe button (a one-button card's
+   *  only button; the contract's "Put the pen down", never "Sign"), so the key
+   *  is never swallowed by a modal the visitor has stopped looking at. */
+  function dismissCard() {
+    let btn = null;
+    try {
+      const btns = Array.from(document.querySelectorAll('#cnt-buttons .cnt-btn'));
+      btn = btns.length === 1 ? btns[0] : (btns.filter((b) => !b.classList.contains('primary')).pop() || null);
+    } catch (err) { btn = null; }
+    if (btn) btn.click(); else cards?.hide();
+  }
   function onTunnel() {
-    if (!cards || cards.open || transit.on) return;
+    // NEVER A SILENT E: every early-out says why, and an open card is closed
+    if (transit.on) { env.toast('Already halfway down the hole. Keep crawling.'); return; }
+    if (sleep.on) { env.toast('Shh. You are asleep.'); return; }
+    if (cards?.open) dismissCard();
+    const pl = ctx.systems.player;
+    if (pl?.onVehicle || ctx.state.vehicle) { env.toast('Not from up here. Get down first.'); return; }
     if (!S.tunnelOpen) {
       if (!S.hasFish) {
-        env.say('A cat is asleep across the tunnel mouth. Completely across it.', 'Tunnel');
-        env.say('His collar says MR. SARDINE. He has always been asleep. He will always be asleep.', 'Tunnel');
+        if (standLooks++ === 0) {
+          env.say('GAINS SHAKE: 90% tuna, 10% belief, served in a bucket. You lean round the back of the stand to see where they keep the tuna…', 'Smoothie Stand');
+          env.say('…and there is a hole, going under the gym. Across the hole: a cat. Completely across it.', 'Tunnel');
+          env.say('His collar says MR. SARDINE. He has always been asleep. He will always be asleep.', 'Tunnel');
+        } else {
+          env.say(MENU[menuLine++ % MENU.length], 'Smoothie Stand');
+          env.say('Mr. Sardine is still asleep across the hole. He has not moved. He is not going to move.', 'Tunnel');
+        }
         env.toast('He would probably wake up for a fish.');
         ui()?.setObjective('Find something a sleeping cat cannot ignore');
         return;
       }
       S.hasFish = false; fish.visible = false;
       story()?.set('has_fish', false);
-      S.tunnelOpen = true; S.napperGone = true; residents.napperAwake = true;
+      S.tunnelOpen = true; S.napperGone = true;
       story()?.set('tunnel_open');
+      if (standLooks++ === 0) env.say('GAINS SHAKE: 90% tuna, 10% belief. Round the back of the stand, a cat is asleep across a hole. You hold out the fish.', 'Smoothie Stand');
       env.say('Mr. Sardine accepts your fish. Mr. Sardine suddenly has business elsewhere.', 'Mr. Sardine');
       env.toast('The tunnel is clear. Go now. Go quietly.');
       ui()?.setObjective('Crawl through the tunnel');
+      startSardineWalk();
+      showTunnelBeacon();
+      refreshStandLabel();
       return;
     }
-    transit = { on: true, stage: 0, t: 0, to: 'cove' };
-    if (ctx.systems.player) ctx.systems.player.locked = true;
-    cards.fadeTo(1, 2.4);
+    startTransit('cove');
   }
+  // a verifier (or any system) that sets the flag directly gets the same world:
+  // Mr. Sardine pads off, the arrow comes up, the prompt says "Crawl"
+  ctx.events.on('story:tunnel_open', (v) => {
+    if (!v || S.tunnelOpen) return;
+    S.tunnelOpen = true; S.napperGone = true;
+    startSardineWalk(); showTunnelBeacon(); refreshStandLabel();
+  });
   function onCoveArch() {
-    if (!cards || cards.open || transit.on) return;
-    transit = { on: true, stage: 0, t: 0, to: 'gym' };
+    if (transit.on) { env.toast('Already halfway down the hole. Keep crawling.'); return; }
+    if (cards?.open) dismissCard();
+    startTransit('gym');
+  }
+  function startTransit(to) {
+    transit = { on: true, stage: 0, t: 0, to };
     if (ctx.systems.player) ctx.systems.player.locked = true;
-    cards.fadeTo(1, 2.4);
+    if (to === 'cove' && !S.tunnelUsed) { S.tunnelUsed = true; hideTunnelArrow(); }
+    if (cards) cards.fadeTo(1, 2.4);
+    else { transit.stage = 0; transit.noFade = true; }             // no UI: cut, don't hang
+  }
+
+  // Mr. Sardine: gags.js lays him across the mouth with the OLD arch facing baked
+  // in, and walks him off along it — straight into the stand, now. The arch turns
+  // to face the camera, so we lay him across the new mouth here and, once bribed,
+  // walk him ourselves: round the clear end of the stand to its counter, where
+  // he sits down to wait for a GAINS SHAKE. (Business elsewhere.)
+  const napper = residents.napper;
+  if (napper) { napper.x = TUN.x + tnx * 1.25; napper.z = TUN.z + tnz * 1.25; napper.ry = (TUN.ry ?? 0) + Math.PI / 2; }
+  const sardine = { on: false, i: 0, sat: false, path: [] };
+  const sardineDraw = { x: 0, y: 0, z: 0, ry: 0, tilt: 0, scale: 1, squash: 1 };
+  const sardineGround = {}, sardinePush = {};
+  function startSardineWalk() {
+    if (!napper || sardine.on) return;
+    residents.hideNapper?.();                     // gags stops drawing him; we take over
+    napper.show = false;
+    const c = Math.cos(STAND.ry ?? 0), s = Math.sin(STAND.ry ?? 0);
+    const L = (u, v) => ({ x: STAND.x + u * c + v * s, z: STAND.z - u * s + v * c });
+    const w = TUN.way || 1, hw = STAND.hw ?? 2.7, hd = STAND.hd ?? 1.9;
+    sardine.path = [{ x: APRON.x, z: APRON.z }, L(w * (hw + 1.1), -hd - 1.1), L(w * (hw + 1.1), hd + 1.1), L(w * 1.4, hd + 1.15)];
+    sardine.on = true; sardine.i = 0; sardine.sat = false;
+  }
+  function updateSardine(dt) {
+    if (!sardine.on || !napper) return;
+    const pl = ctx.systems.player;
+    if (!sardine.sat) {
+      const wp = sardine.path[sardine.i];
+      const d = napper.moveTo(wp.x, wp.z, dt, 2.2);
+      if (pl?.pushOut) { const r = pl.pushOut(napper.x, napper.z, 0.4, sardinePush); napper.x = r.x; napper.z = r.z; }
+      napper.sit = false; napper.squash = 1; napper.scale = 1.15;
+      if (d < 0.3 && ++sardine.i >= sardine.path.length) {
+        sardine.sat = true; napper.sit = true; napper.hop = 0; napper.face(STAND.x, STAND.z);
+      }
+    } else napper.squash = 0.86 + Math.sin(ctx.state.elapsed * 1.3) * 0.03;
+    const gi = pl?.groundInfo ? pl.groundInfo(napper.x, napper.z, sardineGround) : null;
+    const gy = gi && Number.isFinite(gi.h) ? gi.h : world.height(napper.x, napper.z);
+    const o = sardineDraw;
+    o.x = napper.x; o.z = napper.z; o.ry = napper.ry; o.scale = napper.scale;
+    o.y = Math.max(gy, 0.02) + (napper.sit ? 0 : Math.abs(Math.sin(napper.hop)) * 0.16);
+    o.squash = napper.squash * (napper.sit ? 0.82 : 1);
+    pool.set(napper.slot, o);
+  }
+
+  // The way in, once he has gone: a gold arrow bobbing over the arch and a slow
+  // fizz of sparkles at the mouth (Contract O). The arrow goes after the first
+  // crawl; the sparkles stay, faintly, so you can always find it again.
+  const tunnelArrow = (() => {
+    const parts = [
+      place(paint(new THREE.ConeGeometry(0.62, 1.0, 4), 0xffd24a), 0, 0, 0, Math.PI, 0, 0),       // tip, pointing down
+      place(paint(new THREE.BoxGeometry(0.34, 0.95, 0.34), 0xffe38a), 0, 0.95, 0),                 // shaft
+    ];
+    const m = new THREE.Mesh(mergeGeometries(parts, false), mat(0xffffff, { vertexColors: true, flatShading: true, roughness: 0.45, emissive: 0xffb020, emissiveIntensity: 0.9 }));
+    m.visible = false; m.castShadow = false; m.name = 'containment-tunnel-arrow'; m.frustumCulled = true;
+    ctx.scene.add(m);
+    return m;
+  })();
+  const beacon = { on: false, t: 0, baseY: 0, x: TUN.x + tnx * 0.9, z: TUN.z + tnz * 0.9 };
+  function showTunnelBeacon() {
+    beacon.on = true; beacon.baseY = world.height(TUN.x, TUN.z) + 6.6;
+    if (!S.tunnelUsed) tunnelArrow.visible = true;
+    try { ui()?.addMapMarker?.({ id: 'cnt_tunnel', x: TUN.x, z: TUN.z, label: 'The tunnel' }); } catch (err) { /* no map */ }
+  }
+  function hideTunnelArrow() { tunnelArrow.visible = false; }
+  function updateBeacon(dt) {
+    if (!beacon.on) return;
+    const e = ctx.state.elapsed;
+    if (tunnelArrow.visible) {
+      tunnelArrow.position.set(beacon.x, beacon.baseY + Math.sin(e * 3.1) * 0.35, beacon.z);
+      tunnelArrow.rotation.y = e * 1.6;
+    }
+    const p = ctx.systems.player?.position;
+    if (!p || Math.hypot(p.x - TUN.x, p.z - TUN.z) > 70) return;
+    beacon.t -= dt;
+    if (beacon.t > 0) return;
+    beacon.t = S.tunnelUsed ? 0.9 : 0.28;
+    const y = world.height(TUN.x, TUN.z);
+    const k = Math.sin(e * 7.3) * 1.1;                              // wander across the mouth
+    ctx.systems.particles?.sparkle?.(TUN.x + tnx * 0.8 + tnz * k, y + 1.0 + Math.abs(Math.sin(e * 2.1)) * 1.6, TUN.z + tnz * 0.8 - tnx * k, S.tunnelUsed ? 0xbff7ea : 0xffe27a, S.tunnelUsed ? 2 : 4);
   }
   function updateTransit(dt) {
-    if (!transit.on || !cards) return;
+    if (!transit.on) return;
     transit.t += dt;
-    if (transit.stage === 0 && cards.fadeValue() > 0.985) {
+    const fadeV = cards ? cards.fadeValue() : (transit.stage === 0 ? 1 : 0);
+    if (transit.stage === 0 && fadeV > 0.985) {
       transit.stage = 1; transit.t = 0;
       if (transit.to === 'cove') {
         ctx.systems.player?.teleport(SPOTS.cove.x + 1.6, SPOTS.cove.z + 3.4);
         ui()?.banner('Hidden Cove', 'No signs. No arrows. No cats. Suspicious.', 3.4);
         ui()?.setObjective('Push off before anyone notices');
       } else {
-        ctx.systems.player?.teleport(SPOTS.tunnel.x - 2.6, SPOTS.tunnel.z + 2.6);
+        // out onto the apron, in front of the mouth (it faces the camera now)
+        ctx.systems.player?.teleport(APRON.x + tnx * 0.4, APRON.z + tnz * 0.4);
         ui()?.banner('Muscle Beach Gym', 'You smell faintly of tunnel.', 2.6);
       }
-      cards.fadeTo(0, 1.4);
-    } else if (transit.stage === 1 && cards.fadeValue() < 0.02) {
+      cards?.fadeTo(0, 1.4);
+    } else if (transit.stage === 1 && fadeV < 0.02) {
       transit.on = false;
       if (ctx.systems.player) ctx.systems.player.locked = false;
     }
@@ -584,10 +749,14 @@ export function create(ctx) {
         }
       },
     });
-    reg({
-      id: 'cnt_tunnel', x: SPOTS.tunnel.x, z: SPOTS.tunnel.z, r: 3.4,
-      label: 'Look behind the smoothie stand', onInteract: onTunnel,
+    // THE stand's one prompt (see the tunnel section): same id as catArchitecture's
+    // menu chatter, registered after it (world:ready order), so it replaces it
+    standEntry = reg({
+      id: 'cat_smoothie', x: STAND.x, z: STAND.z, r: 2.6, promptR: 1.6, promptH: 2.6,
+      label: S.tunnelOpen ? LABEL_CRAWL : LABEL_LOOK, getPos: standGetPos, onInteract: onTunnel,
     });
+    // the old id stays for scripts that poke it, but never prompts on its own
+    reg({ id: 'cnt_tunnel', x: TUN.x, z: TUN.z, r: 3.4, enabled: false, label: LABEL_LOOK, onInteract: onTunnel });
     reg({ id: 'cnt_cove', x: SPOTS.cove.x, z: SPOTS.cove.z, r: 3.0, label: 'Crawl back through the tunnel', onInteract: onCoveArch });
     reg({
       id: 'cnt_raftA', r: 3.4, label: 'Board the raft',
@@ -785,6 +954,11 @@ export function create(ctx) {
     updateCurfew(dt);
     updateSleep(dt);
     updateTransit(dt);
+    updateSardine(dt);
+    updateBeacon(dt);
+    // our stand entry must be THE 'cat_smoothie' (a late re-register elsewhere would
+    // quietly bring the menu-only prompt back)
+    if (standEntry) { const I = ctx.systems.interaction; if (I?.items && I.items.get('cat_smoothie') !== standEntry) I.items.set('cat_smoothie', standEntry); }
     blockChecks(dt);
     cards?.update(dt);
 
@@ -845,6 +1019,14 @@ export function create(ctx) {
     },
     // handy for other systems / debugging
     spots: SPOTS,
+    /** Debug/render hook (Contract O): 'fish' pockets the fish; 'open' also bribes
+     *  Mr. Sardine exactly as E at the stand would (he walks off, the arrow and
+     *  sparkles come up). Returns the tunnel state. */
+    debugTunnel(stage = 'open') {
+      if (!S.tunnelOpen && !S.hasFish) { S.hasFish = true; fish.visible = true; story()?.set('has_fish', true); }
+      if (stage === 'open' && !S.tunnelOpen) onTunnel();
+      return { open: S.tunnelOpen, fish: S.hasFish, label: standEntry?.label ?? null, sardine: napper ? { x: +napper.x.toFixed(2), z: +napper.z.toFixed(2), sat: sardine.sat } : null };
+    },
     triggerWave: (x, z) => wave.trigger(x ?? ctx.systems.player.position.x, z ?? ctx.systems.player.position.z),
     sceneryTris: scenery.tris,
   };

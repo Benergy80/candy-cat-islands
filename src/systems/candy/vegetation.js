@@ -1449,7 +1449,7 @@ export function create(ctx) {
     landmarksOfNote.push({
       id: 'veg_sugar_ring', x: B.x, z: B.z + 2.4, y: by0 + 2.2, r: 3.4, label: 'Stand in the ring',
       speaker: 'The Sugar Ring', colors: [0x8fd8ff, 0xffffff, 0xff9fe0],
-      line: 'Twelve crystals in a circle, grown not placed. Inside the ring it is noticeably quieter. The Sour Patch Kids walk around it.',
+      line: 'Twelve crystals in a circle, grown not placed. Inside the ring it is noticeably quieter. The Sourlings walk around it.',
     });
   }
 

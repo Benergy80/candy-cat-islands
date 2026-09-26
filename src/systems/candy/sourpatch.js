@@ -10,10 +10,12 @@
 // legs on the Great Cupcake steps, three follow you at a polite distance with
 // their hands behind their backs, and the rest wander the licorice.
 // At 18:30 every one of them FREEZES mid-pose, turns to face you exactly and
-// tilts its head — all of them, the same way, for three seconds. Then they go
-// indoors. After 19:30 they come back out hunched, with the lights off in their
-// heads, and hunt you. Three of them touching you is dinner. They will not
-// cross the salt line at Sugar Pier; they will stand at it and paw.
+// tilts its head — all of them, the same way, for three seconds. Then (Contract
+// O) they RUN for the Sour Shrine, ring it, chant, turn their backs, go dark
+// and come back round as the night rig (sourpatch/ritual.js, ≈ 40 s: the hunt
+// begins ≈ 21:42) — hunched, the lights off in their heads, and they hunt you.
+// Three of them touching you is dinner. They will not cross the salt line at
+// Sugar Pier; they will stand at it and paw.
 //
 // WAVE 2 — they can be fought back. api.hit(kidRef, { weapon, power, from, kind })
 // dissolves them (salt), melts them (spray), punts them (bat/hammer), stuns them
@@ -158,6 +160,24 @@
 // Measured (A/B with the rig AND props hidden, at the game camera): 9 draw
 // calls / 32.0k tris by day, 13 / 35.3k at night, 14 / 37.3k during the dusk
 // beat. Budget is 40 calls / 60k tris.
+// 2026-09-25 Contract O — THE DUSK RITUAL (sourpatch/ritual.js, owner
+// "ritual"): the 18:30 freeze is kept; after it every kid RUNS to the Sour
+// Shrine (the walk-back-to-work navigation with its ring spot as the goal and
+// its speeds × 1.9; in the visitor's sight it makes for the nearest licorice
+// way out of the picture first, the least crowded; out of it, it joins a
+// procession up the forest path; a kid boxed in by walls gives up in a puff),
+// forms two rings on the grass round the dais (pushOut-tested spots), and the
+// ≈ 40 s rite plays out (ritual.js RT): chant, torches one by one, the altar,
+// backs to the centre, eyes dark, a pulse, the whirl into the night rig. The
+// phase machine (wantPhase / clockPhase) holds 'watching' from 18:30 to the
+// rite's end on its own clock (past 19:30's nightfall); a clock jump seeds
+// the rite from the clock. At the hunt the ones the visitor can see (or
+// within 42 u) hunt from where they stand; the rest come as before. The
+// visitor inside the outer ring breaks it: heads snap, the hunt starts early.
+// Runners plan round the visitor (navVis), squeeze past each other (half a
+// body), get RIT_TOKENS plans a frame, and give up like a sunbather (a door,
+// never a stroll-arrive short of the ring). Debug: api.debug.ritual(rt),
+// api.ritual.stats(), api.phaseAt(h). Event 'sourpatch:ritual' {stage, rt}.
 // Kids never leave Candyland — except the raiding pack (k.raid, above): every
 // position test goes through onHome() (onCandy() for everyone else).
 // Exposes: api.kids [{pos, color, name, state}], api.getMood(), api.phase,
@@ -186,6 +206,7 @@ import { createWater } from './sourpatch/water.js';
 import { createPuddles } from './sourpatch/puddles.js';
 import { createNav } from './sourpatch/nav.js';
 import { createRaid } from './sourpatch/raid.js';
+import { createRitual, RIT_START_H, RT as RIT_RT, ritualEndH } from './sourpatch/ritual.js';
 
 // At most this many kids are ever coming after the visitor at once; the rest
 // watch from the edge of the light and step in as slots free up.
@@ -789,9 +810,13 @@ export function create(ctx) {
     // body-width of dark between each shape — not one heap of gummy
     const spread = phase === 'hunting' && !k.hurt && night.pounce <= 0 && night.sated <= 0;
     const soft = spread ? SPREAD_RATE * dt : 0;
+    // (Contract O: two kids both on the run to the shrine squeeze past each
+    // other — half a body of give — or the whole village jams in the lane
+    // mouth out of the plaza, single file between the gumdrop bushes)
+    const runK = k.ritMode === 'run';
     for (const o of kids) {
       if (o === k || o.vis < 0.5 || o.air > 0.05) continue;
-      const dx = k.x - o.x, dz = k.z - o.z, hard = (k.r + o.r) * (o.lie > 0.5 || spread ? HUNT_BODY : 0.92);
+      const dx = k.x - o.x, dz = k.z - o.z, hard = (k.r + o.r) * (runK && o.ritMode === 'run' ? 0.72 : (o.lie > 0.5 || spread ? HUNT_BODY : 0.92));
       const min = spread ? (k.r + o.r) * HUNT_GAP : hard;
       const d2 = dx * dx + dz * dz;
       if (d2 >= min * min) continue;
@@ -1040,11 +1065,16 @@ export function create(ctx) {
   // …and the salt line round Sugar Pier is a wall to plan round, not a place
   // to be shoved back out of every frame (keepOutOfSalt)
   const pierIn = (x, z) => (x - DOCK.x) ** 2 + (z - DOCK.z) ** 2 < (SAFE_R + 0.4) * (SAFE_R + 0.4);
+  // (Contract O: a kid on the run to the Sour Shrine plans round the VISITOR
+  // too — he is a wall to its ways round, not something to sidestep at the
+  // last step: the plaza's ways round used to lead straight through him)
+  let navVis = false;
+  const visAt = (x, z, r) => navVis && (x - visX) * (x - visX) + (z - visZ) * (z - visZ) < (r + VISITOR_R) * (r + VISITOR_R);
   const nav = createNav(ctx, {
-    okAt: (x, z, r, marks) => (!dryLand(x, z) ? 2 : (pierIn(x, z) || salt.blocked(x, z) || blocked(x, z, r) || (marks && markHit(x, z, r)) ? 1 : 0)),
+    okAt: (x, z, r, marks) => (!dryLand(x, z) ? 2 : (pierIn(x, z) || salt.blocked(x, z) || blocked(x, z, r) || (marks && markHit(x, z, r)) || visAt(x, z, r) ? 1 : 0)),
     staticAt: (x, z) => (!dryLand(x, z) ? 3 : (pierIn(x, z) || blocked(x, z, NAV_R) ? 2 : 1)),
     nodeOK: (x, z) => !pierIn(x, z),
-    dynBlocked: (x, z, r, marks) => salt.blocked(x, z) || (marks && markHit(x, z, r)),
+    dynBlocked: (x, z, r, marks) => salt.blocked(x, z) || (marks && markHit(x, z, r)) || visAt(x, z, r),
     inMark: (x, z, r) => markHit(x, z, r),
     wetAt: (x, z) => !dryLand(x, z),
     version: () => (ctx.colliders || []).length,
@@ -1336,6 +1366,7 @@ export function create(ctx) {
   raid = createRaid(ctx, {
     kids, V, rand, hits, water, rig, DOCK, SAFE_R,
     phase: () => phase, duskStage: () => duskStage,
+    phaseAt: (tm) => clockPhase(tm),
     groundY, blocked: (x, z, r) => !!blocked(x, z, r), saltBlocked: (x, z) => !!salt.blocked(x, z),
     moveTo, faceThing, hopTick, say, puff, homeSpot, damp,
     meltInWater: (k, why) => meltInWater(k, why),
@@ -1348,6 +1379,64 @@ export function create(ctx) {
     // grace, pounce or full bellies from the view before)
     freshNight: () => { night.timer = 0; night.ready = 0; night.pounce = 0; night.sated = 0; },
   });
+  // Contract O: THE DUSK RITUAL (sourpatch/ritual.js) — after the freeze they
+  // run to the Sour Shrine, ring it, chant, go dark and come back ZOMBIE
+  const ritual = createRitual(ctx, {
+    kids, V, water, hits, rig, groundY, angDamp, say, puff,
+    moveTo: (k, x, z, v, dt) => moveTo(k, x, z, v, dt), stepOK: (x, z, r) => stepOK(x, z, r),
+    blocked: (x, z, r) => !!blocked(x, z, r), lowNear: (x, z, r) => !!lowNear(x, z, r),
+    inView: (x, y, z) => inView(x, y, z),
+    settleAt: (k, x, z, dt, rate) => settleAt(k, x, z, dt, rate),
+    stroll: (k, dt, t, p, dp, x, z, mul) => ritualRun(k, dt, t, p, dp, x, z, mul),
+    giveUp: (k, x, z) => ritualRun(k, 0, 0, null, 0, x, z, 1, true),
+    navReset: (k) => navReset(k),
+    lineClear: (x0, z0, x1, z1, r) => nav.lineClear(x0, z0, x1, z1, r),
+  });
+  const secPerH = () => (world.DAY_LENGTH_SEC || 300) / 24;
+  /** Where the clock alone puts the kids (a jump, a debug pose, the raid's
+   *  clock): the day; the dusk rite, 18:30 → its end (≈ 21:42); the night. */
+  function clockPhase(tm, isNight = tm < 5.5 || tm > 19.5) {
+    if (tm >= RIT_START_H && tm < ritualEndH(secPerH())) return 'watching';
+    if (isNight || tm >= RIT_START_H) return 'hunting';
+    return 'playful';
+  }
+  /** This frame's phase. The rite runs on its own clock to its end (or until
+   *  the visitor breaks it), past the 19:30 nightfall; a clock JUMP re-reads
+   *  the clock. */
+  function wantPhase(tm) {
+    const isN = ctx.state.isNight;
+    if (phase === null || timeJump) return clockPhase(tm, isN);
+    if (phase === 'watching') return ritual.over ? 'hunting' : ((!isN && tm < RIT_START_H) ? 'playful' : 'watching');
+    if (phase === 'hunting') return isN || tm >= RIT_START_H ? 'hunting' : 'playful';
+    return clockPhase(tm, isN);
+  }
+  /** Seconds of rite by the clock (0 at the 18:30 freeze). */
+  const riteClock = (tm) => Math.max(0, (tm - RIT_START_H) * secPerH());
+  function enterRite(jump) {
+    ritual.start(riteClock(ctx.state.time), jump);
+    duskStage = ritual.rt >= RIT_RT.FREEZE ? 1 : 0;
+    duskToast = ritual.rt > 0.7;
+  }
+  /** Contract O: the run to the shrine — the walk back to work's navigation
+   *  (strollBrain: the licorice, ways round, the visitor in the way, a
+   *  breather, off-camera placement) with the ring spot as its goal and its
+   *  walking speeds × mul. */
+  const _ra = { x: 0, z: 0 };
+  function ritualRun(k, dt, t, p, dp, sx, sz, mul, giveUp = false) {
+    const a = k.anchor;
+    _ra.x = sx; _ra.z = sz;
+    k.anchor = _ra; k.visc = mul; k.ritRun = true; navVis = true;
+    try {
+      // (the rite's own watchdog: no closer for a few seconds — give the
+      // walk up now, the sunbather's way, not after strollBrain's budget)
+      if (giveUp) { if (k.navMode !== NAV_DOOR && k.navMode !== NAV_OUT) strollGiveUp(k, 'ritual'); }
+      else strollBrain(k, dt, t, p, dp);
+    } finally { k.anchor = a; k.visc = 1; k.ritRun = false; navVis = false; }
+  }
+  function navReset(k) {
+    k.navMode = NAV_PLAN; k.navAsk = -1; k.detOn = false; k.routeN = 0; k.routeI = 0; k.progT = 0; k.progBest = Infinity;
+    k.breathT = 0; k.markFree = false; k.sideT = 0; k.sideS = 0;
+  }
 
   function say(k, text, force = false) {
     if (sayCd > 0 && !force) return false;
@@ -1857,13 +1946,20 @@ export function create(ctx) {
    *  and fairly — the kid that has been waiting longest goes first (the one
    *  that asked earliest among last frame's askers holds this frame's turn). */
   let navPrio = -1, navNext = -1, navNextAsk = Infinity;
+  // (Contract O: while the whole village runs for the Sour Shrine at once,
+  // RIT_TOKENS plans a frame instead of one — one a frame left the kids in
+  // the visitor's sight milling in the plaza for most of the run)
+  let navUsed = 0;
+  const RIT_TOKENS = 4;
   function navToken(k) {
     if (k.navAsk < 0) k.navAsk = frame;
-    if (navFrame === frame || (navPrio >= 0 && navPrio !== k.i)) {
+    if (navFrame !== frame) { navFrame = frame; navUsed = 0; }
+    const cap = k.ritRun && ritual.running ? RIT_TOKENS : 1;
+    if (navUsed >= cap || (navUsed === 0 && navPrio >= 0 && navPrio !== k.i)) {
       if (k.navAsk < navNextAsk) { navNextAsk = k.navAsk; navNext = k.i; }   // next frame's turn, if it waited longest
       return false;
     }
-    navFrame = frame; k.navAsk = -1; nstat.tokens++;
+    navUsed++; k.navAsk = -1; nstat.tokens++;
     return true;
   }
   /** Once a frame, before the brains: whose turn it is. */
@@ -1936,7 +2032,10 @@ export function create(ctx) {
     // puff; only one stranded far from its game (a dancer 28 u from the
     // fountain across a row of fences) is put back — where nobody can see.
     const seen = inView(k.x, k.y, k.z);
-    if (!ANCHORED[k.role]) {
+    // (Contract O: a kid on the run to the shrine has a spot it must be ON —
+    // its place in the ring — so it gives up like a sunbather: put back
+    // unseen, else in at a front door, else a breather)
+    if (!ANCHORED[k.role] && !k.ritRun) {
       if (!seen && dist2d(k.x, k.z, k.anchor.x, k.anchor.z) > STRAND_R && dist2d(k.x, k.z, visX, visZ) > NO_PUFF_R) { strollPlace(k); strollWarps++; return; }
       strollArrive(k); return;
     }
@@ -1944,7 +2043,9 @@ export function create(ctx) {
     // in view, and the visitor NO_PUFF_R off or more: in at the nearest front
     // door it can walk to (the last 1.2 u — the step itself — is the house's
     // business)…
-    if (dist2d(k.x, k.z, visX, visZ) < NO_PUFF_R) { strollRest(k); return; }
+    // (Contract O: a kid boxed in on its run to the shrine bolts for the
+    // nearest front door even with him close by — just never at his feet)
+    if (dist2d(k.x, k.z, visX, visZ) < (k.ritRun ? 4 : NO_PUFF_R)) { strollRest(k); return; }
     for (let j = 0; j < N; j++) _hd[j] = dist2d(k.x, k.z, kids[j].home.x, kids[j].home.z);
     for (let tries = 0; tries < 4; tries++) {
       let bj = -1, bd = 30;
@@ -1966,6 +2067,7 @@ export function create(ctx) {
    *  seconds, looks about, then plans the walk again with STROLL_MORE s more. */
   function strollRest(k) {
     k.breathT = BREATH_SEC[0] + ((k.i * 7 + nstat.rests * 3) % 11) / 11 * (BREATH_SEC[1] - BREATH_SEC[0]);
+    if (k.ritRun) k.breathT = 0.5;              // (Contract O: on the run to the shrine, a beat — not a rest)
     k.navMode = NAV_PLAN; k.navAsk = -1; k.detOn = false; k.markFree = false; k.moving = 0;
     k.progT = 0; k.progBest = Infinity; k.sideT = 0; k.sideS = 0;
     k.strollCap = Math.max(k.strollCap, k.strollT + k.breathT + STROLL_MORE);
@@ -2070,7 +2172,7 @@ export function create(ctx) {
     // nothing between it and its spot (fixer r1: 'within 6 u' alone left
     // dancers wedged behind a lamp post, dancing on the spot for minutes)
     const dA2n = (k.x - ax) ** 2 + (k.z - az) ** 2;
-    if (k.navMode !== NAV_DOOR && (dA2n < 1.44 || (!ANCHORED[k.role] && dA2n < 36
+    if (k.navMode !== NAV_DOOR && (dA2n < 1.44 || (!ANCHORED[k.role] && !k.ritRun && dA2n < 36
       && (frame + k.i) % 6 === 0 && nav.lineClear(k.x, k.z, ax, az, k.r) === 0))) { strollArrive(k); return; }
     if (k.navMode === NAV_DOOR) {
       if (d < 1.1) { strollVanish(k); return; }
@@ -2380,18 +2482,9 @@ export function create(ctx) {
       k.lean = damp(k.lean, 0.06, 4, dt);
       // armMode is deliberately NOT touched: whatever they were doing, they are
       // still doing it. Caught mid-run, mid-wave, mid-lick.
-    } else {
-      k.lie = damp(k.lie, 0, 7, dt); k.sit = damp(k.sit, 0, 7, dt);
-      k.kick = damp(k.kick, 0, 7, dt); k.cross = damp(k.cross, 0, 7, dt);
-      k.armMode = 'free'; k.freezeHead = 0;
-      const d = moveTo(k, k.home.x, k.home.z, 6.4, dt);
-      k.headRoll = damp(k.headRoll, 0, 6, dt);
-      if (d < 1.1) {
-        if (k.vis > 0.02 && k.vis === 1) puff(k, 10, 0.8);
-        k.vis = Math.max(0, k.vis - dt * 2.6);
-        k.moving = 0;
-      }
     }
+    // (Contract O: after the freeze they no longer go indoors — they run for
+    // the Sour Shrine: sourpatch/ritual.js brain())
   }
 
   // ── night: creep, ring, pounce ──────────────────────────────────────────────
@@ -2420,6 +2513,16 @@ export function create(ctx) {
       // raiding pack is out on the rainbow / Cat Island: raid.js places it)
       if (k.raid || hits.absent(k) || hits.melting(k) || k.gaveUp) continue;
       if (k.hurt) hits.clear(k);
+      // Contract O: revealed on screen at the shrine (or close to him) — it
+      // hunts from where it stands, already the night rig
+      if (fresh && ritual.keeps(k, p, aroundPlayer)) {
+        k.state = 'stalk'; k.vis = 1; k.bursting = 0; k.burstT = 0;
+        k.hop = 0; k.lie = 0; k.sit = 0; k.kick = 0; k.cross = 0; k.eyesShut = 0;
+        k.slit = 1; k.browOut = 1; k.crouch = Math.max(k.crouch, 0.6);
+        k.watchA = Math.atan2(k.z - p.z, k.x - p.x); k.orbit = k.watchA;
+        k.saltA = Math.atan2(k.z - DOCK.z, k.x - DOCK.x);
+        continue;
+      }
       let x = k.home.x, z = k.home.z, ok = false;
       // a ring of shapes at the edge of the lamplight — never on top of you;
       // the ones without a slot further out still, where they will watch from
@@ -2937,9 +3040,14 @@ export function create(ctx) {
         }
       }
     }
-    if (next === 'watching') { duskStage = 0; duskToast = false; duskTilt = 0; for (const k of kids) { if (hits.melting(k)) continue; k.state = 'idle'; k.vis = Math.max(k.vis, 1); } }
+    if (next === 'watching') {
+      duskStage = 0; duskToast = false; duskTilt = 0;
+      for (const k of kids) { if (hits.melting(k)) continue; k.state = 'idle'; k.vis = Math.max(k.vis, 1); }
+      enterRite(timeJump || prev === null);
+    }
     props.hat.visible = false;
     if (next === 'hunting') { spawnHunters(p); night.sated = 0; }
+    if (prev === 'watching') ritual.end(eyeLights);
     raid.onPhase(next, prev, p, dawn, timeJump);   // (a jump into the morning: the pack is placed by raid.js THE CLOCK)
     if (prev) {
       ctx.events.emit('sourpatch:phase', { phase: next, prev });
@@ -3287,6 +3395,7 @@ export function create(ctx) {
         ...hits.counters(),
         // WAVE 4: the pack over the rainbow (sourpatch/raid.js)
         raid: { ...raid.stats(), catDetours, tigers: { circles: tgN, pushes: tigPushes, escapes: tigEscapes, frames: tigFrames } },
+        ritual: ritual.stats(),
       };
     },
     /** The pools of liquid on the water: api.puddles.list() / .active / .mesh */
@@ -3294,7 +3403,22 @@ export function create(ctx) {
     /** Verifier / render hooks. None of these run unless called. */
     /** WAVE 4: the raid (sourpatch/raid.js) — ring, landfall, pack, respawn. */
     raid,
+    /** Contract O: the dusk rite (sourpatch/ritual.js) — rt, stage, torches, stats(). */
+    ritual,
+    /** The phase the clock alone gives (a verifier's expectation). */
+    phaseAt: (tm) => clockPhase(tm),
     debug: {
+      /** Contract O: pose the dusk rite at rt seconds after the 18:30 freeze
+       *  (≥ 12.4: in the rings; 3.2–12.4: the procession up the forest path).
+       *  Applied once the phase is 'watching' — set the clock to the matching
+       *  hour (18.5 + rt / 12.5) for the sky. */
+      ritual(rt = 20) { return ritual.debug(rt); },
+      /** Render hook: turn the visitor to face (x, z) — a view's framing of
+       *  the rite (player.facing is his public setter). */
+      faceVisitor(x, z) {
+        const pl = ctx.systems.player; if (!pl?.position) return false;
+        pl.facing = Math.atan2(x - pl.position.x, z - pl.position.z); return true;
+      },
       /** WAVE 4: pose the raiding pack — 'cross' (on the rainbow at fraction f),
        *  'home' (the dawn walk home over it at f), 'hunt' (round the visitor on
        *  Cat Island). Sets story rainbow_bridge / bridge.debugRaise() itself. */
@@ -3412,8 +3536,9 @@ export function create(ctx) {
 
       // phase
       const time = ctx.state.time;
-      const want = ctx.state.isNight ? 'hunting' : (time >= 18.5 && time <= 19.5 ? 'watching' : 'playful');
+      const want = wantPhase(time);
       if (want !== phase) setPhase(want, p);
+      else if (timeJump && phase === 'watching') enterRite(true);     // a jump inside the rite: where its clock has them
       api.phase = phase; phaseT += dt;
 
       // the star lands: the nearest kid that can see it screams about it
@@ -3430,7 +3555,7 @@ export function create(ctx) {
       lastPlayer.copy(p);
       if (jumped) {
         if (phase === 'hunting') spawnHunters(p, false);
-        else for (const k of kids) {
+        else if (phase === 'playful') for (const k of kids) {
           if (k.role !== 'follow' || k.raid) continue;
           const a = k.ph * 6.28;
           const x = p.x + Math.sin(a) * k.standoff, z = p.z + Math.cos(a) * k.standoff;
@@ -3513,14 +3638,20 @@ export function create(ctx) {
       const sky = ctx.systems.sky;
       if (sky?.sunDir) _sun.copy(daylight > 0.15 ? sky.sunDir : (sky.moonDir || sky.sunDir));
       const sunY = sky?.sunDir ? sky.sunDir.y : 0.6;
-      rig.setMood(daylight, nightMix, sunY, t, _sun);
+      // (the dusk rite grades the faces itself: half-night through the run and
+      // the chant, black sockets in the dark beat, burning at the reveal)
+      rig.setMood(daylight, phase === 'watching' ? ritual.rigNight(nightMix, dt) : nightMix, sunY, t, _sun);
+      if (phase === 'watching') ritual.eyes(rig);
       const glintDay = daylight > 0.3;
 
       // dusk staging
       if (phase === 'watching') {
-        duskTilt = 0.34 * smoothstep(0.30, 1.0, phaseT);
-        if (duskStage === 0 && phaseT > 3.2) duskStage = 1;
-        if (!duskToast && phaseT > 0.7) {
+        // (the rite's clock: sourpatch/ritual.js — torches, chant, the snap)
+        ritual.update(dt, t, p, playerOnCandy);
+        const rt = ritual.rt;
+        duskTilt = 0.34 * smoothstep(0.30, 1.0, rt);
+        if (duskStage === 0 && rt > RIT_RT.FREEZE) duskStage = 1;
+        if (!duskToast && rt > 0.7) {
           duskToast = true;
           if (playerOnCandy) {
             ctx.systems.ui?.toast(`Every ${V.GANG_ONE} stops and turns to look at you.`, 4);
@@ -3588,7 +3719,10 @@ export function create(ctx) {
         // false = the ordinary brains below (the night hunt on Cat Island too)
         else if (k.raid && k.state !== 'dawn' && raid.brain(k, dt, t, p, dp, rinfo)) { /* raid.js */ }
         else if (phase === 'playful') { k.vis = Math.min(1, k.vis + dt * 3); dayBrain(k, dt, t, p, dp); }
-        else if (phase === 'watching') duskBrain(k, dt, t, p, dp);
+        else if (phase === 'watching') {
+          if (duskStage === 0 || !ritual.pastFreeze) duskBrain(k, dt, t, p, dp);
+          else ritual.brain(k, dt, t, p, dp);               // Contract O: the run, the rings, the reveal
+        }
         else {
           nightBrain(k, dt, t, p, dp, kidSafe, kidReach);
           // salt between us doesn't count: you cannot be surrounded through a
@@ -3714,11 +3848,13 @@ export function create(ctx) {
         // (the dawn turn and the water melt pose it themselves)
         // — except up on the rainbow, where the night column marches upright
         // (kids polisher r1: the hero shot needs their faces, not their crowns)
-        if (k.state !== 'dawn' && !hits.inWater(k)) k.crouch = damp(k.crouch, phase === 'hunting' ? (deck ? 0.08 : 0.82) : 0, 3.5, dt);
+        if (k.state !== 'dawn' && !hits.inWater(k) && !k.ritOwn) k.crouch = damp(k.crouch, phase === 'hunting' ? (deck ? 0.08 : 0.82) : 0, 3.5, dt);
         // head look-at (the dusk beat owns the head during the freeze)
         const lookR = phase === 'hunting' ? 40 : 17;
         if (k.hurtHead) {
           // a dissolving / dizzy / stunned kid owns its own head this frame
+        } else if (k.ritOwn) {
+          // the dusk rite owns it (sourpatch/ritual.js): one tilt for all 24
         } else if (phase === 'watching' && duskStage === 0) {
           let rel = Math.atan2(p.x - k.x, p.z - k.z) - k.yaw;
           rel = Math.atan2(Math.sin(rel), Math.cos(rel));
@@ -3751,7 +3887,8 @@ export function create(ctx) {
         k.glintCd -= dt;
         if (k.glintCd <= 0) {
           k.glintCd = glintDay ? 0.11 + rand() * 0.20 : 2.4 + rand() * 4.5;
-          if (k.vis > 0.55 && dp < 72) glint(k, glintDay);
+          // (the freeze: everything about them stops — the sparkle too)
+          if (k.vis > 0.55 && dp < 72 && !(phase === 'watching' && duskStage === 0)) glint(k, glintDay);
         }
       }
 
@@ -3789,8 +3926,10 @@ export function create(ctx) {
       if (dawnHold > 0) dawnHold = Math.max(0, dawnHold - dt / (DAWN_SEC + 0.25));
       timeJump = false;
 
-      // eye lights on the two nearest visible hunters
-      if (nightMix > 0.15) {
+      // eye lights on the two nearest visible hunters (while the dusk rite runs
+      // they are its altar and its torch fire: ritual.lights)
+      if (phase === 'watching' && ritual.lights(eyeLights, t)) { /* sourpatch/ritual.js */ }
+      else if (nightMix > 0.15) {
         // the two nearest, found without filter()/sort() (nothing allocated per frame)
         let c0 = null, c1 = null, d0 = Infinity, d1 = Infinity;
         for (const k of kids) {
@@ -3809,7 +3948,10 @@ export function create(ctx) {
 
       // ── pose ────────────────────────────────────────────────────────────────
       for (const k of kids) {
-        if (k.state !== 'dawn') {                  // the dawn turn drives its own face
+        if (k.ritOwn) {                             // the dusk rite grades the face (ritual.js)
+          k.slit = damp(k.slit, k.ritSlit ?? 1, 7, dt);
+          k.browOut = damp(k.browOut, k.ritBrow ?? 0, 8, dt);
+        } else if (k.state !== 'dawn') {           // the dawn turn drives its own face
           k.slit = damp(k.slit, nightMix, 3, dt);
           k.browOut = damp(k.browOut, nightMix > 0.5 ? 1 : 0, 4, dt);
         }
@@ -3819,6 +3961,7 @@ export function create(ctx) {
       }
       rig.commit();
       raid.post(nightMix, dt);    // the pack's eyes, pinpricks across the strait (+ the night column's shade)
+      ritual.post(dt, t, phase);  // the torches, the altar, the pulse (Contract O)
       // never own the interaction prompt off the kid's own island: on Cat Island
       // a kid across the water used to out-bid the cats' own interactables
       // (a raider on Cat Island may be pleaded with there; nobody on the deck)

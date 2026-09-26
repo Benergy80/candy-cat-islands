@@ -251,5 +251,350 @@
   "dist": 13,
   "time": 12,
   "frames": 45
+ },
+ "rails_cat_pier": {
+  "free": [
+   34,
+   22
+  ],
+  "y": 4.5,
+  "az": 0.3,
+  "el": 0.45,
+  "dist": 28,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_cat_pier_head": {
+  "free": [
+   31,
+   22
+  ],
+  "y": 4.2,
+  "az": -1.2,
+  "el": 0.4,
+  "dist": 22,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_cat_tower_flight": {
+  "free": [
+   214,
+   36.2
+  ],
+  "y": 11.4,
+  "player": [
+   210,
+   40.5
+  ],
+  "az": -0.9,
+  "el": 0.72,
+  "dist": 17,
+  "time": 12,
+  "frames": 160,
+  "call": {
+   "powerups.collect": "cat_tower",
+   "powerups.end": []
+  }
+ },
+ "rails_cat_tower_base": {
+  "free": [
+   214,
+   31
+  ],
+  "y": 11,
+  "player": [
+   205,
+   22
+  ],
+  "az": 3.7,
+  "el": 0.42,
+  "dist": 26,
+  "time": 12,
+  "frames": 30,
+  "call": {
+   "player.teleport": [
+    205,
+    22
+   ]
+  }
+ },
+ "rails_cat_tower_stair": {
+  "pos": [
+   214,
+   33.4
+  ],
+  "az": 0.78,
+  "el": 1.1,
+  "dist": 15,
+  "time": 12,
+  "frames": 45
+ },
+ "rails_cat_tower_stair_low": {
+  "pos": [
+   213.2,
+   32.9
+  ],
+  "az": -2.3,
+  "el": 0.75,
+  "dist": 11,
+  "time": 12,
+  "frames": 45
+ },
+ "rails_cat_square_rim": {
+  "free": [
+   158,
+   21
+  ],
+  "y": 6.5,
+  "az": 0.35,
+  "el": 0.42,
+  "dist": 34,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_cat_forecourt_rim": {
+  "free": [
+   113,
+   -27
+  ],
+  "y": 5.8,
+  "az": -1.35,
+  "el": 0.42,
+  "dist": 32,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_cat_gym": {
+  "pos": [
+   198,
+   -18
+  ],
+  "time": 12,
+  "frames": 45
+ },
+ "rails_cat_square_top": {
+  "free": [
+   152,
+   10
+  ],
+  "y": 6.8,
+  "az": 0,
+  "el": 1.45,
+  "dist": 62,
+  "time": 12,
+  "frames": 20
+ },
+ "rails_cat_forecourt_top": {
+  "free": [
+   124,
+   -26
+  ],
+  "y": 6,
+  "az": 0,
+  "el": 1.45,
+  "dist": 58,
+  "time": 12,
+  "frames": 20
+ },
+ "rails_cat_tower_top": {
+  "free": [
+   214,
+   32
+  ],
+  "y": 11,
+  "player": [
+   205,
+   40
+  ],
+  "az": 0,
+  "el": 1.45,
+  "dist": 34,
+  "time": 12,
+  "frames": 20,
+  "call": {
+   "player.teleport": [
+    205,
+    40
+   ]
+  }
+ },
+ "rails_cat_pier_ferry": {
+  "free": [
+   28,
+   22
+  ],
+  "y": 4,
+  "az": -0.35,
+  "el": 0.55,
+  "dist": 34,
+  "time": 12,
+  "frames": 30,
+  "call": {
+   "ferry.moor": "cat"
+  }
+ },
+ "rails_cat_tower_fence_w": {
+  "free": [
+   208.2,
+   29.5
+  ],
+  "y": 10.4,
+  "player": [
+   206.5,
+   26
+  ],
+  "az": -1.25,
+  "el": 0.45,
+  "dist": 15,
+  "time": 12,
+  "frames": 30,
+  "call": {
+   "player.teleport": [
+    206.5,
+    26
+   ]
+  }
+ },
+ "rails_cat_tower_fence_back": {
+  "free": [
+   219.3,
+   27.2
+  ],
+  "y": 10.4,
+  "player": [
+   220.4,
+   25.6
+  ],
+  "az": 2.25,
+  "el": 0.5,
+  "dist": 17,
+  "time": 12,
+  "frames": 30,
+  "call": {
+   "player.teleport": [
+    220.4,
+    25.6
+   ]
+  }
+ },
+ "rails_cat_tower_cottage": {
+  "free": [
+   216.2,
+   34.6
+  ],
+  "y": 10.8,
+  "player": [
+   208,
+   40
+  ],
+  "az": 0.2,
+  "el": 0.95,
+  "dist": 14,
+  "time": 12,
+  "frames": 160,
+  "call": {
+   "powerups.collect": "cat_tower",
+   "powerups.end": []
+  }
+ },
+ "rails_cat_tower_yard": {
+  "free": [
+   219.5,
+   26.5
+  ],
+  "y": 9.6,
+  "az": 2.25,
+  "el": 0.55,
+  "dist": 25,
+  "time": 12,
+  "frames": 30,
+  "call": {
+   "player.teleport": [
+    220.4,
+    25.6
+   ]
+  },
+  "player": [
+   220.4,
+   25.6
+  ]
+ },
+ "rails_cat_tower_yard_w": {
+  "free": [
+   207.5,
+   27.5
+  ],
+  "y": 9.4,
+  "az": -2.35,
+  "el": 0.5,
+  "dist": 22,
+  "time": 12,
+  "frames": 30
+ },
+ "rails_cat_tower_yard_top": {
+  "free": [
+   214,
+   31
+  ],
+  "y": 9,
+  "az": 0.0,
+  "el": 1.25,
+  "dist": 62,
+  "time": 12,
+  "frames": 20,
+  "call": {
+   "player.teleport": [
+    205,
+    40
+   ]
+  },
+  "player": [
+   205,
+   40
+  ]
+ },
+ "rails_cat_tower_base_night": {
+  "free": [
+   214,
+   31
+  ],
+  "y": 11,
+  "player": [
+   205,
+   22
+  ],
+  "az": 3.7,
+  "el": 0.42,
+  "dist": 26,
+  "time": 21.5,
+  "frames": 45,
+  "call": {
+   "player.teleport": [
+    205,
+    22
+   ]
+  }
+ },
+ "rails_cat_tower_yard_night": {
+  "free": [
+   219.5,
+   26.5
+  ],
+  "y": 9.6,
+  "az": 2.25,
+  "el": 0.55,
+  "dist": 25,
+  "time": 22,
+  "frames": 45,
+  "call": {
+   "player.teleport": [
+    220.4,
+    25.6
+   ]
+  },
+  "player": [
+   220.4,
+   25.6
+  ]
  }
 }

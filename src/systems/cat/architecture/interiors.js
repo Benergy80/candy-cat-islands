@@ -53,6 +53,8 @@ export function inRoom(T, f) {
     pool(lx, ly, lz, r) { const p = W(lx, lz); T.pool(p[0], f.y + ly, p[1], r); },
     /** solid furniture: an oriented box the player cannot walk through */
     solid(lx, lz, w, d, top, rot = 0) { const p = W(lx, lz); T.wall(p[0], p[1], w, d, ry0 + rot, f.y + top); },
+    /** a solid lining with no top (a wall's panelling: nothing to climb onto) */
+    lining(lx, lz, w, d, rot = 0) { const p = W(lx, lz); T.wall(p[0], p[1], w, d, ry0 + rot); },
     world: W,
   };
 }
@@ -116,6 +118,11 @@ function ceiling(R, hx, hz, ly, o = {}) {
  *   o = { h, faceH: [f0,f1,f2,f3], color, capColor, gaps: [{ face, lx, w }] }
  *   faces: 0 = front (the door side, +lz), 1 = +lx, 2 = back, 3 = -lx
  */
+// How much wider than its doorway a room's lining is cut: an open leaf rests
+// on the hinge-side jamb line and leans back 10°, and within the lining's
+// 0.38 depth its back face (and its hinge knuckles) reach C/2 + 0.2. Cut at
+// C/2 + 0.15 the panelling's end stood a centimetre into the open leaf.
+const LEAF_ROOM = 0.45;
 function wainscot(R, hx, hz, o = {}) {
   const h0 = o.h ?? 0.95, c = o.color ?? 0x9a8a72;
   const t = 0.16;
@@ -136,6 +143,13 @@ function wainscot(R, hx, hz, o = {}) {
       if (a1 - a0 < 0.1) return;
       const p = P((a0 + a1) / 2, fa.off - t / 2);
       R.box(p[0], 0, p[1], a1 - a0, h, t, tall ? (o.wallColor ?? 0xe8dcc0) : c, { ry: fa.rot });
+      // …and the lining is SOLID, out to its rail (0.38 in on a tall face,
+      // 0.34 on a dado-only one). The shell's wall collider stops 0.05 inside
+      // the shell, so a visitor walking the room's edge had half his body in
+      // the panelling. It stops where the lining does: at the doorway it is
+      // cut wider than the gap, so it never narrows the way in.
+      const dep = tall ? 0.38 : 0.34, q2 = P((a0 + a1) / 2, fa.off - dep / 2);
+      R.lining(q2[0], q2[1], a1 - a0, dep, fa.rot);
       // a tall face keeps the dado: panelling below, plaster above, a rail between
       if (tall) {
         const d = P((a0 + a1) / 2, fa.off - t - 0.04);
@@ -170,7 +184,7 @@ export function meowInterior(T, f, o = {}) {
   // Only the DOOR wall stays low. Every other face runs to the ceiling: at 1.15
   // and 2.3 the iso camera looked clean over the side walls and what it found
   // there was the sky, which is how a restaurant ends up with no back wall.
-  wainscot(R, hx, hz, { h: 1.15, faceH: [1.15, 5.0, 5.0, 5.0], color: 0xe8dcc0, capColor: MDR, wallColor: 0xf6ead2, gaps: [{ face: 0, lx: -3.2, w: 2.6 }, { face: 1, lx: 0, w: 2.4 }] });
+  wainscot(R, hx, hz, { h: 1.15, faceH: [1.15, 5.0, 5.0, 5.0], color: 0xe8dcc0, capColor: MDR, wallColor: 0xf6ead2, gaps: [{ face: 0, lx: -3.2, w: 2.4 + LEAF_ROOM }, { face: 1, lx: 0, w: 2.4 }] });
   ceiling(R, hx, hz, 5.1, { color: 0xf2e7cf, capColor: MDR, joistColor: 0xd8c9a8 });
 
   // ── service counter ───────────────────────────────────────────────────────
@@ -274,7 +288,9 @@ export function meowInterior(T, f, o = {}) {
   // different on each, so the row does not read as one table copied three times.
   const straw = [0xd52b1e, 0xffc72c, 0x6ac9d8];
   for (let i = 0; i < 3; i++) {
-    const lx = -5.4 + i * 5.0, lz = 3.2;
+    // the corner table sits 0.15 further west: its booth's end stood 0.15 u
+    // inside the doorway
+    const lx = i === 0 ? -5.55 : -5.4 + i * 5.0, lz = 3.2;
     R.cyl(lx, 0, lz, 0.16, 0.26, 0.72, 0x3a3229, { mat: 'metal' });
     R.cyl(lx, 0.72, lz, 1.0, 1.0, 0.12, 0xf2e5cc, { seg: 12 });
     R.solid(lx, lz, 1.9, 1.9, 0.85);
@@ -356,10 +372,11 @@ export function purrbucksInterior(T, f, o = {}) {
   const GREEN = 0x1f6a4a, CREAM = 0xf4f0e0;
   const hx = o.hw ?? 3.6, hz = o.hd ?? 3.3;
 
-  // floorboards
-  for (let i = 0; i < 8; i++) R.box(-hx + 0.45 + i * 0.9, 0.03, 0, 0.86, 0.06, hz * 2 - 0.2, [0x9a7a52, 0xa8875c, 0x8e7048][i % 3]);
+  // floorboards (let into the slab, 0.03 proud: at 0.09 over the floor the
+  // visitor walked with his soles in them from the threshold to the counter)
+  for (let i = 0; i < 8; i++) R.box(-hx + 0.45 + i * 0.9, -0.03, 0, 0.86, 0.06, hz * 2 - 0.2, [0x9a7a52, 0xa8875c, 0x8e7048][i % 3]);
 
-  wainscot(R, hx, hz, { h: 1.0, faceH: [1.0, 3.5, 3.5, 3.5], color: 0x2f5a42, capColor: 0x8a5a2a, wallColor: 0xf2e6cc, gaps: [{ face: 0, lx: (o.doorX ?? 2.13), w: 2.4 }] });
+  wainscot(R, hx, hz, { h: 1.0, faceH: [1.0, 3.5, 3.5, 3.5], color: 0x2f5a42, capColor: 0x8a5a2a, wallColor: 0xf2e6cc, gaps: [{ face: 0, lx: (o.doorX ?? 2.13), w: (o.doorW ?? 2.1) + LEAF_ROOM }] });
   ceiling(R, hx, hz, 3.6, { color: 0xf0e4c8, capColor: 0x8a5a2a, joistColor: 0x9a7a52 });
 
   // ── counter + espresso machine ────────────────────────────────────────────
@@ -450,10 +467,10 @@ export function travelInterior(T, f, o = {}) {
   const A = T.A, DUST = 0xb8b2a0;
   const hz = o.hd ?? 3.1;
 
-  // dusty boards
-  for (let i = 0; i < 7; i++) R.box(-2.7 + i * 0.9, 0.03, 0, 0.86, 0.06, hz * 2 - 0.2, [0x8a7a62, 0x96866c, 0x7e6e58][i % 3]);
+  // dusty boards (let into the slab, 0.03 proud, not 0.09: see Purrbucks)
+  for (let i = 0; i < 7; i++) R.box(-2.7 + i * 0.9, -0.03, 0, 0.86, 0.06, hz * 2 - 0.2, [0x8a7a62, 0x96866c, 0x7e6e58][i % 3]);
 
-  wainscot(R, 3.1, hz, { h: 0.95, faceH: [0.95, 3.5, 3.5, 3.5], color: 0x7a705c, capColor: 0x5a5248, wallColor: 0xc9c0ac, gaps: [{ face: 0, lx: (o.doorX ?? 1.87), w: 2.4 }] });
+  wainscot(R, 3.1, hz, { h: 0.95, faceH: [0.95, 3.5, 3.5, 3.5], color: 0x7a705c, capColor: 0x5a5248, wallColor: 0xc9c0ac, gaps: [{ face: 0, lx: (o.doorX ?? 1.87), w: (o.doorW ?? 2.1) + LEAF_ROOM }] });
   ceiling(R, 3.1, hz, 3.6, { color: 0xcfc6b0, capColor: 0x5a5248, joistColor: 0x8a8070 });
 
   // ── the desk nobody has sat at in years ───────────────────────────────────
@@ -488,7 +505,7 @@ export function travelInterior(T, f, o = {}) {
     g.fillStyle = '#f6f2ea'; g.fillRect(W * 0.305, H * 0.5, W * 0.03, H * 0.18);
     g.fillStyle = 'rgba(28,22,16,.72)'; g.fillRect(0, H * 0.82, W, H * 0.18);
     g.fillStyle = '#ffe9a8'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.font = `bold ${H * 0.09}px ${FONTS.SANS}`; g.fillText(title, W / 2, H * 0.875);
+    g.font = `bold ${H * 0.09}px ${FONTS.SANS}`; g.fillText(title, W / 2, H * 0.875, W * 0.92);
     g.font = `italic bold ${H * 0.055}px ${FONTS.SANS}`; g.fillStyle = '#e0c98a'; g.fillText(sub, W / 2, H * 0.945);
     // DO NOT, scrawled across it in red
     g.save(); g.translate(W * 0.5, H * 0.45); g.rotate(-0.22);
@@ -499,7 +516,7 @@ export function travelInterior(T, f, o = {}) {
     g.restore();
     g.globalAlpha = 0.18; g.fillStyle = '#cfc6ae'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
   }, 96);
-  const ps = [poster('CANDYLAND', 'the sweet island', '#f0c8dc', '#f0a8c8'), poster('THE MAINLAND', 'it is over there', '#cfe0ec', '#a8ce72'), poster('ANYWHERE', 'one way, obviously', '#e8dcb8', '#d8b88a')];
+  const ps = [poster('THE CANDY KINGDOM', 'the sweet island', '#f0c8dc', '#f0a8c8'), poster('THE MAINLAND', 'it is over there', '#cfe0ec', '#a8ce72'), poster('ANYWHERE', 'one way, obviously', '#e8dcb8', '#d8b88a')];
   ps.forEach((c, i) => framed(R, c, -1.9 + i * 1.9, 2.42, -(hz - 0.17), 1.5, 2.0, 0, 0x4a3a28));
 
   // ── the globe with the sea painted over ───────────────────────────────────
@@ -519,9 +536,12 @@ export function travelInterior(T, f, o = {}) {
   R.sign(gl, GX, 0.5, GZ + 0.62, 1.1, 0.34, {});
 
   // ── dust sheets, a dead lamp, and the smell of nobody ─────────────────────
-  R.box(2.2, 0, 1.8, 1.8, 0.9, 1.4, DUST, { ry: -0.3, rz: 0.03 });
-  R.box(2.2, 0.9, 1.8, 1.9, 0.2, 1.5, 0xc6c0ae, { ry: -0.3 });
-  R.solid(2.2, 1.8, 2.0, 1.6, 1.1, -0.3);
+  // the sheeted sofa, pushed back off the doormat: at (2.2, 1.8) it stood half
+  // a metre inside the door and you walked into a dust sheet and stopped
+  const SX = 2.3, SZ = 0.3;
+  R.box(SX, 0, SZ, 1.8, 0.9, 1.4, DUST, { ry: -0.3, rz: 0.03 });
+  R.box(SX, 0.9, SZ, 1.9, 0.2, 1.5, 0xc6c0ae, { ry: -0.3 });
+  R.solid(SX, SZ, 2.0, 1.6, 1.1, -0.3);
   R.box(-2.3, 0, 1.7, 1.2, 1.7, 0.5, DUST, { ry: 0.4, rz: -0.02 });               // sheeted filing cabinet
   R.solid(-2.3, 1.7, 1.3, 0.7, 1.7, 0.4);
   R.cyl(-1.2, 0.84, -1.5, 0.12, 0.16, 0.34, 0x3a3229);                            // desk lamp, on
@@ -540,13 +560,13 @@ export function travelInterior(T, f, o = {}) {
   R.cyl(-0.9, 2.96, -0.4, 0.03, 0.03, 0.6, 0x3a3229);
   R.cone(-0.9, 2.94, -0.4, 0.44, 0.42, 0x6a6252, { rx: Math.PI });
   R.sph(-0.9, 2.68, -0.4, 0.2, 0xffd0a0, { mat: 'lamp', seg: 8, rings: 5 });
-  R.cyl(2.3, 2.5, 1.9, 0.05, 0.05, 0.7, 0x5a5248);
-  R.cyl(2.3, 2.2, 1.9, 0.28, 0.22, 0.34, 0xffd0a0, { mat: 'lamp', seg: 9 });
+  R.cyl(SX, 2.5, SZ, 0.05, 0.05, 0.7, 0x5a5248);
+  R.cyl(SX, 2.2, SZ, 0.28, 0.22, 0.34, 0xffd0a0, { mat: 'lamp', seg: 9 });
   const openCell = T.plaque(1.1, 0.36, [{ t: 'OPEN', s: 0.66, c: '#9fe0b8' }], { bg: '#1f3a2c', border: '#4a6a58', borderW: 0.08, grime: 0.25, dpu: 200 });
   R.sign(openCell, (o.doorX ?? 1.87), 2.55, hz - 0.24, 1.1, 0.36, { ry: Math.PI, glow: true });
   R.pool(-1.0, 0.08, -1.4, 1.9);
   R.pool(-0.9, 0.08, -0.4, 2.0);
-  R.pool(2.3, 0.08, 1.9, 1.5);
+  R.pool(SX, 0.08, SZ, 1.5);
   const p = R.world(0.4, 0.8);
   T.act('travel_in', p[0], p[1], 'Ring the bell', [
     'you ring the bell. the sound is swallowed by dust. somewhere upstairs, a cat rolls over.',
@@ -575,12 +595,21 @@ export function purrliamentInterior(T, f, o = {}) {
   ceiling(R, hx, hz, 6.95, { color: 0xefe4c8, capColor: 0x8a7450, joistColor: 0xc9b894, joists: false });
 
   // ── tiered benches, two rows facing each other ───────────────────────────
+  // The front rows (s = +1, the door side) are split by a gangway from the
+  // chamber doors down to the floor: they used to run straight across the
+  // doorway, so the way in was over the back of the top bench, and the doors
+  // had nowhere to swing.
+  const GANG = o.gang ?? 2.4;
   for (const s of [-1, 1]) for (let k = 0; k < 3; k++) {
     const lz = s * (1.9 + k * 1.3), ly = k * 0.42;
-    R.box(0, ly, lz, 17.0, 0.5, 1.2, 0xd8cbb0);                       // riser
-    R.box(0, ly + 0.5, lz, 17.2, 0.16, 1.3, GREEN);                   // bench
-    R.box(0, ly + 0.66, lz + s * 0.55, 17.2, 0.75, 0.2, GREEN);       // back
-    R.solid(0, lz, 17.2, 1.4, ly + 0.66);
+    const runs = s > 0 ? [[-8.6, -GANG], [GANG, 8.6]] : [[-8.6, 8.6]];
+    for (const [a, c2] of runs) {
+      const cx = (a + c2) / 2, L = c2 - a;
+      R.box(cx, ly, lz, L - 0.2, 0.5, 1.2, 0xd8cbb0);                 // riser
+      R.box(cx, ly + 0.5, lz, L, 0.16, 1.3, GREEN);                   // bench
+      R.box(cx, ly + 0.66, lz + s * 0.55, L, 0.75, 0.2, GREEN);       // back
+      R.solid(cx, lz, L, 1.4, ly + 0.66);
+    }
   }
   // the cats who turned up
   R.loaf(-5.2, 0.68, 1.9, 1.3, PAL.fur[1], { ry: 0.4 });
@@ -681,7 +710,7 @@ export function guestInterior(T, f, o = {}) {
   R.cyl(2.4, 0.12, 2.4, 1.4, 1.4, 0.05, 0xc96a5a, { seg: 14 });
   R.tor(2.4, 0.15, 2.4, 1.15, 0.07, 0xe08a6a, { seg: 16, tseg: 4, rx: -Math.PI / 2 });
 
-  wainscot(R, hx, hz, { h: 0.9, faceH: [0.9, 4.2, 4.2, 4.2], color: 0xe8dcc0, capColor: 0x2a8f8a, wallColor: 0xf6ead0, gaps: [{ face: 0, lx: (o.doorX ?? -1.7), w: 2.5 }] });
+  wainscot(R, hx, hz, { h: 0.9, faceH: [0.9, 4.2, 4.2, 4.2], color: 0xe8dcc0, capColor: 0x2a8f8a, wallColor: 0xf6ead0, gaps: [{ face: 0, lx: (o.doorX ?? -1.7), w: (o.doorW ?? 2.2) + LEAF_ROOM }] });
   ceiling(R, hx, hz, 4.35, { color: 0xf4e8cc, capColor: 0x2a8f8a, joistColor: 0xc4a878 });
 
   // ── the wardrobe, full of pyjamas in exactly your size ───────────────────

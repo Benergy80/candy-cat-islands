@@ -9,9 +9,14 @@
 //     land you HAVE walked is painted in full island colour, cut out of the
 //     cloud with a white rim and an ink hairline; your route is a thick
 //     red-and-white dashed line that runs through the gold-ringed places you
-//     have visited (named on the sheet) and ends at your arrow. The footer reads
-//     'Explored: Candyland 37% · Cat Island 12%'. It does not dim at night: it is
-//     a sheet of paper you are reading, not a window onto the world.
+//     have visited (named on the sheet) and ends at your arrow. Each island's
+//     name is lettered big along its north coast ('THE CANDY KINGDOM', 'CAT
+//     ISLAND'); the scale bar sits in open sea. The footer reads
+//     'Explored: the Candy Kingdom 37% · Cat Island 12%' (the ' · ' hides when
+//     the two figures stack), and its key drops 'not yet explored', then 'your
+//     route' (shown only while there is a route), and 'places n/26' last. It
+//     does not dim at night: it is a sheet of paper you are reading, not a
+//     window onto the world.
 //   M (or a TAP on either sheet) cycles near → world → atlas → off; when off, a
 //   small MAP chip sits in the corner so a phone can tap it back on.
 //   • CAVE mode: automatic on the corner plate. Underground the chart is
@@ -40,6 +45,10 @@
 // player arrow and the compass; pins whose head would sit under the player
 // arrow LEAN away from it (the foot stays on the spot); landmark discs that
 // would sit under the arrow step aside on a short leader.
+// (atlas): every name is a pill hugging its own marker (a leader of at most
+// ~12 px), never nearer another named marker than its own, never across the
+// channel onto the other island, never under your arrow (walk onto one and the
+// names re-lay out); a name with no clear slot is dropped rather than misplaced.
 //
 // The chart is baked ONCE into an offscreen canvas (1.6 px per world unit,
 // transparent where there is sea) and blitted per frame. Baked in, bottom to
@@ -114,8 +123,17 @@ const MAX_SMALL_PINS = 2;                                   // …of which tier-
 const CLEAR_PLAYER = 28;                                    // px a landmark disc keeps from the arrow
 const LEANS = [0, 0.5, 0.9, 1.3, 2.2, Math.PI];             // pin lean ladder (rad), tried in order
 
-// Label slots around an anchor: right, left, above, below, then the diagonals.
-const LDIR = [[1, 0], [-1, 0], [0, -1], [0, 1], [0.8, -0.7], [-0.8, -0.7], [0.8, 0.7], [-0.8, 0.7]];
+// Label slots around an anchor: right, left, above, below, then the diagonals
+// ([ox, oy] = where on the anchor's rim it attaches, [ax, ay] = which way the
+// box runs from there, cost = the order of preference). The atlas adds four
+// more — above / below, running left or right — so a name can hug a place
+// that sits near the channel or a neighbour instead of falling off it.
+const LSLOT = [
+  [1, 0, 1, 0, 0], [-1, 0, -1, 0, 1.5], [0, -1, 0, -1, 3], [0, 1, 0, 1, 4.5],
+  [0.8, -0.7, 1, -1, 6], [-0.8, -0.7, -1, -1, 7.5], [0.8, 0.7, 1, 1, 9], [-0.8, 0.7, -1, 1, 10.5],
+  [0, -1, -0.8, -1, 4], [0, -1, 0.8, -1, 4.5], [0, 1, -0.8, 1, 5.5], [0, 1, 0.8, 1, 6],
+];
+const NSLOT = LSLOT.length, NSLOT_NEAR = 8;
 const LABEL_FONT = '900 8.5px "Nunito", "Trebuchet MS", sans-serif';
 const ALABEL_FONT = '900 10.5px "Nunito", "Trebuchet MS", sans-serif';
 const PLACE_FONT = '900 11px "Nunito", "Trebuchet MS", sans-serif';
@@ -229,10 +247,10 @@ export function createMinimap(ctx, opts = {}) {
     + '<div class="cci-atlas-chart"><canvas class="st"></canvas><canvas class="rt"></canvas><canvas class="pl"></canvas><canvas class="dy"></canvas></div>'
     + '<div class="cci-atlas-foot">'
     + '<span class="cci-map-xp"><span class="cci-map-xp-lab">Explored:</span> '
-    + '<span class="cci-map-xp-isl c">Candyland 0%</span> · <span class="cci-map-xp-isl k">Cat Island 0%</span></span>'
+    + '<span class="cci-map-xp-isl c">the Candy Kingdom 0%</span><span class="cci-map-xp-sep"> · </span><span class="cci-map-xp-isl k">Cat Island 0%</span></span>'
     + '<span class="cci-atlas-legend">'
     + '<span class="cci-atlas-leg"><i class="lg-place"></i><em>places <b class="cci-atlas-n">0</b>/<b class="cci-atlas-t">0</b></em></span>'
-    + '<span class="cci-atlas-leg"><i class="lg-route"></i><em>your route</em></span>'
+    + '<span class="cci-atlas-leg lg-r"><i class="lg-route"></i><em>your route</em></span>'
     + '<span class="cci-atlas-leg"><i class="lg-fog"></i><em>not yet explored</em></span>'
     + '</span>'
     + '<span class="cci-map-modes"><i></i><i></i><i></i></span>'
@@ -244,6 +262,13 @@ export function createMinimap(ctx, opts = {}) {
   const sg = aSt.getContext('2d'), rg = aRt.getContext('2d'), lg = aPl.getContext('2d'), ag = aDy.getContext('2d');
   const xpC = atlas.querySelector('.cci-map-xp-isl.c');
   const xpK = atlas.querySelector('.cci-map-xp-isl.k');
+  const xpEl = atlas.querySelector('.cci-map-xp');
+  const legEl = atlas.querySelector('.cci-atlas-legend');
+  // When the footer wraps, Cat Island's figure starts line two and the ' · '
+  // would dangle at the end of line one: it hides (keeping its room, so the
+  // wrap never flips back). Re-checked when the figures, the legend or the
+  // sheet change, never per frame.
+  let xpCheck = true, routeOn = null;
   const aN = atlas.querySelector('.cci-atlas-n'), aT = atlas.querySelector('.cci-atlas-t');
   let placesTotal = 0;
   for (const id in world.LANDMARKS) if (world.LANDMARKS[id].label !== '???') placesTotal++;
@@ -651,10 +676,20 @@ export function createMinimap(ctx, opts = {}) {
     if (xpVer === covVer) return;
     xpVer = covVer;
     const c = pct(1), k = pct(2);
-    xpC.textContent = `Candyland ${c}%`;
+    xpC.textContent = `the Candy Kingdom ${c}%`;
     xpK.textContent = `Cat Island ${k}%`;
     xpC.style.setProperty('--p', c + '%');
     xpK.style.setProperty('--p', k + '%');
+    xpCheck = true;
+  }
+  let footH = -1;
+  function checkStack() {
+    if (!xpCheck || !(aPlate.offsetWidth > 0)) return;
+    xpCheck = false;
+    xpEl.classList.toggle('stack', xpK.offsetTop > xpC.offsetTop + 3);
+    // a footer that gained or lost a line changes the sheet's chrome: re-measure
+    const fh = xpEl.parentNode.offsetHeight;
+    if (fh !== footH) { if (footH >= 0) aMeasured = false; footH = fh; }
   }
 
   // ── markers (other systems' pins) ──────────────────────────────────────────
@@ -693,13 +728,14 @@ export function createMinimap(ctx, opts = {}) {
   }
 
   // ── label placement: obstacles, eight slots, a leader line back ─────────────
-  const OB_MAX = 160;
-  const OB = new Float32Array(4 * OB_MAX);
-  const SOB = new Float32Array(4 * OB_MAX);          // the atlas's static obstacles (places + names)
+  const OB_MAX = 256;
+  const OB = new Float32Array(4 * OB_MAX), OBW = new Float32Array(OB_MAX);
+  const SOB = new Float32Array(4 * OB_MAX), SOBW = new Float32Array(OB_MAX);   // the atlas's static obstacles (places + names)
   let nOb = 0, nSOB = 0;
-  function obAdd(x0, y0, x1, y1) {
+  /** An obstacle box; `w` < 1 is a soft one (an unvisited place's pencil ring: a name may cover it if it must). */
+  function obAdd(x0, y0, x1, y1, w = 1) {
     if (nOb >= OB_MAX) return -1;
-    const k = 4 * nOb; OB[k] = x0; OB[k + 1] = y0; OB[k + 2] = x1; OB[k + 3] = y1;
+    const k = 4 * nOb; OB[k] = x0; OB[k + 1] = y0; OB[k + 2] = x1; OB[k + 3] = y1; OBW[nOb] = w;
     return nOb++;
   }
   function obHit(x0, y0, x1, y1, skip) {
@@ -710,12 +746,26 @@ export function createMinimap(ctx, opts = {}) {
       const ix = Math.min(x1, OB[k + 2]) - Math.max(x0, OB[k]);
       if (ix <= 0) continue;
       const iy = Math.min(y1, OB[k + 3]) - Math.max(y0, OB[k + 1]);
-      if (iy > 0) a += ix * iy;
+      if (iy > 0) a += ix * iy * OBW[n];
     }
     return a;
   }
   // The label being placed: text (truncated), box size, and where it went.
-  const LB = { t: '', bw: 0, bh: 12.5, x: 0, y: 0, font: LABEL_FONT, side: 0, slot: -1 };
+  // lo / hi: the band of x (css px) the box may use — on the atlas a label
+  // stays on its own island's side of the channel (keepSide); amb: score it
+  // against the other named anchors, so it never sits nearer someone else's
+  // marker than its own.
+  const LB = { t: '', bw: 0, bh: 12.5, x: 0, y: 0, font: LABEL_FONT, side: 0, slot: -1, lo: -1e9, hi: 1e9, amb: false };
+  // Named anchors on the atlas (lit places, quest-pin heads): x, y, radius.
+  const AN_MAX = 64;
+  const ANX = new Float32Array(AN_MAX), ANY = new Float32Array(AN_MAX), ANR = new Float32Array(AN_MAX);
+  let nAn = 0, nAnS = 0;
+  function anAdd(x, y, r) { if (nAn < AN_MAX) { ANX[nAn] = x; ANY[nAn] = y; ANR[nAn] = r; nAn++; } }
+  /** Atlas only: a label whose anchor is at world x `wx` keeps to that island's side of the channel. */
+  function keepSide(wx) {
+    LB.amb = true;
+    if (wx < 0) { LB.lo = -1e9; LB.hi = amx(-4); } else { LB.lo = amx(4); LB.hi = 1e9; }
+  }
   const LCACHE = new Map();                          // font|text → { t, w }
   function measureLabel(text, font, maxW, bh) {
     const key = font + '|' + text;
@@ -732,28 +782,59 @@ export function createMinimap(ctx, opts = {}) {
       LCACHE.set(key, m);
     }
     LB.t = m.t; LB.bw = m.w + (bh > 13 ? 4 : 10); LB.bh = bh; LB.font = font;
+    LB.lo = -1e9; LB.hi = 1e9; LB.amb = false;
   }
   // Metrics measured before the web font arrived are wrong: forget them and
   // redraw the atlas names when any font finishes loading.
   try {
-    document.fonts?.addEventListener?.('loadingdone', () => { LCACHE.clear(); aLitKey = ''; });
+    document.fonts?.addEventListener?.('loadingdone', () => {
+      LCACHE.clear(); aLitKey = ''; aBarDirty = true;
+      xpCheck = true; checkStack();                  // the footer's face changed its wrap: now, not next frame
+    });
     for (const f of [LABEL_FONT, ALABEL_FONT, PLACE_FONT, PLACE_FONT_S]) document.fonts?.load?.(f)?.catch?.(() => {});
   } catch { /* no FontFaceSet: fallback fonts measure what they draw */ }
-  /** Best of the eight slots around a circle (ax, ay, ar). Returns its score. */
+  /**
+   * How much nearer some OTHER named anchor is to the box than its own anchor
+   * (rim to box, with 14 px of benefit of the doubt) — a name reads as
+   * belonging to whatever it sits closest to, whatever its leader says.
+   */
+  function ambiguity(ax, ay, ar, x0, y0, x1, y1) {
+    const qx = Math.max(x0, Math.min(x1, ax)), qy = Math.max(y0, Math.min(y1, ay));
+    const own = Math.hypot(qx - ax, qy - ay) - ar + 14;
+    let a = 0;
+    for (let n = 0; n < nAn; n++) {
+      const x = ANX[n], y = ANY[n];
+      if (Math.abs(x - ax) < 1.5 && Math.abs(y - ay) < 1.5) continue;     // itself
+      const px = Math.max(x0, Math.min(x1, x)), py = Math.max(y0, Math.min(y1, y));
+      const d = Math.hypot(px - x, py - y) - ANR[n];
+      if (d < own) a += (own - d) * 6;
+    }
+    return a;
+  }
+  /** Best of the eight slots around a circle (ax, ay, ar), close or a short leader away. Returns its score. */
   function placeLabel(ax, ay, ar, skip = -1, prefer = -1) {
-    const bw = LB.bw, bh = LB.bh;
+    const bw = LB.bw, bh = LB.bh, lo = LB.lo, hi = LB.hi;
     let best = Infinity, bx = ax, by = ay + ar + 4 + bh / 2;
+    const atlas = LB.amb, ns = atlas ? NSLOT : NSLOT_NEAR;
     for (let gi = 0; gi < 2; gi++) {
-      const gap = gi ? 13 : 3.5;
-      for (let d = 0; d < LDIR.length; d++) {
-        const dx = LDIR[d][0], dy = LDIR[d][1];
-        const cx = ax + dx * (ar + gap) + Math.sign(dx) * bw / 2;
-        const cy = ay + dy * (ar + gap) + Math.sign(dy) * bh / 2;
-        const x0 = cx - bw / 2, y0 = cy - bh / 2, x1 = cx + bw / 2, y1 = cy + bh / 2;
+      const gap = gi ? (atlas ? 11 : 13) : 3.5;                         // (on the atlas a leader stays under ~12 px)
+      for (let d = 0; d < ns; d++) {
+        const S = LSLOT[d], ox = S[0], oy = S[1];
+        let cx = ax + ox * (ar + gap) + S[2] * bw / 2;
+        let cy = ay + oy * (ar + gap) + S[3] * bh / 2;
+        let x0 = cx - bw / 2, y0 = cy - bh / 2, x1 = cx + bw / 2, y1 = cy + bh / 2;
         const out = (Math.max(0, 2 - x0) + Math.max(0, x1 - (SW - 2))) * bh + (Math.max(0, 2 - y0) + Math.max(0, y1 - (SH - 2))) * bw;
-        const slot = gi * 8 + d;
-        const sc = obHit(x0, y0, x1, y1, skip) + out * 4 + d * 1.5 + gi * 26 - (slot === prefer ? 30 : 0);
-        if (sc < best) { best = sc; bx = cx; by = cy; LB.side = Math.sign(dx); LB.slot = slot; }
+        if (atlas && out > 0) {
+          // on the atlas a box off the sheet is scored where it will be drawn:
+          // pushed back inside (the clamp below), so it never lands on a neighbour unseen
+          cx = Math.max(2 + bw / 2, Math.min(SW - 2 - bw / 2, cx)); cy = Math.max(2 + bh / 2, Math.min(SH - 2 - bh / 2, cy));
+          x0 = cx - bw / 2; y0 = cy - bh / 2; x1 = cx + bw / 2; y1 = cy + bh / 2;
+        }
+        const across = (Math.max(0, lo - x0) + Math.max(0, x1 - hi)) * bh;   // over the channel onto the other island
+        const slot = gi * NSLOT + d;
+        let sc = obHit(x0, y0, x1, y1, skip) + out * 4 + across * 8 + S[4] + gi * 26 - (slot === prefer ? 30 : 0);
+        if (atlas && sc < best) sc += ambiguity(ax, ay, ar, x0, y0, x1, y1);
+        if (sc < best) { best = sc; bx = cx; by = cy; LB.side = Math.sign(S[2]); LB.slot = slot; }
       }
     }
     LB.x = Math.max(2 + bw / 2, Math.min(SW - 2 - bw / 2, bx));
@@ -1342,7 +1423,80 @@ export function createMinimap(ctx, opts = {}) {
       c.width = Math.round(aW * aDpr); c.height = Math.round(aH * aDpr);
       c.style.width = aW + 'px'; c.style.height = aH + 'px';
     }
-    aStW = -1;
+    aStW = -1; xpCheck = true;
+    placeBar();
+  }
+
+  // ── the scale bar: in open sea, bottom right first ─────────────────────────
+  // (100 m if it fits there, else 50 m; then the bottom-left corner). Chosen
+  // once per sheet size by sampling the island masks under its box.
+  const BAR_FONT = '900 9px "Nunito", "Trebuchet MS", sans-serif';
+  const aBar = { x0: 0, y0: 0, x1: 0, y1: 0, bx: 0, sy: 0, L: 0, txt: '100 m' };
+  let aBarDirty = false;                                        // a font landed: re-measure its caption
+  function seaBox(x0, y0, x1, y1) {
+    const dy = Math.max(1, (y1 - y0) / 3);
+    for (let y = y0; y <= y1 + 0.01; y += dy) {
+      for (let x = x0; x <= x1 + 0.01; x += 3) {
+        const wx = AX0 + x / aS, wz = AZ0 + y / aS;
+        if (world.islandMask(wx, wz, wx < 0 ? 'candy' : 'cat') > 0.01) return false;
+      }
+    }
+    return true;
+  }
+  function placeBar() {
+    const sy = aH - 9, y0 = sy - 8, y1 = sy + 2, pad = 4;
+    sg.font = BAR_FONT;
+    let pick = null;
+    for (const [m, side] of [[100, 1], [50, 1], [100, -1], [50, -1]]) {
+      const txt = m + ' m', tw = sg.measureText(txt).width, L = m * aS;
+      const w = L + 5 + tw;
+      const x0 = side > 0 ? aW - 10 - w : 10, x1 = x0 + w;
+      if (x0 < 4 || x1 > aW - 4) continue;
+      const c = { x0, y0, x1, y1, bx: x0, sy, L, txt };
+      if (!pick) pick = c;                                      // (fallback: the first that fits the sheet)
+      if (seaBox(x0 - pad, y0 - pad, x1 + pad, Math.min(aH, y1 + pad))) { pick = c; break; }
+    }
+    if (pick) Object.assign(aBar, pick);
+  }
+
+  // ── the islands' names, lettered big and curved across each landmass ───────
+  // (under every place, pin and name: a chart's title lettering, not a label)
+  // Each rides an arc parallel to its island's north coast (radius RW world
+  // units, apex baseline at z), clear of the pier–village corridor a new
+  // visitor explores first.
+  const ISLE_NAMES = [
+    { text: 'THE CANDY KINGDOM', x: -150, z: -60, fill: 'rgba(158,38,94,.6)' },
+    { text: 'CAT ISLAND', x: 150, z: -60, fill: 'rgba(16,98,92,.6)' },
+  ];
+  const ISLE_RW = 128;
+  const ISLE_FONT = '800 100px "Baloo 2", "Trebuchet MS", sans-serif';
+  const ISLE_TRACK = 0.14;                                      // letter-spacing, em
+  function isleNames() {
+    g.font = ISLE_FONT;
+    const w100 = g.measureText(ISLE_NAMES[0].text).width + ISLE_TRACK * 100 * (ISLE_NAMES[0].text.length - 1);
+    const size = Math.max(9, Math.min(40, (0.72 * 254 * aS) / (w100 / 100)));
+    g.font = `800 ${size.toFixed(1)}px "Baloo 2", "Trebuchet MS", sans-serif`;
+    g.textAlign = 'center'; g.textBaseline = 'alphabetic'; g.lineJoin = 'round';
+    const track = ISLE_TRACK * size;
+    for (const n of ISLE_NAMES) {
+      const t = n.text;
+      let span = -track;
+      for (let i = 0; i < t.length; i++) span += g.measureText(t[i]).width + track;
+      const R = ISLE_RW * aS, cx = amx(n.x), cy = amz(n.z) + R;
+      let a = -Math.PI / 2 - span / (2 * R);
+      for (let i = 0; i < t.length; i++) {
+        const cw = g.measureText(t[i]).width;
+        const am = a + (cw / 2) / R;
+        g.save();
+        g.translate(cx + R * Math.cos(am), cy + R * Math.sin(am));
+        g.rotate(am + Math.PI / 2);
+        g.lineWidth = Math.max(2.4, size * 0.2); g.strokeStyle = 'rgba(255,251,240,.7)';
+        g.strokeText(t[i], 0, 0);
+        g.fillStyle = n.fill; g.fillText(t[i], 0, 0);
+        g.restore();
+        a += (cw + track) / R;
+      }
+    }
   }
 
   /**
@@ -1507,6 +1661,7 @@ export function createMinimap(ctx, opts = {}) {
   /** GROUND extras: lamp glows under the lit places, pencil rings for the rest, compass, scale bar. */
   function atlasGround() {
     g = sg; SW = aW; SH = aH;
+    isleNames();
     for (const id in world.LANDMARKS) {
       if (aVis.has(id)) continue;
       const lm = world.LANDMARKS[id];
@@ -1523,25 +1678,39 @@ export function createMinimap(ctx, opts = {}) {
       g.drawImage(glowCv, x - big / 2, y - big / 2, big, big);
     }
     frameMarks(null);
-    // scale bar: 100 m in two bands
-    const L = 100 * aS, sx = 12, sy = SH - 12;
+    // scale bar: 100 m (or 50) in two bands, in open sea (placeBar)
+    const L = aBar.L, sx = aBar.bx, sy = aBar.sy;
     g.fillStyle = 'rgba(255,251,240,.9)'; g.strokeStyle = INK; g.lineWidth = 1.4;
     g.fillRect(sx, sy - 4, L, 5); g.strokeRect(sx, sy - 4, L, 5);
     g.fillStyle = INK; g.fillRect(sx, sy - 4, L / 2, 5);
-    g.font = '900 9px "Nunito", "Trebuchet MS", sans-serif'; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+    g.font = BAR_FONT; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
     g.lineJoin = 'round'; g.lineWidth = 3; g.strokeStyle = 'rgba(255,251,240,.9)';
-    g.strokeText('100 m', sx + L + 5, sy + 1); g.fillText('100 m', sx + L + 5, sy + 1);
+    g.strokeText(aBar.txt, sx + L + 5, sy + 1); g.fillText(aBar.txt, sx + L + 5, sy + 1);
     g = pg; SW = W; SH = H;
   }
 
-  /** Halo text at LB, anchored on the side that faces its place. */
-  function haloName() {
-    const tx = LB.side > 0 ? LB.x - LB.bw / 2 + 2 : LB.side < 0 ? LB.x + LB.bw / 2 - 2 : LB.x;
-    g.font = LB.font; g.textBaseline = 'middle';
-    g.textAlign = LB.side > 0 ? 'left' : LB.side < 0 ? 'right' : 'center';
-    g.lineJoin = 'round'; g.lineWidth = 3.8; g.strokeStyle = 'rgba(255,251,240,.96)';
-    g.strokeText(LB.t, tx, LB.y + 0.5);
-    g.fillStyle = INK; g.fillText(LB.t, tx, LB.y + 0.5);
+  /** A visited place's name at LB: a quiet cream pill (a lighter member of the label family). */
+  function namePill() {
+    const bw = LB.bw, bh = LB.bh, bx = LB.x, by = LB.y;
+    g.beginPath();
+    if (g.roundRect) g.roundRect(bx - bw / 2, by - bh / 2, bw, bh, bh / 2);
+    else g.rect(bx - bw / 2, by - bh / 2, bw, bh);
+    g.fillStyle = 'rgba(255,251,240,.94)'; g.fill();
+    g.lineWidth = 1.2; g.strokeStyle = 'rgba(43,36,66,.62)'; g.stroke();
+    g.font = LB.font; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = INK; g.fillText(LB.t, bx, by + 0.5);
+  }
+
+  /**
+   * The here-place's anchor radius: its disc, or — while you stand on it —
+   * the disc AND your arrow's ring, so its gold plate starts outside the ring
+   * and its leader is never hidden under you.
+   */
+  function hereRadius(x, y, pl) {
+    const ar = POI[aHere] ? R_LIT + 0.5 : 6;
+    if (!pl) return ar;
+    const d = Math.hypot(amx(pl.x) - x, amz(pl.z) - y);
+    return d < 26 ? Math.max(ar, d + 17) : ar;
   }
 
   /**
@@ -1553,15 +1722,60 @@ export function createMinimap(ctx, opts = {}) {
    * is named on the live layer instead, clear of your arrow.
    */
   const R_LIT = 10 * 0.86;
+  let hereSOB = -1;                                            // the here-name's reserved spot among the static obstacles
+  const NM = [];                                               // name layout records (grown once, reused)
+  let nNm = 0, namesDirty = false, nmPX = -999, nmPY = -999;   // (where you stood at the last layout)
+  let nlHere = 0;
+  /** Does your arrow (at sheet x, y) sit on a drawn place name? */
+  function onAName(x, y) {
+    for (let i = 0; i < nNm; i++) {
+      const r = NM[i];
+      if (r.drop || r.here) continue;
+      if (Math.abs(r.x - x) < r.bw / 2 + 13 && Math.abs(r.y - y) < r.bh / 2 + 13) return true;
+    }
+    return false;
+  }
+  /** Lay out every lit place's name over the obstacles [0, base); returns how many had no clear slot (nlHere = the here-name's score). */
+  function nameLayout(base, p, hereLast) {
+    nOb = base; nNm = 0;
+    let drops = 0;
+    for (let pass = 0; pass < 2; pass++) {
+      for (const id of litIds) {
+        const here = id === aHere;
+        if (here !== (pass === (hereLast ? 1 : 0))) continue;
+        const lm = world.LANDMARKS[id];
+        if (!lm.label || lm.label === '???') continue;
+        const x = amx(lm.x), y = amz(lm.z);
+        measureLabel(lm.label, placeFont, 130, here ? 15 : 14);
+        LB.bw += here ? 8 : 6;
+        keepSide(lm.x);
+        const ar = here ? hereRadius(x, y, p) : POI[id] ? R_LIT + 0.5 : 6;
+        const sc = placeLabel(x, y, ar);
+        const r = NM[nNm] || (NM[nNm] = { here: false, drop: false, t: '', font: '', bw: 0, bh: 0, x: 0, y: 0, ax: 0, ay: 0, ar: 0, slot: -1, ob: -1 });
+        nNm++;
+        r.here = here; r.t = LB.t; r.font = LB.font; r.bw = LB.bw; r.bh = LB.bh; r.x = LB.x; r.y = LB.y;
+        r.ax = x; r.ay = y; r.ar = ar; r.slot = LB.slot; r.ob = -1;
+        r.drop = sc > 60 && !here;
+        if (here) nlHere = sc;
+        if (r.drop) { drops++; continue; }
+        r.ob = obAdd(LB.x - LB.bw / 2 - 2, LB.y - LB.bh / 2 - 2, LB.x + LB.bw / 2 + 2, LB.y + LB.bh / 2 + 2);   // a little air
+      }
+    }
+    return drops;
+  }
   function atlasNames() {
     reset(lg); lg.clearRect(0, 0, aPl.width, aPl.height);
     lg.setTransform(aDpr, 0, 0, aDpr, 0, 0);
-    g = lg; SW = aW; SH = aH; nOb = 0;
+    g = lg; SW = aW; SH = aH; nOb = 0; nAn = 0;
     sortLit();
+    for (const id of litIds) {
+      const lm = world.LANDMARKS[id];
+      anAdd(amx(lm.x), amz(lm.z), POI[id] ? R_LIT : 5.6);
+    }
     for (const id in world.LANDMARKS) {
       if (aVis.has(id) || world.LANDMARKS[id].label === '???') continue;
       const lm = world.LANDMARKS[id], x = amx(lm.x), y = amz(lm.z);
-      obAdd(x - 3.5, y - 3.5, x + 3.5, y + 3.5);
+      obAdd(x - 3.5, y - 3.5, x + 3.5, y + 3.5, 0.35);
     }
     for (const id of litIds) {
       const lm = world.LANDMARKS[id];
@@ -1576,33 +1790,68 @@ export function createMinimap(ctx, opts = {}) {
       }
     }
     obAdd(SW - 26, 0, SW, 26);                                  // the compass
-    obAdd(0, SH - 30, 118, SH);                                 // the scale bar
+    obAdd(aBar.x0 - 3, aBar.y0 - 3, aBar.x1 + 3, aBar.y1 + 3);  // the scale bar
+    // the small markers the live layer will draw here (dots, diamonds): soft
+    for (const m of mList) {
+      const st = m.style;
+      if (st.tier === 2 && !st.dot) continue;
+      if (!st.always && !seenAt(m.x, m.z)) continue;
+      const x = amx(m.x), y = amz(m.z);
+      obAdd(x - 4.5, y - 4.5, x + 4.5, y + 4.5, 0.6);
+    }
+    nAnS = nAn;                                                 // (quest pins join the anchors live)
     // the quest pins (drawn live, over this layer): names keep off them
     const q0 = nOb;
     for (const m of mList) {
       if (m.style.dot || m.style.tier !== 2) continue;
       const x = amx(m.x), y = amz(m.z), d = 11.5 * 1.08, r = 7.4 * 1.08 + 1.5;
       obAdd(x - r, y - d - r, x + r, y + 2);
+      anAdd(x, y - d, 7.4 * 1.08);
+    }
+    // you (and your ring) as you stand now: a name never starts under your
+    // arrow, and atlasLive asks for a re-layout if you walk onto one
+    const p = ctx.systems.player?.position;
+    nmPX = nmPY = -999;
+    if (p && p.x >= AX0 && p.x <= AX1 && p.z >= AZ0 && p.z <= AZ1) {
+      const x = amx(p.x), y = amz(p.z);
+      obAdd(x - 16, y - 16, x + 16, y + 16);
+      nmPX = x; nmPY = y;
     }
     const q1 = nOb;
-    // the here-place's name is live, but its usual spot is reserved
-    for (const id of litIds) {
-      const lm = world.LANDMARKS[id];
-      if (!lm.label || lm.label === '???') continue;
-      const x = amx(lm.x), y = amz(lm.z);
-      measureLabel(lm.label, placeFont, 130, 14);
-      if (placeLabel(x, y, POI[id] ? R_LIT + 0.5 : 6) > 60) continue;
-      if (id !== aHere) haloName();
-      obAdd(LB.x - LB.bw / 2 - 2, LB.y - LB.bh / 2 - 2, LB.x + LB.bw / 2 + 2, LB.y + LB.bh / 2 + 2);   // a little air
+    namesDirty = false;
+    // The names: laid out with the here-place's name leading, and — if that
+    // drops a name — once more with it placed last; whichever drops fewer
+    // wins. Then drawn. (The here-name itself is drawn live, but its spot is
+    // reserved with the same plate and anchor, so the others keep off it.)
+    const base = nOb;
+    // (placed last, the here-name must not end up on another name: the second
+    // layout only wins if it drops fewer AND leaves the here-name as clear)
+    nlHere = 0;
+    const drops = nameLayout(base, p, false), h1 = nlHere;
+    if (drops > 0 && aHere) {
+      const d2 = nameLayout(base, p, true);
+      if (d2 >= drops || nlHere > h1 + 12) nameLayout(base, p, false);
+    }
+    let hereOb = -1;
+    hereSlot = -1;
+    for (let i = 0; i < nNm; i++) {
+      const r = NM[i];
+      if (r.drop) continue;
+      if (r.here) { hereSlot = r.slot; hereOb = r.ob; continue; }
+      LB.t = r.t; LB.font = r.font; LB.bw = r.bw; LB.bh = r.bh; LB.x = r.x; LB.y = r.y;
+      leader(r.ax, r.ay, r.ar);
+      namePill();
     }
     // keep everything but the quest pins for the live layer's labels
-    nSOB = 0;
+    nSOB = 0; hereSOB = -1;
     for (let n = 0; n < nOb; n++) {
       if (n >= q0 && n < q1) continue;
+      if (n === hereOb) hereSOB = nSOB;
       for (let c = 0; c < 4; c++) SOB[nSOB * 4 + c] = OB[n * 4 + c];
+      SOBW[nSOB] = OBW[n];
       nSOB++;
     }
-    hereSlot = -1;
+    nAn = nAnS;
     g = pg; SW = W; SH = H;
   }
 
@@ -1614,8 +1863,21 @@ export function createMinimap(ctx, opts = {}) {
    * white road, red dashes (still) — older thirds a duskier red.
    * Teleports break it; it ends at your arrow.
    */
+  /** The legend names the route only while there is one on the sheet to name. */
+  function routeLegend(on) {
+    if (on === routeOn) return;
+    routeOn = on;
+    legEl.classList.toggle('no-route', !on);
+    xpCheck = true;
+  }
+  /** Length (css px) of the simplified route in RX/RY, teleport breaks excluded. */
+  function RC_len(n) {
+    let L = 0;
+    for (let m = 1; m < n; m++) if (!RB[m]) L += Math.hypot(RX[m] - RX[m - 1], RY[m] - RY[m - 1]);
+    return L;
+  }
   function drawRoute(pl) {
-    if (tN < 1) return;
+    if (tN < 1) { routeLegend(false); return; }
     let n = 0, lx = 0, ly = 0, lwx = NaN, lwz = NaN;
     for (let i = 0; i < tN; i++) {
       const q = trailIdx(i), wx = trail[q * 2], wz = trail[q * 2 + 1];
@@ -1628,6 +1890,7 @@ export function createMinimap(ctx, opts = {}) {
     if (pl && Math.abs(pl.x - lwx) < TRAIL_BREAK && Math.abs(pl.z - lwz) < TRAIL_BREAK) {
       RX[n] = amx(pl.x); RY[n] = amz(pl.z); RI[n] = tN - 1; RB[n] = 0; n++;
     }
+    routeLegend(n >= 2 && RC_len(n) > 6);
     if (n < 2) return;
     RC[0] = 0;
     for (let m = 1; m < n; m++) RC[m] = RC[m - 1] + (RB[m] ? 0 : Math.hypot(RX[m] - RX[m - 1], RY[m] - RY[m - 1]));
@@ -1659,8 +1922,15 @@ export function createMinimap(ctx, opts = {}) {
 
   /** Other systems' markers on the atlas. Quest pins are labelled. */
   function atlasMarkers(pl) {
-    if (!mList.length) return;
     const px = pl ? amx(pl.x) : -999, py = pl ? amz(pl.z) : -999;
+    // start from the static layer's places and names, so a quest label (or the
+    // here-name after this) never lands on 'Main Street'; you and your ring are
+    // an obstacle too
+    for (let i = 0; i < nSOB * 4; i++) OB[i] = SOB[i];
+    for (let i = 0; i < nSOB; i++) OBW[i] = SOBW[i];
+    nOb = nSOB; nAn = nAnS;
+    if (pl) obAdd(px - 16, py - 16, px + 16, py + 16);
+    if (!mList.length) return;
     for (let pass = 0; pass < 2; pass++) {
       for (const m of mList) {
         const st = m.style;
@@ -1673,11 +1943,6 @@ export function createMinimap(ctx, opts = {}) {
         if (diamond) mdiamond(x, y, st.fill, 4); else mdot(x, y, st.fill, 2.6);
       }
     }
-    // start from the static layer's places and names, so a quest label never
-    // lands on 'Main Street'
-    for (let i = 0; i < nSOB * 4; i++) OB[i] = SOB[i];
-    nOb = nSOB;
-    if (pl) obAdd(px - 14, py - 14, px + 14, py + 14);
     for (const m of mList) {
       const st = m.style;
       if (st.dot || st.tier !== 2) { m._ob = -1; continue; }
@@ -1691,11 +1956,13 @@ export function createMinimap(ctx, opts = {}) {
       pin(x, y, m.glyph, s, st.fill, true, lean);
       m._ob = obAdd(m._hx - R - 1, m._hy - R - 1, m._hx + R + 1, m._hy + R + 1);
     }
+    for (const m of mList) if (m._ob >= 0) anAdd(m._hx, m._hy, 7.4 * m._s);
     for (const m of mList) {
       if (m._ob < 0 || !m.label || m.style.tier !== 2) continue;
       const R = 7.4 * m._s + 1;
       measureLabel(m.label, ALABEL_FONT, 120, 15);
       LB.bw += 6;
+      keepSide(m.x);
       placeLabel(m._hx, m._hy, R, m._ob, m._slotA ?? -1);
       m._slotA = LB.slot;
       leader(m._hx, m._hy, R);
@@ -1717,10 +1984,11 @@ export function createMinimap(ctx, opts = {}) {
     // WHERE YOU ARE, named on a gold plate beside the place, never under you
     const lm = aHere ? world.LANDMARKS[aHere] : null;
     if (pl && lm && lm.label && lm.label !== '???') {
-      const x = amx(lm.x), y = amz(lm.z), ar = POI[aHere] ? R_LIT + 0.5 : 6;
+      const x = amx(lm.x), y = amz(lm.z), ar = hereRadius(x, y, pl);
       measureLabel(lm.label, placeFont, 130, 15);
       LB.bw += 8;
-      placeLabel(x, y, ar, -1, hereSlot);
+      keepSide(lm.x);
+      placeLabel(x, y, ar, hereSOB, hereSlot);
       hereSlot = LB.slot;
       leader(x, y, ar);
       labelPlate('#ffe7a0');
@@ -1729,6 +1997,8 @@ export function createMinimap(ctx, opts = {}) {
     if (fp) drawFerry(amx(fp.x), amz(fp.z));
     if (pl) {
       const x = amx(pl.x), y = amz(pl.z);
+      // walked onto a name: it moves aside next frame (at most once per 6 px of travel)
+      if (!namesDirty && (Math.abs(x - nmPX) > 6 || Math.abs(y - nmPY) > 6) && onAName(x, y)) namesDirty = true;
       // a still ring round you that breathes in opacity only
       ag.globalAlpha = 0.35 + 0.55 * (0.5 + 0.5 * Math.cos((ctx.state.elapsed || 0) * PULSE_W));
       ag.lineWidth = 2.6; ag.strokeStyle = '#ffc94a';
@@ -1749,6 +2019,7 @@ export function createMinimap(ctx, opts = {}) {
     aVis = visitedIn instanceof Set ? visitedIn : visited;
     if (!structDone && ctx.state.elapsed > 0) bakeStructures();
     fitAtlas();
+    if (aBarDirty) { aBarDirty = false; if (aW > 0) placeBar(); }
     if (!aMeasured && aPlate.offsetWidth > 0 && aSt.offsetWidth > 0) {
       aMeasured = true;
       const cw = aPlate.offsetWidth - aSt.offsetWidth, ch = aPlate.offsetHeight - aSt.offsetHeight;
@@ -1772,7 +2043,12 @@ export function createMinimap(ctx, opts = {}) {
       const t2 = PROF ? performance.now() : 0;
       atlasNames();
       if (PROF) console.warn('[ui/minimap] atlas rebuild ms', JSON.stringify({ static: +tS.toFixed(2), explored: +(t2 - t1).toFixed(2), names: +(performance.now() - t2).toFixed(2), w: aW, h: aH, dpr: aDpr }));
-    } else if (dBox.x1 >= dBox.x0) {
+    } else if (namesDirty) {
+      const t1 = PROF ? performance.now() : 0;
+      atlasNames();                                             // only the names layer: you walked onto one
+      if (PROF) console.warn('[ui/minimap] atlas names ms', +(performance.now() - t1).toFixed(2));
+    }
+    if (!full && dBox.x1 >= dBox.x0) {
       // only the neighbourhood that was just explored (plus room for the rim;
       // the places and names are redrawn inside it, so nothing is lost)
       const k = aDpr * aS, pad = (CELL + 4) * k + 6 * aDpr;
@@ -1782,6 +2058,7 @@ export function createMinimap(ctx, opts = {}) {
     }
     dBox.x0 = Infinity; dBox.x1 = -Infinity; dBox.z0 = Infinity; dBox.z1 = -Infinity;
     atlasLive();
+    checkStack();
     if (aVis.size !== placesShown) {
       placesShown = aVis.size;
       let n = 0;

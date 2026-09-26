@@ -97,12 +97,16 @@ export function createNpcXray(ctx) {
   const sC = { x: 0, y: 0, depth: 0, ndx: 0, ndy: 0 }, sT = { x: 0, y: 0, depth: 0, ndx: 0, ndy: 0 }, sF = { x: 0, y: 0, depth: 0, ndx: 0, ndy: 0 };
   /**
    * Aim the window at the visitor for this camera (call once the camera has its
-   * final matrices). k = strength 0..1 (0 = off: carried, off screen, no player).
+   * final matrices). k = strength 0..1 (0 = off: carried, off screen, no player);
+   * nk = the near-lens band's own strength (default k — the scruff-carry keeps
+   * the band with the window off: a bystander at the lens still thins, the
+   * carrier, framed well clear of the lens, is never touched).
    */
-  function update(cam, P, k = 1) {
+  function update(cam, P, k = 1, nk = k) {
     const R = uniforms.uNpcR.value, Cc = uniforms.uNpcC.value;
-    if (!cam || !P || !(k > 0) || !ctx.renderer) { R.z = 0; R.w = 0; stats.on = false; return; }
-    R.w = NEAR_K * k;
+    if (!cam || !P || !ctx.renderer || !(k > 0 || nk > 0)) { R.z = 0; R.w = 0; stats.on = false; return; }
+    R.w = NEAR_K * nk;
+    if (!(k > 0)) { R.z = 0; stats.on = false; return; }
     ctx.renderer.getDrawingBufferSize(buf);
     const cy = P.y + 0.95;
     toPx(cam, P.x, cy, P.z, sC);
@@ -113,7 +117,7 @@ export function createNpcXray(ctx) {
     const pxPerU = buf.y * (cam.zoom || 1) / (2 * sC.depth * Math.tan(THREE.MathUtils.degToRad(cam.fov || 40) * 0.5));
     const rx = Math.max(8, RX * pxPerU);
     Cc.set(sC.x, sC.y, sC.depth - X_DEPTH, NEAR);
-    R.set(rx, ry, X_CORE * k, NEAR_K * k);
+    R.set(rx, ry, X_CORE * k, NEAR_K * nk);
     stats.on = true;
   }
   return { patch, update, uniforms, stats };

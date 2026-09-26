@@ -30,7 +30,7 @@ const LINES = {
     'All aboard the Sugarfin Express! Mind the horn, she\'s proud of it.',
     'Cat Island! Lovely place. Lovely, lovely place.',
   ],
-  boardCandy: ['Okay, FINE. You can VISIT Candyland. But you live here now.'],
+  boardCandy: ['Okay, FINE. You can VISIT the Candy Kingdom. But you live here now.'],
   mid: [
     'Round trip? Ha. HA.',
     'Sugarfin eats plankton and schedules. Mostly schedules.',
@@ -545,7 +545,7 @@ export function create(ctx) {
     gate.enabled = S.phase === 'idle';
     gate.label = S.asleep
       ? 'The Sugarfin Express is fast asleep'
-      : (S.side === 'cat' ? 'Board the Sugarfin Express — back to Candyland' : 'Board the Sugarfin Express');
+      : (S.side === 'cat' ? 'Sail back to the Candy Kingdom' : 'Board the Sugarfin Express');
   }
 
   // ── boarding / crossing ────────────────────────────────────────────────────

@@ -259,7 +259,7 @@ export function authorPickups(ctx, clear, nudge) {
     ['pick_cannon', 'jawbreaker_cannon', -124.5, -48.5, 'candy', 'Take the Jawbreaker Cannon', 'on the Candy Palace approach',
       'The palace salute cannon, loaded with jawbreakers. The plaque reads: "FOR CEREMONIAL USE." It is not ceremonial.'],
     ['pick_whip', 'licorice_whip', -190.5, -7.5, 'candy', 'Take the Licorice Whip', 'on the Gummy Forest path',
-      'A licorice whip, hung on a trail sign. The Sour Patch Kids flinch when they walk past it. Good.'],
+      'A licorice whip, hung on a trail sign. The Sourlings flinch when they walk past it. Good.'],
     ['pick_gum', 'bubblegum_blower', -157.5, 51.5, 'candy', 'Take the Bubblegum Blower', 'in Gumdrop Village',
       'A bubble gun loaded with extra-sticky gum. Anything it hits stays put for a bit.'],
     ['pick_marsh', 'marshmallow_launcher', 86.0, 27.5, 'cat', 'Take the Marshmallow Launcher', 'by the Welcome Plaza',

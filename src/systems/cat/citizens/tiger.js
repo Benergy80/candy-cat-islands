@@ -110,7 +110,10 @@ const TPOSE = {
   roar:   { crouch: -0.05, tail: 0.62, curl: 0.20, swish: 2.2, freq: 0, stride: 0, roll: 0, mouth: 1, ear: 1, headY: 0.17, pitch: -0.36, rear: 0.12, chest: 1 },
   sit:    { sit: 1, tail: -0.55, curl: 0.30, wrap: 1, swish: 0.35, freq: 0, stride: 0, chest: 0.25 },
   watch:  { sit: 1, tail: -0.55, curl: 0.28, wrap: 1, swish: 0.24, freq: 0, stride: 0, eye: 1.12, chest: 0.30 },
-  carry:  { crouch: 0.02, tail: -0.70, curl: 0.34, swish: 0.8, freq: 1.65, stride: 0.44, roll: 1.0, mouth: 0.55, headY: 0.11, pitch: -0.14 },
+  // (the scruff-carry: head held HIGH, a mother cat with a kitten, so he
+  //  swings clear of the ground under its chin — citizens/carry.js hangs him
+  //  from the rig's real jaws)
+  carry:  { crouch: 0.02, tail: -0.70, curl: 0.34, swish: 0.8, freq: 1.65, stride: 0.44, roll: 1.0, mouth: 0.55, headY: 0.55, headZ: 0.04, pitch: -0.42 },
   // the raiding party (citizens/raid.js): a long, low, ground-eating lope over
   // the rainbow, and the same lope with a visitor hanging out of it
   lope:   { crouch: 0.08, tail: -1.05, curl: 0.34, swish: 0.7, freq: 2.15, stride: 0.52, roll: 1.15, headY: -0.05, headZ: 0.05, pitch: 0.05 },
@@ -128,6 +131,14 @@ const TPOSE = {
   stun:   { crouch: 0.22, tail: -1.10, curl: 0.18, swish: 0.5, freq: 0, stride: 0, ear: 0.55, eye: 0.42, pitch: 0.20 },
   sulk:   { sit: 1, tail: -0.60, curl: 0.30, wrap: 1, swish: 0.2, freq: 0, stride: 0, ear: 0.6, eye: 0.5, pitch: 0.28 },
   sleep:  { crouch: 0.60, tail: -0.70, curl: 0.20, wrap: 1.2, swish: 0.14, freq: 0, stride: 0, eye: 0.02, pitch: 0.26 },
+  // the scruff-carry's last beat (citizens/carry.js): at the bedside, low, the
+  // head dipped right down over the pillow to let go of him — and a purr
+  tuck:   { crouch: 0.30, tail: -0.62, curl: 0.34, wrap: 0.4, swish: 0.30, freq: 0, stride: 0, mouth: 0.34, headY: -0.24, headZ: 0.20, pitch: 0.46, ear: 0.12, eye: 0.62, chest: 0.2 },
+  // …and once he is down: still low at the bedside, the head lifted clear of
+  // him and leaning over the bed edge, looking down at him — its face in the
+  // tuck shot, not its skull through his chest (and not sat bolt upright,
+  // its head looming into the lens)
+  bedside: { crouch: 0.26, tail: -0.62, curl: 0.34, wrap: 0.5, swish: 0.22, freq: 0, stride: 0, mouth: 0.04, headY: 0.06, headZ: 0.16, pitch: 0.30, ear: 0.08, eye: 0.7, chest: 0.2 },
 };
 // Pose vectors (Contract J): fixed-shape objects written by named fields, every
 // TPOSE pre-expanded against TREST — the for-in damping boxed a number per key.
@@ -204,7 +215,7 @@ const POSE_OF = {
   lope: 'lope', bound: 'bound', carryrun: 'carryrun', carrygallop: 'carrygallop', trot: 'trot',
   yawn: 'yawn', flinch: 'flinch', hiss: 'hiss', flee: 'flee', stun: 'stun', dizzy: 'stun',
   sulk: 'sulk', sit: 'sit', watch: 'watch', gossip: 'sit', groom: 'sit',
-  sleep: 'sleep', loaf: 'sleep', sunbathe: 'sleep', nip: 'sleep', curl: 'sit', squat: 'sit',
+  sleep: 'sleep', loaf: 'sleep', sunbathe: 'sleep', nip: 'sleep', curl: 'sit', squat: 'sit', tuck: 'tuck', bedside: 'bedside',
 };
 
 const TAIL_BACK = -1.62;          // rotation.x that lays the tail straight back
@@ -239,7 +250,9 @@ export function applyTiger(c, k, el, dt, ctx) {
   if (!key) key = c.moving ? 'prowl' : 'sit';
   const t = tg.t, a = tg.a;
   setTPose(t, TFULL[key] || TFULL.prowl);
-  if (tg.snap) { setTPose(a, t); tg.snap = false; } else dampTPose(a, t, 1 - Math.exp(-7.5 * dt));
+  // (c.poseRate: a scripted beat that needs the pose NOW — the scruff-carry's
+  //  catch lifts the head out of the pounce this fast, citizens/carry.js)
+  if (tg.snap) { setTPose(a, t); tg.snap = false; } else dampTPose(a, t, 1 - Math.exp(-(c.poseRate || 7.5) * dt));
   tg.mv = damp(tg.mv, c.moving ? 1 : 0, 8, dt);
 
   // ── gait: diagonal pairs, heavy and slow ───────────────────────────────────

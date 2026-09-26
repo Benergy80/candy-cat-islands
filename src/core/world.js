@@ -13,7 +13,7 @@ export const SEA_LEVEL = 0;
 export const DAY_LENGTH_SEC = 300; // one full day/night cycle (debug can override)
 
 export const ISLANDS = {
-  candy: { id: 'candy', name: 'Candyland Island', center: { x: -150, z: 0 }, radius: 118, seed: 11 },
+  candy: { id: 'candy', name: 'The Candy Kingdom', center: { x: -150, z: 0 }, radius: 118, seed: 11 },
   cat:   { id: 'cat',   name: 'Cat Island',       center: { x:  150, z: 0 }, radius: 118, seed: 23 },
 };
 

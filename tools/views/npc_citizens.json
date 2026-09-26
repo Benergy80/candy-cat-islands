@@ -16,5 +16,11 @@
   "tigerraid_dawn_home": {"free": [16, -8], "y": 24, "az": 0.66, "el": 0.1, "dist": 44, "time": 5.9, "frames": 50, "call": {"catCitizens.raidDebug": {"phase": "retreat", "n": 5, "t": 0.45, "park": [-55, 21], "frame": {"frames": 50, "who": 2, "dist": 17, "el": 0.05, "az": 1.35, "fov": 34}}}},
   "tigerraid_pier_start": {"pos": [-47, 19], "az": -1.75, "el": 0.56, "dist": 22, "time": 23, "frames": 150, "call": {"catCitizens.raidDebug": {"phase": "hunt", "n": 4, "r": 8}}},
   "tigerraid_cupcake_ring": {"pos": [-74, -34], "az": 2.75, "el": 0.66, "dist": 25, "time": 23, "frames": 60, "call": {"catCitizens.raidDebug": {"phase": "hunt", "n": 4, "r": 9}}},
-  "tigerraid_under_deck": {"pos": [-117.6, 39.2], "time": 23, "frames": 60, "call": {"catCitizens.raidDebug": {"phase": "hide", "az": 2.88, "dist": 9}}}
+  "tigerraid_under_deck": {"pos": [-117.6, 39.2], "time": 23, "frames": 60, "call": {"catCitizens.raidDebug": {"phase": "hide", "az": 2.88, "dist": 9}}},
+  "carry_1_catch": {"pos": [150, 14], "time": 22.5, "frames": 16, "call": {"catCitizens.carryDebug": {"beat": "catch", "at": [126, 2], "key": "jogger"}}},
+  "carry_2_main_street": {"pos": [104, 5], "time": 22.5, "frames": 100, "call": {"catCitizens.carryDebug": {"beat": "carry", "at": [104, 5], "key": "jogger"}}},
+  "carry_3_rainbow": {"pos": [-48, 25], "time": 23, "frames": 90, "call": {"catCitizens.raidDebug": {"phase": "carry", "t": 0.45, "n": 4}}},
+  "carry_4_arrival": {"pos": [172, 60], "time": 22.5, "frames": 24, "call": {"catCitizens.carryDebug": {"beat": "arrive", "key": "jogger", "back": 7}}},
+  "carry_5_tuck": {"pos": [172, 60], "time": 22.5, "frames": 52, "call": {"catCitizens.carryDebug": {"beat": "tuck", "key": "jogger"}}},
+  "carry_6_wake": {"pos": [172, 60], "time": 22.5, "frames": 40, "call": {"catCitizens.carryDebug": {"beat": "wake", "key": "jogger"}}}
 }

@@ -6,12 +6,15 @@
 // by the same rules as at home. Light horror, never gore:
 //
 //  · DUSK — the pack is picked when the dusk freeze starts. Like everyone else
-//    they freeze, turn and go indoors… and then they come up out of the dark
-//    at the foot of the rainbow, just outside Sugar Pier's salt line, one after
-//    another, and skip up the arc in a loose column, hands behind their backs,
-//    heads turning in unison to follow you — quick: the lead is due at the
-//    Arrivals Pier by 20:45 (THE CLOCK, below; ≈ 7.6 u/s from the natural
-//    18:47 start). The first one on the deck fires the
+//    they freeze, run to the Sour Shrine and stand in its rings for the rite
+//    (Contract O, sourpatch/ritual.js)… and once the reveal is over (≈ 21:42)
+//    the pack MUSTERS out of the shrine: off into the dark along the forest
+//    path, and — once nobody can see it — up out of the dark at the foot of
+//    the rainbow, just outside Sugar Pier's salt line, one after another; it
+//    skips up the arc in a loose column, hands behind their backs, heads
+//    turning in unison to follow you — quick: the lead is due at the Arrivals
+//    Pier by ≈ 23:20 (THE CLOCK, below; ≈ 9.5 u/s from the natural ≈ 21:42
+//    start). The first one on the deck fires the
 //    cue: a giggle (ctx.systems.audio.play('sourpatch_giggle') if there is an
 //    audio system) and the toast "…They're on the bridge."
 //  · THE BRIDGE IS A TRUCE. On the deck nobody is eaten: a visitor standing in
@@ -70,6 +73,8 @@
 import * as THREE from 'three';
 import { createCatSalt } from './catsalt.js';
 import { rng, hash } from '../../../core/util.js';
+import { ritualEndH } from './ritual.js';
+import { DAY_LENGTH_SEC } from '../../../core/world.js';
 
 export const PACK = 8;                 // ≤ 10 (Contract M); the rest stay home
 // THE CLOCK (kids fixer r2 — integration verifier: "ashore at 22:20, on the deck
@@ -81,9 +86,9 @@ export const PACK = 8;                 // ≤ 10 (Contract M); the rest stay hom
 // three game hours each way. Now:
 //  · OUT: the pack's lead is due at the far foot by ASHORE_H, whenever it set
 //    off (crossPace(), one pace for the whole column, fixed at its first step):
-//    the natural dusk (muster ≈ 18:47) is a ≈ 7.6 u/s skip, ashore ≈ 20:45; a
-//    late start (the clock set to 19:00 / 19:12) scurries, at up to CROSS_MAX,
-//    and is ashore ≈ 20:50–20:55.
+//    the natural muster at the end of the dusk rite (Contract O, ≈ 21:42) is a
+//    ≈ 9.5 u/s skip, ashore ≈ 23:20; a late start scurries, at up to
+//    CROSS_MAX; an early one (the visitor broke the rite) takes CROSS_H_MAX.
 //  · HOME: before the sun can catch them on the wrong island, each raider sets
 //    off for the foot of the rainbow in the dark — the far ones first, by as
 //    long as the walk takes (never before RETREAT_MIN_H) — so the pack files
@@ -91,8 +96,13 @@ export const PACK = 8;                 // ≤ 10 (Contract M); the rest stay hom
 //    the dawn turns them back into day kids up there, in the sunrise. The deck
 //    is clear by ≈ 07:00. One caught on Cat Island by the dawn anyway (a lunge,
 //    a clock jump) hurries, to be off the deck by DECK_DUE_H.
-const MUSTER_H = 18.75;                // the dusk beat's "gone indoors" (18:30 + 3.2 s): the natural start
-const ASHORE_H = 20.75;                // the lead is due at the Cat Island foot by then…
+// (Contract O: the pack leaves only after the dusk rite's reveal — ritual.js
+// RT.END, ≈ 21:42 at 12.5 s a game hour)
+const MUSTER_H = ritualEndH((DAY_LENGTH_SEC || 300) / 24);  // the natural start: the rite hands over to the hunt
+const ASHORE_H = MUSTER_H + 1.6;       // the lead is due at the Cat Island foot by then…
+const MUSTER_RUN = 9;                  // s: the longest the pack runs off from the shrine in view before it is simply gone
+// the forest path out of the shrine, the way the pack musters (toward the rainbow)
+const MUSTER_WAY = [[-200, -20], [-185, 0], [-170, 30]];
 const CROSS_H_MIN = 1.25;              // …but a late start never takes less than this…
 const CROSS_H_MAX = 2.0;               // …or an early one more
 const CROSS_MIN = 5.5;                 // u/s along the arc
@@ -477,11 +487,12 @@ export function createRaid(ctx, D) {
       nightStarted = false;
     } else if (next === 'hunting') {
       nightStarted = true;
-      if (!pack.length) {
+      if (!pack.length || jump) {
         // a time jump straight into the night: the pack is already where the
         // clock says it would be — on the arc (at the natural dusk pace, from
         // MUSTER_H) until ASHORE_H, on Cat Island after
-        pick(); readBridge();
+        if (!pack.length) pick();
+        readBridge();
         const span = ASHORE_H - MUSTER_H, hu = hoursUntil(ASHORE_H);
         const early = bridgeMode === 'api' && hu > 0.05 && hu < span;
         const onCatNow = onCat(p.x, p.z);
@@ -492,7 +503,8 @@ export function createRaid(ctx, D) {
         }
         placeSmallHours();                        // (a jump into the file home: onto the deck)
       } else {
-        for (const k of pack) if (k.raid === 'muster') startCross(k);
+        // the end of the dusk rite: the pack musters out of the shrine (brain 'muster')
+        for (const k of pack) if (k.raid === 'muster') k.rT = 0;
       }
     } else if (next === 'playful' && !dawn) {
       endAll();
@@ -693,11 +705,13 @@ export function createRaid(ctx, D) {
     k.rT += dt;
     switch (k.raid) {
       case 'muster':
-        // still at home in the dusk beat; once it has gone indoors (or the
-        // moment nobody is looking) it is out of the dark at the foot of the rainbow
-        if (D.phase() === 'hunting' || (D.phase() === 'watching' && D.duskStage() > 0 &&
-          (k.vis <= 0.02 || !D.inView(k.x, k.y + 0.8, k.z)))) { startCross(k); return true; }
-        return false;
+        // (Contract O) in the rings with everyone else through the dusk rite;
+        // after the reveal it runs off out of the shrine into the dark, and the
+        // moment nobody can see it, it is out of the dark at the foot of the rainbow
+        if (D.phase() !== 'hunting') return false;
+        if (k.vis <= 0.02 || !D.inView(k.x, k.y + 0.8, k.z) || k.rT > MUSTER_RUN) { startCross(k); return true; }
+        musterRun(k, dt, t);
+        return true;
       case 'wait':
         // no bridge: it comes ashore at the Arrivals Pier at nightfall
         k.vis = 0; k.moving = 0;
@@ -717,6 +731,22 @@ export function createRaid(ctx, D) {
         return true;
       default: return false;
     }
+  }
+
+  /** The pack musters: off out of the shrine along the forest path, at a
+   *  scurry, the night rig on (it has just been revealed). */
+  function musterRun(k, dt, t) {
+    let tx = MUSTER_WAY[MUSTER_WAY.length - 1][0], tz = MUSTER_WAY[MUSTER_WAY.length - 1][1];
+    for (let j = 0; j < MUSTER_WAY.length; j++) {
+      const w = MUSTER_WAY[j];
+      if (dist2d(k.x, k.z, w[0], w[1]) > 3 && (j === MUSTER_WAY.length - 1 || k.x < w[0] + 1.5)) { tx = w[0]; tz = w[1]; break; }
+    }
+    k.state = 'raid';
+    D.moveTo(k, tx, tz, 7.2, dt);
+    k.armMode = 'reach'; k.eyesShut = 0;
+    k.lean = D.damp(k.lean, 0.25, 5, dt);
+    k.mouthWide = D.damp(k.mouthWide, 0.9, 4, dt);
+    k.sit = 0; k.lie = 0; k.kick = 0; k.cross = 0;
   }
 
   function crossBrain(k, dt, t, p, dp, info, dir) {
@@ -1272,7 +1302,8 @@ export function createRaid(ctx, D) {
         try { if (b && !b.up && typeof b.debugRaise === 'function') b.debugRaise(true); } catch (e) { console.warn('[sourpatch/raid] debugRaise', e?.message || e); }
         enable();
         const tm = ctx.state.time;
-        const ph = (tm < 5.5 || tm > 19.5) ? 'hunting' : (tm >= 18.5 && tm <= 19.5 ? 'watching' : 'playful');
+        // (the phase the clock gives — the dusk rite runs to ≈ 21:42: sourpatch.js clockPhase)
+        const ph = typeof D.phaseAt === 'function' ? D.phaseAt(tm) : ((tm < 5.5 || tm > 19.5) ? 'hunting' : (tm >= 18.5 && tm <= 19.5 ? 'watching' : 'playful'));
         pending = { mode, f, phase: ph };
         return true;
       },

@@ -513,6 +513,16 @@ export function createRig(ctx, N, rand) {
       blobMat.opacity = 0.50 * (0.62 + 0.38 * daylight);
     },
 
+    /** The dusk ritual (ritual.js), after setMood: scale the eyes' light — 0
+     *  is black sockets (no pupil glow, no halo, no ground pool, no grin
+     *  light), >1 the reveal burning hotter. */
+    eyeScale(f) {
+      pupilMat.emissiveIntensity *= f;
+      glowMat.opacity = Math.min(1, glowMat.opacity * f); glow.visible = glowMat.opacity > 0.01;
+      poolMat.opacity *= Math.min(1.4, f); pool.visible = poolMat.opacity > 0.008;
+      uGrinGlow.value *= f;
+    },
+
     hide(i) {
       if (hidden[i]) return; hidden[i] = 1;
       head.setMatrixAt(i, ZERO_M); torso.setMatrixAt(i, ZERO_M);
@@ -609,6 +619,9 @@ export function createRig(ctx, N, rand) {
           case 'paw':    ax = -1.15 + Math.sin(t * 4.4 + k.ph * 6 + s * 2.2) * 0.55; az = side * 0.34; break;
           case 'lick':   ax = s === 0 ? -1.95 : -0.15; az = side * 0.30; break;
           case 'wave':   ax = s === 1 ? -2.6 + Math.sin(t * 9) * 0.5 : -0.2; az = side * 0.42; break;
+          // the dusk ritual (ritual.js): both arms rise TOGETHER, in a V, by
+          // k.armLift (0 hanging … 1 straight up) — one value for all 24
+          case 'ritual': { const L = k.armLift || 0; ax = -0.2 - 2.45 * L; az = side * (0.5 + 0.34 * L); break; }
           // arms hang OUT, not down: stubby nubs at 35° off the body
           default:       ax = -Math.sin(k.gait + (s ? Math.PI : 0)) * 0.5 * k.gaitAmp + k.lean * 0.35; az = side * (0.62 + k.gaitAmp * 0.12);
         }

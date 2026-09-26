@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { PAL, frame, at, windowUnit, doorUnit, block, roomShell, tileRoof, flatRoof, awning, fascia, shopWindow, lamppost, bench, planter, crate, barrel, sittingCat, loafCat, catEars, bunting, paving, ribbon, column, hedge, pool, wash, halo, cornice, balcony, billboard, hangingPlate } from './parts.js';
 import { drawLines, board, catFace, humanFace, FONTS } from './signs.js';
-import { ripple } from './kit.js';
+import { ripple, catRail, tubeStyle, arcPts } from './kit.js';
 import { purrbucksInterior, travelInterior, meowInterior } from './interiors.js';
 
 // street centreline (x is monotonic so we can query by x)
@@ -93,15 +93,42 @@ function shop(T, f, o) {
     // the facade band, with the doorway cut out of it
     const g = o.enter.gaps[0];
     const x0 = -(w - 0.3) / 2, x1 = (w - 0.3) / 2, l0 = g.lx - g.w / 2, l1 = g.lx + g.w / 2;
-    for (const [a, c] of [[x0, l0], [l1, x1]]) if (c - a > 0.05) b.box(f.px((a + c) / 2, fz + 0.1), f.y, f.pz((a + c) / 2, fz + 0.1), c - a, fy, 0.62, o.front ?? PAL.stoneLight, { ry, ao: 0.7, aoBase: f.y, aoH: 2.2 });
+    // …and the slab is SOLID either side of the doorway, with the same edges
+    // as the gap. The wall's collider stops at the wall face, 0.36 behind the
+    // slab's: the visitor walked half his body into the shopfront beside the
+    // door, and the collider gap in front of the wall was the whole frontage.
+    for (const [a, c] of [[x0, l0], [l1, x1]]) if (c - a > 0.05) {
+      b.box(f.px((a + c) / 2, fz + 0.1), f.y, f.pz((a + c) / 2, fz + 0.1), c - a, fy, 0.62, o.front ?? PAL.stoneLight, { ry, ao: 0.7, aoBase: f.y, aoH: 2.2 });
+      T.wall(f.px((a + c) / 2, fz + 0.1), f.pz((a + c) / 2, fz + 0.1), c - a, 0.62, ry);
+    }
     b.box(f.px(g.lx, fz + 0.1), f.y + g.h, f.pz(g.lx, fz + 0.1), g.w, fy - g.h, 0.62, o.front ?? PAL.stoneLight, { ry, ao: 0 });
     b.box(f.px(0, -fz - 0.1), f.y, f.pz(0, -fz - 0.1), w - 0.3, fy, 0.62, o.front ?? PAL.stoneLight, { ry, ao: 0.7, aoBase: f.y, aoH: 2.2 });
   } else {
     b.box(f.x, f.y, f.z, w - 0.3, fy, d + 0.5, o.front ?? PAL.stoneLight, { ry, ao: 0.7, aoBase: f.y, aoH: 2.2 });
   }
-  shopWindow(b, f, -w * 0.19, fz + 0.26, 1.15, w * 0.46, 2.55, { frameColor: o.trim, goods: o.goods });
-  doorUnit(b, f, w * 0.26, fz + 0.26, { w: 1.9, h: 2.9, color: o.trim, humanSide: 1, humanSignCell: T.humansLabel(), flap: o.flap ?? 0xe8d9b8, leaf: !o.enter, recess: !o.enter, mat: !o.enter });
-  if (o.awn !== false) awning(b, f, -w * 0.19, fz + 0.3, f.y + fy - 0.4, w * 0.56, o.stripe, { depth: 2.0, under: 0xefe4cf });
+  // (an enterable shop's facade slab stands 0.41 proud: the window goes on its
+  // face, not buried in it with its glass in the slab's own plane)
+  shopWindow(b, f, o.winX ?? -w * 0.19, fz + (o.enter ? 0.41 : 0.26), 1.15, o.winW ?? w * 0.46, 2.55, { frameColor: o.trim, goods: o.goods });
+  if (o.enter) {
+    // the display window stands proud of the slab: its frame, and its stone
+    // sill 0.4 out at the visitor's waist (and what stands on it, o.goodsOut),
+    // so the slab's collider steps out round it (never a low prop: nobody
+    // climbs onto a shop's window sill)
+    const ww = (o.winW ?? w * 0.46) + 0.4, wx = o.winX ?? -w * 0.19, wz1 = fz + 0.41 + Math.max(0.4, o.goodsOut ?? 0);
+    T.wall(f.px(wx, (fz + 0.21 + wz1) / 2), f.pz(wx, (fz + 0.21 + wz1) / 2), ww, wz1 - fz - 0.21, ry);
+  }
+  if (o.enter) {
+    // An ENTERABLE shop's doorway is its wall gap, cased in the shop's trim on
+    // the face of the facade slab (at fz + 0.26 the casing was buried in it: a
+    // raw cut in the plaster), with a lintel and a painted TRANSOM light over it
+    // under the fascia. The little HUMANS door keeps its old place at the
+    // corner; the doorway moved left to leave wall beside it.
+    const g = o.enter.gaps[0];
+    doorUnit(b, f, g.lx, fz + 0.41, { w: 1.9, h: 2.9, color: o.trim, casing: o.trim, surround: o.band ?? PAL.stoneLight, head: 'transom', transomCell: o.transomCell, transomGlow: o.transomGlow, humanSide: 1, humanAt: w * 0.26 + 1.7, humanSignCell: T.humansLabel(), leaf: false, recess: false, clear: g.w, clearH: g.h, sill: o.enter.floorTop });
+  } else {
+    doorUnit(b, f, w * 0.26, fz + 0.26, { w: 1.9, h: 2.9, color: o.trim, humanSide: 1, humanSignCell: T.humansLabel(), flap: o.flap ?? 0xe8d9b8 });
+  }
+  if (o.awn !== false) awning(b, f, o.awnX ?? -w * 0.19, fz + 0.3, f.y + fy - 0.4, o.awnW ?? w * 0.56, o.stripe, { depth: 2.0, under: 0xefe4cf });
   // The fascia band is taller than it was and it now carries a moulded cornice,
   // so the SIGNED part of the elevation — awning, fascia, cornice, balcony — is
   // two thirds of the building's screen height instead of a stripe under a roof.
@@ -224,16 +251,34 @@ export function buildStreet(T) {
   const b = T.b, A = T.A;
   const sc = (name, o = {}) => T.plaque(o.w ?? 6.6, o.h ?? 1.1, o.lines, o);
 
+  // The north row's two ENTERABLE shops, framed first so the sidewalk can stop
+  // at their faces: it ran 1.4 u under every shop, which a solid block hides,
+  // but inside Purrbucks and the Travel Agency it stood up through the
+  // threshold and 0.23 over the boards (a kerb across the floor at +0.45).
+  const pbF = lot(T, 100.5, -1), taF = lot(T, 127.6, -1);
+  const PBW = 8.2, PBD = 7.6, TAW = 7.2, TAD = 7.2;
+  const faces = (f, w, d) => [
+    { f, x0: -(w - 0.3) / 2, x1: (w - 0.3) / 2, z: d / 2 + 0.41 },      // the facade slab's face
+    { f, x0: -w / 2 - 0.05, x1: -(w - 0.3) / 2, z: d / 2 },             // and the wall beside it
+    { f, x0: (w - 0.3) / 2, x1: w / 2 + 0.05, z: d / 2 },
+  ];
+  const cuts = [...faces(pbF, PBW, PBD), ...faces(taF, TAW, TAD)];
+
   // ── roadway + sidewalks ────────────────────────────────────────────────────
+  // ...and all of it is GROUND (T.paved): the slabs are laid flat at the highest
+  // ground along each run, so on this hillside they stand 0.1–1 u over the
+  // terrain, and the visitor and every cat on the street waded through them.
+  const paveBoxes = [];
   const road = CL.map(([x, z]) => [x, z]);
-  ribbon(b, road, 7.4, (x, z) => T.ground(x, z), 0xa1917a, { th: 0.34, lift: 0.12, kerb: false, seg: 4 });
+  ribbon(b, road, 7.4, (x, z) => T.ground(x, z), 0xa1917a, { th: 0.34, lift: 0.12, kerb: false, seg: 4, out: paveBoxes });
   for (const side of [-1, 1]) {
     const walk = CL.map(([x, z]) => {
       const s = slopeAt(x), len = Math.hypot(1, s);
       return [x + (s / len) * 5.4 * side, z + (-1 / len) * 5.4 * side];
     });
-    ribbon(b, walk, 3.6, (x, z) => T.ground(x, z), 0xd8c9ab, { th: 0.5, lift: 0.12, kerb: true, kerbColor: 0x9c8c70, seg: 4 });
+    ribbon(b, walk, 3.6, (x, z) => T.ground(x, z), 0xd8c9ab, { th: 0.5, lift: 0.12, kerb: true, kerbColor: 0x9c8c70, seg: 4, cuts, out: paveBoxes });
   }
+  const streetFloor = T.paved('cat_main_street', paveBoxes);
   // Painted pawprints down the middle of the road. These were 112 squashed
   // spheres that read as blurred smudges on the tarmac (and cost ~4.5k tris);
   // now they are painted on the road surface as one atlas quad per stride.
@@ -258,16 +303,24 @@ export function buildStreet(T) {
 
   // ── NORTH ROW (the hero row, facing the camera) ───────────────────────────
   // 1 · PURRBUCKS — ENTERABLE (see architecture/interiors.js)
-  const pbF = lot(T, 100.5, -1);
-  const PBW = 8.2, PBD = 7.6, PBH = 9.9, PBT = 0.5, PBFY = 3.9, pbDX = PBW * 0.26;
+  // (pbF, PBW and PBD are up with the sidewalk, which stops at this facade)
+  // The doorway is 1.8 wide and 3.36 high (the floor stands 1.04 above the
+  // street here, so a 3.05 gap left 2.01 of headroom over the threshold), and
+  // it sits 0.37 left of the old cat door so the HUMANS door has wall beside it.
+  const PBH = 9.9, PBT = 0.5, PBFY = 3.9, pbDX = 1.762, PBG = 1.8, PBGH = 3.36;
   // the hillside behind this shop stands ~0.8 above its centre: lay the floor
   // over the HIGHEST ground in the footprint and step up to it at the door
   const pbY = T.padY(pbF.x, pbF.z, PBW - PBT * 2, PBD - PBT * 2, pbF.ry) + 0.16;
   shop(T, pbF, {
     into: T.shell('purrbucks'),
-    enter: { t: PBT, gaps: [{ face: 0, lx: pbDX, w: 2.1, h: 3.05 }], ceil: PBFY - 0.15, floorColor: 0xa8916c, ceilColor: 0xe8dcc0, floorInto: T.b, floorTop: pbY },
+    enter: { t: PBT, gaps: [{ face: 0, lx: pbDX, w: PBG, h: PBGH }], ceil: PBFY - 0.15, floorColor: 0xa8916c, ceilColor: 0xe8dcc0, floorInto: T.b, floorTop: pbY },
     w: PBW, d: PBD, h: PBH, wall: 0xefd7a4, ghost: ['PURRBUCKS', 'MILK &', 'WARM MILK', 'est. whenever'],
     roof: 0xc2452f, roofKind: 'tile', ridge: 0x9c3423, roofSign: true, trim: 0x1f6a4a, band: 0xf6ead0, quoins: true, sideWin: -1,
+    // the window and its awning stop short of the door's lintel (the awning
+    // used to run 0.27 into the casing), and over the door a gilt transom:
+    // what they serve, lit from inside after dark
+    winX: -1.7, awnX: -1.85, awnW: 3.9,
+    transomCell: T.plaque(PBG, 0.6, [{ t: 'WARM MILK', s: 0.5, c: '#f0c870', spacing: 1 }], { bg: '#1a2a22', border: '#2f8f66', borderW: 0.035, grime: 0.05, dpu: 170 }), transomGlow: true,
     id: 'purrbucks', label: 'Purrbucks', act: [
       'the cup has your name on it. spelled right. you have not told anyone your name.',
       'the menu: MILK, WARM MILK, MILK (LARGE), and one line reading "coffee (we do not understand it either)".',
@@ -276,23 +329,41 @@ export function buildStreet(T) {
     sign: T.plaque(7.8, 1.1, [{ t: 'PURRBUCKS', s: 0.66, c: '#f4f9ef', spacing: 3 }], { bg: '#1f6a4a', border: '#0f3a28', border2: '#2f8f66', borderW: 0.05, logo: (g, W, H) => { T.catFace(g, W * 0.1, H * 0.5, H * 0.3, '#f4f9ef', { eye: '#1f6a4a', nose: '#f2c14e' }); } }),
     hang: T.plaque(1.9, 1.4, [{ t: 'COFFEE', s: 0.26, c: '#f4f9ef' }, { t: '& NAPS', s: 0.26, c: '#f4f9ef' }], { bg: '#1f6a4a', border: '#f2c14e', borderW: 0.07, dpu: 120 }),
     stripe: T.stripe(['#1f6a4a', '#f4f0e0'], 10), glow: true,
-    goods: (bb, ff, lx, lz, y) => { for (let i = 0; i < 4; i++) bb.cyl(ff.px(lx - 1.2 + i * 0.8, lz + 0.5), y, ff.pz(lx - 1.2 + i * 0.8, lz + 0.5), 0.22, 0.17, 0.5, 0xf4f0e0, { seg: 8, ry: ff.ry, ao: 0 }); },
+    // four cups standing ON the window's sill (at lz + 0.5, y they hung in the
+    // air in front of it, half over the pavement; at lz + 0.37 and 0.22 across
+    // they still overhung it by 0.14, over the visitor's chest): between the
+    // glass (lz + 0.15) and the sill's edge (lz + 0.4), and solid to their rims
+    goodsOut: 0.46,
+    goods: (bb, ff, lx, lz, y) => { for (let i = 0; i < 4; i++) bb.cyl(ff.px(lx - 1.2 + i * 0.8, lz + 0.31), y - 0.08, ff.pz(lx - 1.2 + i * 0.8, lz + 0.31), 0.15, 0.12, 0.44, 0xf4f0e0, { seg: 8, ry: ff.ry, ao: 0 }); },
   });
-  T.stoop(pbF, pbDX, PBD / 2, 3.0, pbY);
+  T.stoop(pbF, pbDX, PBD / 2, 3.0, pbY, { wall: PBT, gap: PBG, front: 0.41, floor: streetFloor });
   const pbRoom = T.room({ id: 'purrbucks', x: pbF.x, z: pbF.z, w: PBW - PBT * 2, d: PBD - PBT * 2, rot: pbF.ry, y: pbF.y, floorY: pbY, h: PBFY, label: 'Purrbucks' });
+  // a café door: green, glazed above (lit from inside after dark), cream
+  // glazing bars, hung on the right so it opens clear of the armchairs
   T.door({
-    id: 'purrbucks', room: pbRoom, y: pbF.y, ry: pbF.ry, w: 2.05, h: 2.95, color: 0x1f6a4a,
-    x: pbF.px(pbDX, PBD / 2 + 0.36), z: pbF.pz(pbDX, PBD / 2 + 0.36),
+    id: 'purrbucks', room: pbRoom, y: pbF.y, ry: pbF.ry, w: PBG, color: 0x1f6a4a, field: 0x2a7d58, trim: 0xf4f0e0, flap: 0xf4f0e0,
+    style: 'glazed', glassMat: 'win', glassFrom: 0.5, hinge: 1,
+    x: pbF.px(pbDX, PBD / 2 + 0.36), z: pbF.pz(pbDX, PBD / 2 + 0.36), inset: 0.36 + PBT, sill: pbY, top: pbF.y + PBGH,
     say: 'warm milk. it is always warm milk. it is always exactly right.', speaker: 'PURRBUCKS',
   });
-  T.roomDetail('purrbucks', () => purrbucksInterior(T, frame(pbF.x, pbY, pbF.z, pbF.ry), { hw: (PBW - PBT * 2) / 2, hd: (PBD - PBT * 2) / 2, doorX: pbDX }));
-  // outdoor tables
-  for (let i = 0; i < 3; i++) {
-    const tx = 97.5 + i * 2.6, tz = streetZ(tx) - 5.4, ty = T.ground(tx, tz) + 0.3;
+  T.roomDetail('purrbucks', () => purrbucksInterior(T, frame(pbF.x, pbY, pbF.z, pbF.ry), { hw: (PBW - PBT * 2) / 2, hd: (PBD - PBT * 2) / 2, doorX: pbDX, doorW: PBG }));
+  // outdoor tables, in front of the window (the middle one of three at
+  // 97.5 / 100.1 / 102.7 stood on the doorstep, a chair in the doorway)
+  // They stand ON the paving (they were set at terrain + 0.3, which on this
+  // hillside is not where the sidewalk's top is), and they are solid: the
+  // table is (you walk round it), a chair is a seat you can step up onto.
+  for (const tx of [95.2, 97.5]) {
+    const tz = streetZ(tx) - 5.4, ty = streetFloor(tx, tz) ?? T.ground(tx, tz) + 0.3;
     b.cyl(tx, ty, tz, 0.18, 0.3, 0.75, 0x3a3229, { seg: 7, mat: 'metal', ao: 0.4, aoBase: ty });
     b.cyl(tx, ty + 0.75, tz, 0.72, 0.72, 0.1, 0xf0e6d2, { seg: 12, ao: 0 });
     b.cyl(tx + 0.2, ty + 0.85, tz + 0.15, 0.14, 0.11, 0.28, 0xf4f0e0, { seg: 7, ao: 0 });
-    for (const s of [-1, 1]) { b.cyl(tx + s * 1.0, ty, tz + s * 0.3, 0.14, 0.16, 0.45, 0x3a3229, { seg: 6, mat: 'metal', ao: 0 }); b.cyl(tx + s * 1.0, ty + 0.45, tz + s * 0.3, 0.36, 0.34, 0.09, 0x1f6a4a, { seg: 9, ao: 0 }); }
+    T.col(tx, tz, 0.72);
+    for (const s of [-1, 1]) {
+      const cx = tx + s * 1.0, cz = tz + s * 0.3, cy = streetFloor(cx, cz) ?? ty;
+      b.cyl(cx, cy, cz, 0.14, 0.16, 0.45, 0x3a3229, { seg: 6, mat: 'metal', ao: 0 });
+      b.cyl(cx, cy + 0.45, cz, 0.36, 0.34, 0.09, 0x1f6a4a, { seg: 9, ao: 0 });
+      T.col(cx, cz, 0.36, cy + 0.54);
+    }
   }
 
   // 2 · THE FISH MONGER
@@ -329,12 +400,18 @@ export function buildStreet(T) {
   });
 
   // 4 · TRAVEL AGENCY (dusty, closed, the saddest window in town) — ENTERABLE
-  const taF = lot(T, 127.6, -1);
-  const TAW = 7.2, TAD = 7.2, TAH = 9.4, TAT = 0.5, TAFY = 3.9, taDX = TAW * 0.26;
+  // (taF, TAW and TAD are up with the sidewalk, which stops at this facade)
+  // 1.7 wide, 0.32 left of the old cat door (HUMANS keeps its corner), and the
+  // display window 0.18 further left to make room for the casing
+  const TAH = 9.4, TAT = 0.5, TAFY = 3.9, taDX = 1.552, TAG = 1.7, TAGH = 3.05;
   const taY = T.padY(taF.x, taF.z, TAW - TAT * 2, TAD - TAT * 2, taF.ry) + 0.16;
   shop(T, taF, {
     into: T.shell('travel'),
-    enter: { t: TAT, gaps: [{ face: 0, lx: taDX, w: 2.1, h: 3.05 }], ceil: TAFY - 0.15, floorColor: 0x8e7f64, ceilColor: 0xcfc6b0, floorInto: T.b, floorTop: taY },
+    enter: { t: TAT, gaps: [{ face: 0, lx: taDX, w: TAG, h: TAGH }], ceil: TAFY - 0.15, floorColor: 0x8e7f64, ceilColor: 0xcfc6b0, floorInto: T.b, floorTop: taY },
+    // the display window clear of the door's lintel; over the door a transom
+    // nobody has cleaned, with the only destination they still sell
+    winX: -1.6, winW: TAW * 0.44,
+    transomCell: T.plaque(TAG, 0.6, [{ t: 'ARRIVALS ONLY', s: 0.36, c: '#b9b09a' }], { bg: '#2c3436', border: '#5a6a70', borderW: 0.035, grime: 0.4, dpu: 170 }),
     w: TAW, d: TAD, h: TAH, wall: 0xbdb6a4, ghost: ['SEE THE', 'WORLD', 'ask inside', '(do not ask)'],
     roof: 0x7d7a72, roofKind: 'slate', ridge: 0x5a584f, trim: 0x5a6a70, band: 0xaaa392, awn: false, lamps: false, balcony: false,
     sign: T.plaque(6.8, 1.1, [{ t: 'TRAVEL AGENCY', s: 0.5, c: '#bcc6c9' }, { t: 'see the world', s: 0.26, c: '#8e9a9e', weight: 'italic bold' }], { bg: '#3f4d52', border: '#5a6a70', borderW: 0.05, grime: 0.3 }),
@@ -344,22 +421,30 @@ export function buildStreet(T) {
       // faded posters of places you cannot go
       const post = (i, t1, t2, col) => T.plaque(1.0, 1.4, [{ t: t1, s: 0.3, c: '#e8e2d2' }, { t: t2, s: 0.2, c: '#c9c2b2' }], { bg: col, border: '#4a4a44', borderW: 0.06, grime: 0.3, dpu: 110 });
       const ps = [post(0, 'HOME', 'ask about it', '#4a6a7a'), post(1, 'AWAY', 'sold out', '#6a5a3a'), post(2, 'ANYWHERE', '—', '#5a4a5a')];
-      ps.forEach((c, i) => bb.sign(c, ff.px(lx - 1.2 + i * 1.2, lz + 0.42), y + 0.9, ff.pz(lx - 1.2 + i * 1.2, lz + 0.42), 1.0, 1.4, { ry: ff.ry, rz: (i - 1) * 0.05 }));
+      // taped to the glass (at lz + 0.42 they hung a quarter-metre out in the street)
+      ps.forEach((c, i) => bb.sign(c, ff.px(lx - 1.2 + i * 1.2, lz + 0.17), y + 0.9, ff.pz(lx - 1.2 + i * 1.2, lz + 0.17), 1.0, 1.4, { ry: ff.ry, rz: (i - 1) * 0.05 }));
     },
   });
-  T.stoop(taF, taDX, TAD / 2, 3.0, taY);
+  // (the sidewalk here stands 0.23 OVER the shop's floor: no flight, a step
+  // down off the paving onto the threshold — the saddest shop sits low)
+  T.stoop(taF, taDX, TAD / 2, 3.0, taY, { wall: TAT, gap: TAG, front: 0.41, floor: streetFloor });
   const taRoom = T.room({ id: 'travel', x: taF.x, z: taF.z, w: TAW - TAT * 2, d: TAD - TAT * 2, rot: taF.ry, y: taF.y, floorY: taY, h: TAFY, label: 'Travel Agency' });
+  // a faded oxblood door (the CLOSED board's red), dusty glass nobody has
+  // cleaned in years (matte: it does not light up), glazing bars in the trim grey
   T.door({
-    id: 'travel', room: taRoom, y: taF.y, ry: taF.ry, w: 2.05, h: 2.95, color: 0x5a6a70,
-    x: taF.px(taDX, TAD / 2 + 0.36), z: taF.pz(taDX, TAD / 2 + 0.36),
+    id: 'travel', room: taRoom, y: taF.y, ry: taF.ry, w: TAG, color: 0x6e3a30, field: 0x7a453a, trim: 0x5a6a70, flap: 0xc9c2b2,
+    style: 'glazed', glass: 0x7d8a8c, glassFrom: 0.45, hinge: -1,
+    x: taF.px(taDX, TAD / 2 + 0.36), z: taF.pz(taDX, TAD / 2 + 0.36), inset: 0.36 + TAT, sill: taY, top: taF.y + TAGH,
     say: 'the door is not locked. it has never been locked. nobody has opened it in years.', speaker: 'TRAVEL AGENCY',
   });
-  T.roomDetail('travel', () => travelInterior(T, frame(taF.x, taY, taF.z, taF.ry), { hw: (TAW - TAT * 2) / 2, hd: (TAD - TAT * 2) / 2, doorX: taDX }));
+  T.roomDetail('travel', () => travelInterior(T, frame(taF.x, taY, taF.z, taF.ry), { hw: (TAW - TAT * 2) / 2, hd: (TAD - TAT * 2) / 2, doorX: taDX, doorW: TAG }));
   // dust, cobwebs and a CLOSED placard on the door
   const closedCell = T.plaque(1.3, 0.9, [{ t: 'CLOSED', s: 0.38, c: '#7a2f24' }, { t: 'for the season', s: 0.2, c: '#5a5248' }, { t: 'all seasons', s: 0.2, c: '#5a5248', weight: 'italic bold' }], { bg: '#e0d8c4', border: '#7a2f24', borderW: 0.06, grime: 0.2, dpu: 140 });
   // A CLOSED card taped to the glass is a decal; a CLOSED board hung on a
   // wrought bracket and two chains is a shop that shut and meant it.
-  hangingPlate(b, taF, TAW * 0.26 + 1.6, TAD / 2 + 0.2, taF.y + 3.7, 1.3, 0.9, closedCell, { rz: 0.1, frame: 0x5a6a70, chain: 0x6a6256 });
+  // (hung 0.35 higher: its foot now clears the HUMANS board under it)
+  // (and 0.14 right: its edge no longer meets the door's transom cornice)
+  hangingPlate(b, taF, TAW * 0.26 + 1.74, TAD / 2 + 0.2, taF.y + 4.05, 1.3, 0.9, closedCell, { rz: 0.1, frame: 0x5a6a70, chain: 0x6a6256 });
   // cobwebs under the fascia — flush with the shopfront (at +0.5 they hung half
   // a metre out in the street and read as four white pebbles in mid-air)
   for (let i = 0; i < 4; i++) b.sph(taF.px(-2.55 + i * 1.7, 7.2 / 2 + 0.3), taF.y + 4.12, taF.pz(-2.55 + i * 1.7, 7.2 / 2 + 0.3), 0.22, 0xd8d2c4, { seg: 5, rings: 3, sz: 0.1, sy: 0.5, ry: 0.5 });
@@ -512,7 +597,8 @@ export function buildStreet(T) {
   // between two shopfronts rather than in the middle of somebody's awning.
   // A uniform row of one lamp design every 8.5 m reads as a prop grid.
   const lampSpec = [
-    { x: 102.6, side: -1, style: 'lantern', h: 5.7 },
+    // 104.9, not 102.6: at 102.6 it stood on the Purrbucks doorstep
+    { x: 104.9, side: -1, style: 'lantern', h: 5.7 },
     { x: 108.0, side: 1, style: 'globe', h: 5.0 },
     { x: 113.8, side: -1, style: 'globe', h: 5.2 },
     { x: 119.6, side: 1, style: 'lantern', h: 5.9 },
@@ -596,7 +682,10 @@ export function buildStreet(T) {
   // groups of two or three, three pot patterns and four things growing in them
   // is a street where somebody waters the plants.
   const potGroups = [
-    { x: 104.2, side: -1, list: [[0, 0, 1.05, 5.4], [2, 1, 0.85, 6.3], [1, 3, 0.95, 5.0]] },
+    // two pots in front of the Fish Monger's window, not three across Purrbucks:
+    // at 104.2 the first stood IN the Purrbucks doorway and the second, at 6.3,
+    // half inside its facade over the HUMANS door
+    { x: 107.64, side: -1, list: [[0, 0, 1.05, 5.3], [2, 1, 0.85, 5.1]] },
     { x: 113.0, side: 1, list: [[1, 2, 1.0, 5.5], [0, 0, 0.8, 6.2]] },
     { x: 121.4, side: -1, list: [[2, 1, 0.95, 5.2], [0, 3, 1.1, 6.0]] },
     { x: 134.6, side: 1, list: [[0, 0, 1.05, 5.3], [1, 1, 0.9, 6.1], [2, 0, 0.8, 5.0]] },
@@ -674,10 +763,12 @@ export function buildStreet(T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-/** A decorative band wrapped round a building: four slabs, holes where asked. */
+/** A decorative band wrapped round a building: four slabs, holes where asked.
+ *  Returns its pieces ({ x, z, w, d, ry, face }) so a caller can make them solid. */
 function ringBand(b, f, w, d, y, h, color, gaps = [], th = 0.5) {
   const { ry } = f;
   const faces = [[w, d / 2, 0], [d, w / 2, Math.PI / 2], [w, d / 2, Math.PI], [d, w / 2, -Math.PI / 2]];
+  const pieces = [];
   faces.forEach(([len, off, rot], i) => {
     const c = Math.cos(rot), s = Math.sin(rot);
     const P = (a, out) => [a * c + out * s, -a * s + out * c];
@@ -685,11 +776,13 @@ function ringBand(b, f, w, d, y, h, color, gaps = [], th = 0.5) {
       if (a1 - a0 < 0.05) return;
       const p = P((a0 + a1) / 2, off - th / 2);
       b.box(f.px(p[0], p[1]), f.y + y, f.pz(p[0], p[1]), a1 - a0, h, th, color, { ry: ry + rot, ao: 0 });
+      pieces.push({ x: f.px(p[0], p[1]), z: f.pz(p[0], p[1]), w: a1 - a0, d: th, ry: ry + rot, face: i });
     };
     let cur = -len / 2;
     for (const g of gaps.filter((g2) => (g2.face ?? 0) === i).sort((m, n) => m.lx - n.lx)) { put(cur, g.lx - g.w / 2); cur = g.lx + g.w / 2; }
     put(cur, len / 2);
   });
+  return pieces;
 }
 
 export function buildMeowDonalds(T) {
@@ -697,8 +790,25 @@ export function buildMeowDonalds(T) {
   const CX = 128, CZ = -24, GY = T.ground(CX, CZ);
   const MDR = 0xd52b1e, MDY = 0xffc72c;
 
-  // forecourt
-  paving(b, CX, GY + 0.1, CZ, 17, { seg: 26, rings: 0, color: 0xb4a78e, border: 0x9a8c74, depth: 2.4 });
+  // forecourt: flagstones laid flat at the centre's height, which stand ~0.3
+  // over the dip in front of the door — walkable (T.paved), not a slab to wade in
+  const court = T.paved('cat_meow_forecourt', [], [paving(b, CX, GY + 0.1, CZ, 17, { seg: 26, rings: 0, color: 0xb4a78e, border: 0x9a8c74, depth: 2.4 })]);
+  // ── the forecourt's raised rim (Contract O): laid flat at the centre's
+  //    height, its west and south-west edge stands 1.2–1.9 over the hillside
+  //    it was cut into. A red-and-yellow tube rail (the drive-thru's colours)
+  //    along it, on the paving just inside the kerb, with solid colliders —
+  //    except where the PLAYPLACE stands across the rim (198°–236°: the slide,
+  //    the scratching post's base and the ball pit's rim run in under it —
+  //    the way down into the playground, left open). The path in (113°) and
+  //    out (−70°) cross the rim well clear of both runs.
+  {
+    const RR = 16.45, deckY = (x, z) => { const y = court(x, z); return y == null ? GY + 0.2 : y; };
+    const style = tubeStyle({ foot: (x, z) => deckY(x, z) });
+    for (const [d0, d1, edge] of [[144, 198, 'west rim'], [236, 266, 'south-west rim']]) {
+      const pts = arcPts(CX, CZ, RR, (d0 * Math.PI) / 180, (d1 * Math.PI) / 180, (a) => deckY(CX + Math.cos(a) * RR, CZ + Math.sin(a) * RR));
+      catRail(T.ctx, b, pts, { site: 'cat_meow_forecourt', edge, out: 1, style, mid: true, force: true, claim: T });
+    }
+  }
 
   // ── restaurant — ENTERABLE: the shell is hollow and fades while you eat ────
   const sb = T.shell('meow');
@@ -709,7 +819,17 @@ export function buildMeowDonalds(T) {
     t: MDT, sink: 0.9, ceil: 4.5, ceilColor: 0xe8dcc0, floorColor: 0xd2bf9e, floorInto: T.b, floorTop: mdY,
     gaps: [{ face: 0, lx: mdDX, w: mdGap, h: 3.25 }, { face: 1, lx: 0, w: 2.2, h: 3.5, y0: 1.55 }],
   });
-  ringBand(sb, f, 17.3, 11.3, 0, 1.5, MDR, [{ face: 0, lx: mdDX, w: mdGap }]);
+  // the little HUMANS door stands in the next bay, clear of the doorway's
+  // dressing and the red pilaster between them, on the red plinth band (which
+  // is cut for it: it used to hide the bottom 1.5 m of the door behind it).
+  // MDCW: the doorway's casing, 0.2 so its lintel fits between the pilasters.
+  const MDCW = 0.2, mdHX = mdDX - 2.37;
+  const mdBand = ringBand(sb, f, 17.3, 11.3, 0, 1.5, MDR, [{ face: 0, lx: mdDX, w: mdGap }, { face: 0, lx: mdHX, w: 1.1 }]);
+  // The red plinth band stands 0.15 proud of the walls, 0.1 past their
+  // colliders, at the visitor's waist (and the pilasters, the sill rail and
+  // the glass stand on it): it is SOLID, with the doorway's own edges. Not on
+  // the drive-thru side (face 1), whose hatch sill stays vaultable.
+  for (const q of mdBand) if (q.face !== 1) T.wall(q.x, q.z, q.w, q.d, q.ry);
   ringBand(sb, f, 17.5, 11.5, 4.4, 1.2, MDR);
   sb.box(f.x, f.y + 5.6, f.z, 18.0, 0.4, 12.0, MDY, { ao: 0 });
   flatRoof(sb, f, 17.0, 11.0, 0xe8dcc0, { top: 5.6, parapet: 0.72, capColor: 0xd52b1e });
@@ -745,14 +865,25 @@ export function buildMeowDonalds(T) {
   for (let i = 0; i < 5; i++) {
     const lx = -6.4 + i * 3.2;
     if (lx !== mdDX) {
-      sb.quad(f.px(lx, 5.56), f.y + 2.9, f.pz(lx, 5.56), 2.7, 2.7, 0x2b4450, { mat: 'win' });
+      // the bay beside the HUMANS door gives up the metre of glass behind it
+      const g0 = lx - 1.35, g1 = (lx < mdDX && lx + 1.35 > mdHX - 0.68) ? mdHX - 0.68 : lx + 1.35;
+      sb.quad(f.px((g0 + g1) / 2, 5.56), f.y + 2.9, f.pz((g0 + g1) / 2, 5.56), g1 - g0, 2.7, 0x2b4450, { mat: 'win' });
       wash(b, f.px(lx, 5.72), f.y + 2.9, f.pz(lx, 5.72), 3.9, 4.4, 0);
     }
     sb.box(f.px(lx + 1.6, 5.5), f.y + 1.4, f.pz(lx + 1.6, 5.5), 0.28, 3.2, 0.24, MDR, { ao: 0 });
     pool(b, f.px(lx, 8.2), f.y + 0.22, f.pz(lx, 8.2), 2.6);
   }
-  sb.box(f.px(0, 5.5), f.y + 1.4, f.pz(0, 5.5), 17.2, 0.2, 0.3, MDR, { ao: 0 });
-  doorUnit(sb, f, mdDX, 5.52, { w: 2.2, h: 3.2, color: MDR, surround: MDY, humanSide: -1, humanSignCell: T.humansLabel(), leaf: false, recess: false, mat: false });
+  // the red sill rail under the glass, stopped either side of the two doors
+  // (it ran straight across the doorway at knee height)
+  {
+    const cuts = [[mdHX - 0.55, mdHX + 0.55], [mdDX - mdGap / 2 - MDCW, mdDX + mdGap / 2 + MDCW]];
+    let cur = -8.6;
+    for (const [a, c] of cuts) { if (a - cur > 0.05) sb.box(f.px((cur + a) / 2, 5.5), f.y + 1.4, f.pz((cur + a) / 2, 5.5), a - cur, 0.2, 0.3, MDR, { ao: 0 }); cur = c; }
+    sb.box(f.px((cur + 8.6) / 2, 5.5), f.y + 1.4, f.pz((cur + 8.6) / 2, 5.5), 8.6 - cur, 0.2, 0.3, MDR, { ao: 0 });
+  }
+  // the doorway in yellow: a casing, a lintel, and in the transom over it two
+  // little golden arches on dark glass, lit from inside after dark
+  doorUnit(sb, f, mdDX, 5.52, { w: 2.2, h: 3.2, color: MDR, surround: MDY, casing: MDY, casingW: MDCW, headOver: 0, head: 'transom', transomH: 0.62, arches: MDY, humanSide: -1, humanAt: mdHX, humanSignCell: T.humansLabel(), leaf: false, recess: false, mat: false, clear: mdGap, clearH: 3.25, sill: mdY });
   // roof sign: BILLIONS SERVED (mice)
   const billions = T.plaque(11.0, 2.0, [
     { t: 'BILLIONS SERVED', s: 0.52, c: '#fff6dd', outline: '#7a1008' },
@@ -765,10 +896,14 @@ export function buildMeowDonalds(T) {
   });
   T.solidify(mdSegs, f.y + MH);
   T.claimRing(f.x, f.z, 17.4, 11.4, 0);
-  T.stoop(f, mdDX, MD / 2, 3.2, mdY);
+  T.stoop(f, mdDX, MD / 2, 3.2, mdY, { wall: MDT, gap: mdGap, front: 0.15, floor: court });
   const mdRoom = T.room({ id: 'meow', x: f.x, z: f.z, w: MW - MDT * 2, d: MD - MDT * 2, rot: 0, y: f.y, floorY: mdY, h: 4.5, label: "Meow Donald's" });
+  // a fast-food door: all glass above a red kick panel, in a yellow frame,
+  // hung on the right so it swings in clear of the corner booth
   T.door({
-    id: 'meow', room: mdRoom, y: f.y, ry: 0, w: 2.35, h: 3.2, color: MDR, x: f.px(mdDX, MD / 2 + 0.4), z: f.pz(mdDX, MD / 2 + 0.4),
+    id: 'meow', room: mdRoom, y: f.y, ry: 0, w: mdGap, color: MDY, field: MDR, trim: MDY, flap: 0xfff6dd,
+    style: 'glazed', glassMat: 'win', glassFrom: 0.5, hinge: 1,
+    x: f.px(mdDX, MD / 2 + 0.4), z: f.pz(mdDX, MD / 2 + 0.4), inset: 0.4 + MDT, sill: mdY, top: f.y + 3.25,
     say: 'a cat in a paper hat holds the door for you. "in?" she says. "in," you agree.', speaker: "MEOW DONALD'S",
   });
   T.roomDetail('meow', () => meowInterior(T, frame(f.x, mdY, f.z, 0), { hw: (MW - MDT * 2) / 2, hd: (MD - MDT * 2) / 2 }));

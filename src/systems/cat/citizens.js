@@ -96,6 +96,7 @@ import { createNav } from './citizens/nav.js';
 import { createNpcXray } from './citizens/xray.js';
 import { buildHideout, RUSTY } from './citizens/rusty.js';
 import { createRaid } from './citizens/raid.js';
+import { createBedtime } from './citizens/carry.js';
 import CAST from './citizens/cast.js';
 
 // Where the cats have decided you live. (containment/scenery.js owns the bed
@@ -198,6 +199,9 @@ export function create(ctx) {
   const xray = createNpcXray(ctx);
   for (const p of pools) if (p.name !== 'blob' && p.name !== 'sillLoaf') xray.patch(p.mesh.material);
   const xrayK = () => ((T.carrying || raid?.carrying) ? 0 : 1);
+  // (the near-lens band stays on under the carry: a bystander tiger at the
+  //  carry's lens thins out; the carrier is framed well clear of the lens)
+  const xrayNK = () => 1;
 
   // kittens run the same ring, staggered → a game of tag instead of milling
   cats.filter((c) => c.sched === 'kitten').forEach((c, i) => { c.kitIdx = i; });
@@ -339,6 +343,28 @@ export function create(ctx) {
       nav.build(cols, navBlocker);
     }
     return nav;
+  }
+  /** The scruff-carry's own grid (citizens/carry.js, Contract N): finer and
+   *  slimmer than the pack grid, over just the window the carry crosses, so a
+   *  carrier finds the gate in a garden fence whose gap the 0.8-u pack grid
+   *  inflates shut (the guest house's green). Built at a catch — rare —
+   *  a fixed quota of work per call over the catch's frames (nav.buildSome:
+   *  no frame pays the whole ~60 ms), one grid per radius, kept while the
+   *  window and the colliders stay the same. Null until it is built. */
+  const navCs = new Map();                     // r → { nav, key }
+  let navC = null;
+  function navFine(x0, z0, x1, z1, r = 0.6) {
+    const pl = groundCore(); if (!pl) return null;
+    lowSync(pl);
+    x0 = Math.floor(x0 / 8) * 8; z0 = Math.floor(z0 / 8) * 8; x1 = Math.ceil(x1 / 8) * 8; z1 = Math.ceil(z1 / 8) * 8;
+    const key = `${x0},${z0},${x1},${z1},${ctx.colliders.length},${LOWG.ver}`;
+    let e = navCs.get(r);
+    if (!e || e.key !== key) {
+      e = { nav: createNav(world, { x0, z0, x1, z1, cell: 0.5, landCell: 1.5, navR: r }), key };
+      navCs.set(r, e);
+    }
+    navC = e.nav;
+    return e.nav.buildSome(ctx.colliders, navBlocker, 20, 800) ? e.nav : null;
   }
   const _nw = { x: 0, z: 0, d: 0 }, _nc = { x: 0, z: 0 };
   const FLEE_FAN = [0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.1, -2.1];
@@ -1298,7 +1324,9 @@ export function create(ctx) {
     // get there: a step if it is close, a pounce if it is not. Tried every
     // quarter second while a circle is really IN something, else once a second.
     if (!ok && !(c.wedgedUntil > S.elapsed)) {
-      const P = wedgeEscape(c, pl, x0, z0, want, T, fy) || navRelocate(c, pl, x0, z0, want, T, fy);
+      const P0 = wedgeEscape(c, pl, x0, z0, want, T, fy) || navRelocate(c, pl, x0, z0, want, T, fy);
+      // (never a bound with the visitor in its jaws: the carry's rail walks it on)
+      const P = P0 && c.carryTo && (P0.x - x0) ** 2 + (P0.z - z0) ** 2 > 1.44 ? null : P0;
       if (P) {
         const far = (P.x - x0) ** 2 + (P.z - z0) ** 2 > 1.44;
         RES.wedges++; if (far) RES.relocs++;
@@ -1370,7 +1398,7 @@ export function create(ctx) {
     // first the planners turn it round (Contract A: a push is "turn around"):
     // settle() gives the goal up, and a tiger takes another place in the pack
     if (c.trapT > 0.9 && !c.trapTurned) { c.trapTurned = true; c.bumpT = Math.max(c.bumpT || 0, 2.25); }
-    if (blockedNow && c.trapT > 2.6) {
+    if (blockedNow && c.trapT > 2.6 && !c.carryTo) {
       RES.traps++;
       const cx = f.x, cz = f.z, ch = f.hit;           // (the search reuses f's scratch)
       // a clean pounce; failing that one whose head or tail brushes a post in
@@ -1404,6 +1432,14 @@ export function create(ctx) {
     // settled THERE — resolving it where it stood (a tiger half-grown on the
     // gossip bench) only started a leap that dragged it back afterwards
     if (S.snapping) return;
+    // the scruff-carry's vault (citizens/carry.js): a carrier bounding a
+    // garden fence on its rail is airborne — nothing to resolve until it
+    // lands; its feet (under c.air, which the carry sets) follow the terrain
+    if (c.railHop) {
+      c.sx = c.x; c.sz = c.z; c.bumped = false; c.kvx = 0; c.kvz = 0; c.airV = 0;
+      const hy = Math.max(0.15, world.height(c.x, c.z)); c.gy = hy; c.y = hy;
+      return;
+    }
     const pl = groundCore();
 
     // 0. a trapped tiger bounding out (resolveTiger → startLeap): airborne,
@@ -1625,9 +1661,9 @@ export function create(ctx) {
   ctx.events.on('world:ready', boot);
   // last word on where the visitor is: fires after player.js has had its say
   ctx.events.on('camera:update', (cam) => {
-    if (T.carrying && T.carrying.stage <= 1) placeCarried(1);
     raid?.late();                          // the raid's carry (citizens/raid.js)
-    xray.update(cam || ctx.camera, ctx.systems.player?.position, xrayK());   // this frame's final lens
+    bedtime.late();                        // the scruff-carry, the tuck-in, the wake-up (citizens/carry.js)
+    xray.update(cam || ctx.camera, ctx.systems.player?.position, xrayK(), xrayNK());   // this frame's final lens
   });
 
   // ── grounding + staging helpers ────────────────────────────────────────────
@@ -1651,7 +1687,7 @@ export function create(ctx) {
     // tigers and never fired 'cats:tigers', and containment kept its curfew on.
     if (striped !== T.on) { T.on = striped; ctx.events.emit('cats:tigers', { on: striped }); announceTigers(striped); }
     for (const cat of cats) {
-      const want = (striped && !cat.spec.noTiger) ? 1 : 0;
+      const want = ((striped || bedtime.keepsTiger(cat)) && !cat.spec.noTiger) ? 1 : 0;
       cat.tigerK = want; cat.yawnUntil = -1; cat.roarUntil = -1; cat.roared = !!want;
       if (!!cat.formed !== !!want) setForm(cat, !!want);
     }
@@ -1747,110 +1783,29 @@ export function create(ctx) {
     }
   }
 
-  /** The comic scruff-carry. Not death: bedtime. */
-  const carryCard = { handle: null, t: 0 };
-  const _mouth = { x: 0, y: 0, z: 0 };
+  /** The comic scruff-carry. Not death: bedtime. (citizens/carry.js runs the
+   *  whole thing — catch, carry, the tuck-in, lights out, the wake-up.) */
   function startCarry(cat) {
     const pl = ctx.systems.player;
     if (!pl || T.carrying || raid?.carrying || pl.locked || pl.onFerry || ctx.state.island !== 'cat') return;
     if (ctx.systems.powerups?.active || pl.invulnerable) return;      // stars / i-frames
-    T.carrying = { cat, t: 0, stage: 0 };
-    cat.carryTo = { x: GUEST_BED.x, z: GUEST_BED.z };
-    cat.think = 0;
-    pl.locked = true;
-    pl.onFerry = true;                  // player.js: "somebody else owns your Y"
-    pl.setEmotion?.('scared');
-    ctx.systems.ui?.say('“Got you. Come on. Bed.”', { speaker: cat.tiger.full });
-    ctx.systems.camera?.shake?.(0.45, 0.5);
-    ctx.systems.camera?.cinematic?.({
-      target: () => ({ x: cat.x, y: cat.y + 1.45, z: cat.z }),
-      distance: 12.0, elevation: 0.34, duration: 5.4, in: 0.7, hold: 4.0, out: 0.7,
-    });
-    ctx.systems.particles?.burst({
-      x: pl.position.x, y: pl.position.y + 1.2, z: pl.position.z,
-      count: 24, color: [0xffe9a8, 0xffffff, 0xf2900f], speed: 3.2, life: 0.8, size: 0.19, gravity: -2.4, spread: 1.3,
-    });
-    ctx.events.emit('cats:caught', { cat, name: cat.tiger.full });
-    const st = ctx.systems.story;
-    st?.set('carried_home', (st.get('carried_home') || 0) + 1);
+    bedtime.start(cat);
   }
 
-  /** Put the visitor in the tiger's jaws. Called late (camera:update) so the
-   *  player system's own ground-follow can't put him back on his feet. */
-  function placeCarried(k = 1) {
-    const C = T.carrying; if (!C) return;
-    const pl = ctx.systems.player, cat = C.cat;
-    if (!pl) return;
-    mouthPoint(cat, _mouth);
-    pl.position.set(
-      pl.position.x + (_mouth.x - pl.position.x) * k,
-      pl.position.y + (_mouth.y - 0.34 - pl.position.y) * k,
-      pl.position.z + (_mouth.z - pl.position.z) * k,
-    );
-    pl.velocity.set(0, 0, 0);
-    const g = pl.group;
-    if (g) {
-      g.position.copy(pl.position);
-      g.rotation.y = cat.yaw + Math.PI * 0.5;
-      g.rotation.z = 1.28 * k;                       // dangling, dignity elsewhere
-      g.rotation.x = Math.sin(ctx.state.elapsed * 6) * 0.10 * k;
-    }
-  }
-
-  function endCarry() {
-    const C = T.carrying; if (!C) return;
-    C.cat.carryTo = null; C.cat.think = 0;
-    T.carrying = null;
-    T.graceUntil = S.elapsed + 45;
-    const pl = ctx.systems.player;
-    if (pl) {
-      pl.onFerry = false; pl.locked = false; pl.setEmotion?.(null);
-      const g = pl.group; if (g) { g.rotation.x = 0; g.rotation.z = 0; }
-    }
-  }
-
-  /** Lights out: 06:00, the guest bed, the card. (Both carries end here — the
-   *  town's scruff-carry and the raid's carry over the rainbow.) */
-  function putToBed(name, card) {
-    const ui = ctx.systems.ui;
+  /** Last resort only (the raid could not hand its carrier over): 06:00, the
+   *  guest bed, the visitor his own again. */
+  function putToBed(name) {
     ctx.state.time = 6;
     ctx.events.emit('time:set', 6);
     lastHour = 6;
-    ctx.systems.player?.teleport(GUEST_BED.x + 1.7, GUEST_BED.z + 1.7);
-    ctx.systems.player && (ctx.systems.player.locked = true);
-    snapAll(6);
-    carryCard.handle = ui?.card?.({
-      title: card?.title || `Carried home by ${name.short}. Bedtime.`,
-      body: card?.body || `${name.full} deposited you in the guest bed, straightened the blanket with one enormous paw, and sat outside the door until morning.`,
-      buttons: [{ label: 'Sleep. Obviously.', primary: true }],
-    }) || null;
-    carryCard.t = 7;
-    ui?.banner?.('06:00', 'Everyone is a normal size again. Nobody mentions it.', 4.0, 'cat');
-  }
-
-  function updateCarry(dt) {
-    const C = T.carrying; if (!C) return;
-    C.t += dt;
-    const ui = ctx.systems.ui;
-    if (C.stage === 0) {
-      placeCarried(Math.min(1, dt * 7));
-      if (C.t > 0.85) { C.stage = 1; C.t = 0; }
-    } else if (C.stage === 1) {
-      placeCarried(1);
-      const d = Math.hypot(C.cat.x - GUEST_BED.x, C.cat.z - GUEST_BED.z);
-      if (C.t > 4.0 || d < 3) {
-        C.stage = 2;
-        const name = C.cat.tiger;
-        const fade = ui?.fade ? ui.fade(true, 1.1) : Promise.resolve();
-        fade.then(() => {
-          endCarry();
-          putToBed(name);
-          return ui?.fade ? ui.fade(false, 1.2) : Promise.resolve();
-        }).then(() => {
-          if (ctx.systems.player) ctx.systems.player.locked = false;
-        }).catch(() => { endCarry(); });
-      }
+    const p = ctx.systems.player;
+    if (p) {
+      p.onFerry = false; p.locked = false; p.setPose?.('stand'); p.setEmotion?.(null);
+      p.teleport?.(GUEST_BED.x + 1.7, GUEST_BED.z + 1.7);
+      const g = p.group; if (g) g.rotation.set(0, p.facing ?? 0, 0);
     }
+    snapAll(6);
+    ctx.systems.ui?.banner?.('06:00', `Carried home by ${name?.short || 'somebody enormous'}. Nobody mentions it.`, 4.0, 'cat');
   }
 
   // Two lanterns' worth of real light for the night watch (NPC budget = 2).
@@ -1860,6 +1815,20 @@ export function create(ctx) {
     L.visible = false; group.add(L); lampLights.push(L);
   }
   const lanternCats = cats.filter((c) => c.rig.heldKind === 'lantern');
+
+  // ── BEDTIME (citizens/carry.js, Contract N): the scruff-carry as one shot ──
+  const bedtime = createBedtime(ctx, {
+    S, T, cats, group, lamp: lampLights[0], lamps: lampLights, bedFallback: GUEST_BED,
+    nav: () => navEnsure(),
+    navFine: (x0, z0, x1, z1, r) => navFine(x0, z0, x1, z1, r),
+    settle: (c, dt, plan) => settle(c, dt, plan),
+    snap: (h) => { snapAll(h); lastHour = h; },
+    resolveSpot: (x, z, m, r) => resolveSpot(x, z, m, r),
+    raidEnd: () => raid?.end?.(),
+    raidCarrying: () => !!raid?.carrying && !T.carrying,
+    // (the carry's sight-line test never counts a cat — or a raider — as a wall)
+    npcGroups: () => [group, raidGroup],
+  });
 
   // ── per-frame tiger driver ─────────────────────────────────────────────────
   let starT = 0;
@@ -1889,7 +1858,7 @@ export function create(ctx) {
       if (c.hideK !== want) c.hideK = want > c.hideK ? Math.min(1, c.hideK + rate) : Math.max(0, c.hideK - rate);
     }
     for (const cat of cats) {
-      const want = (on && !cat.spec.noTiger) ? 1 : 0;
+      const want = ((on || bedtime.keepsTiger(cat)) && !cat.spec.noTiger) ? 1 : 0;
       if (cat.tigerK !== want) {
         cat.tigerK = want > cat.tigerK ? Math.min(1, cat.tigerK + rate) : Math.max(0, cat.tigerK - rate);
         // the bodies swap at the half-way mark, inside a puff of fur, so you
@@ -1941,8 +1910,6 @@ export function create(ctx) {
         }
       }
     }
-    updateCarry(dt);
-    if (carryCard.t > 0 && (carryCard.t -= dt) <= 0) { carryCard.handle?.close?.(); carryCard.handle = null; }
   }
 
   // ═══ WAVE 3: STARS (Contract B) + the new arsenal (Contract C) ═════════════
@@ -2108,6 +2075,7 @@ export function create(ctx) {
     resolveSpot: (x, z, m, r) => resolveSpot(x, z, m, r),
     groundCore, navBlocker: (c) => navBlocker(c), lowSync: (pl) => lowSync(pl),
     putToBed: (name, card) => putToBed(name, card),
+    bedtime,
   });
   /** The citizens plus any raider standing on Candyland — what a weapon can
    *  hit and a speaker can be found in. Rebuilt only when that set changes. */
@@ -2185,6 +2153,8 @@ export function create(ctx) {
     isTigerTime: () => isTigerTime(ctx.state.time),
     /** Debug (probes): the tigers' walkability grid (citizens/nav.js), or null. */
     get nav() { return nav; },
+    /** Debug: the scruff-carry's own finer grid (navFine), or null. */
+    get navCarry() { return navC; },
     /** Debug (probes): the NPC x-ray (citizens/xray.js) — uniforms, stats. */
     get xray() { return xray; },
     /** Debug (probes): does collider c stop a tiger (what the nav grid stamps)? */
@@ -2193,6 +2163,11 @@ export function create(ctx) {
     get tigerTime() { return isTigerTime(ctx.state.time); },
     /** The tiger that currently has you, or null. */
     get carrier() { return T.carrying ? T.carrying.cat : null; },
+    /** Contract N — the scruff-carry (citizens/carry.js): active · stage · carrier ·
+     *  grip · mouth · gripErr · maxGripErr · route · house · stats() · skip() · debug(o) */
+    carry: bedtime,
+    /** Debug / views: stage a beat of the carry ({ beat: 'catch'|'carry'|'arrive'|'tuck'|'dark'|'wake', at, key }). */
+    carryDebug: (o) => bedtime.debug(o || {}),
     /** Every citizen currently wearing stripes, with both names. */
     get tigers() {
       return cats.filter((c) => c.tigerK > 0.5).map((c) => ({ key: c.key, name: c.tiger.full, x: c.x, z: c.z }));
@@ -2330,8 +2305,8 @@ export function create(ctx) {
       { const pl0 = groundCore(); if (pl0) lowSync(pl0); }
       // WAVE 4 (Contract M): the raiding party lives on both islands and the
       // bridge between them, so it runs before the town's island gate
+      bedtime.update(dt);                  // (first: the raid poses a carrier it has handed over)
       raid.update(dt);
-      if (carryCard.t > 0 && !group.visible && (carryCard.t -= dt) <= 0) { carryCard.handle?.close?.(); carryCard.handle = null; }
       // Cheap island gate: the cats only exist for the camera when Cat Island
       // (or its shoreline) is in view. Saves ~29 calls / ~70k tris elsewhere.
       const show = ctx.camera.position.x > -60 || player.x > -60;
@@ -2409,7 +2384,7 @@ export function create(ctx) {
       for (const p of pools) p.sync();
       // the x-ray, for a lens nobody moves this frame (a free / debug view: the
       // camera's own update, and its camera:update, only run for the game lens)
-      if (ctx.systems.camera?.isFree?.() || !ctx.systems.camera) { ctx.camera.updateMatrixWorld(); xray.update(ctx.camera, player, xrayK()); }
+      if (ctx.systems.camera?.isFree?.() || !ctx.systems.camera) { ctx.camera.updateMatrixWorld(); xray.update(ctx.camera, player, xrayK(), xrayNK()); }
 
       // night: eyes catch the light; the watch's lanterns burn
       const night = 1 - ctx.state.daylight;
@@ -2443,8 +2418,15 @@ export function create(ctx) {
         if (striped) { liveTigers.length = 0; for (const c of cats) if (c.tigerK > 0.5) liveTigers.push(c); src = liveTigers; }
         sortPX = player.x; sortPZ = player.z;
         const carriers = src.sort(byPlayerDist);
-        for (let i = 0; i < lampLights.length; i++) {
-          const c = carriers[i], L = lampLights[i];
+        // (the scruff-carry's carrier — a raider too, who is not in this
+        //  list — keeps the first lamp's warm key on its face and on him in
+        //  its jaws: unlit, a black coat under the cold rim read as glass)
+        const lit = bedtime.litCarrier();
+        for (let i = 0, k = 0; i < lampLights.length; i++) {
+          if (bedtime.ownsLamp(i)) continue;               // lent to the guest room's bedside lamp
+          let c;
+          if (i === 0 && lit) c = lit; else { c = carriers[k++]; if (c && c === lit) c = carriers[k++]; }
+          const L = lampLights[i];
           if (c && (c.x - player.x) ** 2 + (c.z - player.z) ** 2 < 3600) {
             if (striped) {
               const sc = tigerScale(c);
@@ -2459,7 +2441,7 @@ export function create(ctx) {
             L.visible = true;
           } else { L.visible = false; L.intensity = 0; }
         }
-      } else for (const L of lampLights) { L.visible = false; L.intensity = 0; }
+      } else for (let i = 0; i < lampLights.length; i++) { if (bedtime.ownsLamp(i)) continue; lampLights[i].visible = false; lampLights[i].intensity = 0; }
 
       // ambient flourishes (cheap, via the shared particle system)
       const fx = ctx.systems.particles;

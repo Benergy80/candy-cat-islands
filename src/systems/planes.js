@@ -494,12 +494,15 @@ function makeAtlas(renderer) {
     const [x, y, w, h] = RECT.bannerDay;
     g.fillStyle = '#fff7ea'; g.fillRect(x, y, w, h);
     stripes(g, x, y, w, 14, '#e8263f', '#fff7ea', 14); stripes(g, x, y + h - 14, w, 14, '#e8263f', '#fff7ea', 14);
-    const txt = 'WELCOME TO CANDYLAND';
-    const s = fitFont(g, txt, w - 150, 80);
-    g.lineWidth = 7; g.strokeStyle = '#7a1024'; g.strokeText(txt, x + w / 2, y + h / 2 + 3);
-    g.fillStyle = '#e8263f'; g.fillText(txt, x + w / 2, y + h / 2 + 3);
+    // Contract P: the longer name. The cloth is 25 u (was 21) and the letters
+    // are set 0.8-condensed into the same row, so on the cloth they stand
+    // ~93 % as tall as the old WELCOME TO CANDYLAND and just as wide-set.
+    const txt = 'WELCOME TO THE CANDY KINGDOM', tw = w - 144;
+    const s = fitFont(g, txt, tw / 0.8, 80);
+    g.lineWidth = 7; g.strokeStyle = '#7a1024'; g.strokeText(txt, x + w / 2, y + h / 2 + 3, tw);
+    g.fillStyle = '#e8263f'; g.fillText(txt, x + w / 2, y + h / 2 + 3, tw);
     // gumdrops at both ends
-    for (const [cx, col] of [[x + 34, '#5be27a'], [x + 64, '#3aa8ff'], [x + w - 34, '#ffe23a'], [x + w - 64, '#b35bff']]) {
+    for (const [cx, col] of [[x + 28, '#5be27a'], [x + 53, '#3aa8ff'], [x + w - 28, '#ffe23a'], [x + w - 53, '#b35bff']]) {
       g.fillStyle = col; g.beginPath(); g.arc(cx, y + h / 2 + 8, 13, Math.PI, 0); g.lineTo(cx + 13, y + h / 2 + 18); g.lineTo(cx - 13, y + h / 2 + 18); g.fill();
     }
     void s;
@@ -619,7 +622,7 @@ export function create(ctx) {
 
   // ── bones ──────────────────────────────────────────────────────────────────
   const K = 9;                 // banner bones
-  const BANNER_L = 21, BANNER_H = 3.3, SEG = BANNER_L / (K - 1);
+  const BANNER_L = 25, BANNER_H = 3.3, SEG = BANNER_L / (K - 1);
   const ROPE = 9, SAG = 3.3;   // path distance to the banner pole, and how far below the path it hangs
   const TOW_TAIL = [0, -0.05, -2.66], TOW_POLE = [0, BANNER_H / 2 + 0.22, 0.14];
   // in the air the banner streams out behind at (nearly) the plane's own

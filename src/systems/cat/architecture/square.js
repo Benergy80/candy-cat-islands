@@ -7,13 +7,16 @@
 import { PAL, frame, at, windowUnit, doorUnit, block, tileRoof, flatRoof, lamppost, bench, planter, sittingCat, loafCat, catEars, bunting, paving, column, hedge, pool, wash, halo, humanFigure } from './parts.js';
 import { drawLines, board, catFace, humanFace, FONTS } from './signs.js';
 import { purrliamentInterior } from './interiors.js';
+import { catRail, wroughtStyle, arcPts } from './kit.js';
 
 export function buildSquare(T) {
   const b = T.b, A = T.A;
   const CX = 152, CZ = 6, GY = T.ground(CX, CZ);
 
   // ── cobbled plaza with a giant pawprint mosaic ────────────────────────────
-  paving(b, CX, GY + 0.1, CZ, 18.5, { seg: 34, rings: 0, color: 0xc2b092, border: 0x93836a, depth: 2.6 });
+  // (walkable, T.paved: laid flat at the centre's height, the flagstones stand
+  // 0.45 over the ground in front of the Purrliament, and he waded in them)
+  const sqFloor = T.paved('cat_square', [], [paving(b, CX, GY + 0.1, CZ, 18.5, { seg: 34, rings: 0, color: 0xc2b092, border: 0x93836a, depth: 2.6 })]);
   for (let r = 1; r <= 4; r++) {
     const rr = 3.6 + r * 3.6, n = 8 + r * 6;
     for (let i = 0; i < n; i++) {
@@ -63,10 +66,17 @@ export function buildSquare(T) {
   flatRoof(sb, pf, PW, PD, 0x3f8a7e, { top: PH, parapet: 0.85, capColor: 0xd8cbb0 });
   for (let i = 0; i < 10; i++) sb.box(pf.px(-11.7 + i * 2.6, 0), pf.y + PH + 0.14, pf.pz(-11.7 + i * 2.6, 0), 0.2, 0.14, PD - 0.5, 0x2f6f66, { ao: 0 });
   for (const s of [-1, 1]) sb.box(pf.px(0, s * (PD / 2 - 0.9)), pf.y + PH + 0.14, pf.pz(0, s * (PD / 2 - 0.9)), PW - 0.6, 0.16, 0.34, 0x57a094, { ao: 0 });
-  // steps
-  for (let i = 0; i < 4; i++) b.box(pf.px(0, PD / 2 + 2.6 - i * 0.55), pf.y - 0.1 - i * 0.42, pf.pz(0, PD / 2 + 2.6 - i * 0.55), PW * 0.62 + i * 1.2, 0.5, 1.3 + i * 0.2, 0xd8cbb0, { ao: 0 });
-  // portico
-  for (let i = 0; i < 8; i++) column(sb, pf.px(-9.1 + i * 2.6, PD / 2 + 1.8), pf.y, pf.pz(-9.1 + i * 2.6, PD / 2 + 1.8), 0.55, 8.6, 0xfaf3e2, { seg: 12 });
+  // THE STEPS: one broad flight the width of the portico, up from the square to
+  // the chamber door and its threshold, walkable all the way. (Four slabs used
+  // to stand here the wrong way round — the highest one furthest out, 0.56 u
+  // proud of the square and walked straight through — under a narrow stoop.)
+  const pSteps = T.stoop(pf, 0, PD / 2, PW * 0.62, pY, { wall: PT, gap: 3.7, color: 0xd8cbb0, floor: sqFloor });
+  // portico: six columns and a wide central bay that frames the chamber doors
+  // and their arch. (Eight at an even 2.6 put the middle pair 1.5 apart right
+  // in front of a 3.7-wide doorway: the way in was a slot between two shafts
+  // and the doorway read as something behind the colonnade, not its centre.)
+  const PCOLS = [-9.1, -6.6, -4.1, 4.1, 6.6, 9.1];
+  for (const cx of PCOLS) column(sb, pf.px(cx, PD / 2 + 1.8), pf.y, pf.pz(cx, PD / 2 + 1.8), 0.55, 8.6, 0xfaf3e2, { seg: 12 });
   sb.box(pf.px(0, PD / 2 + 1.8), pf.y + 8.6, pf.pz(0, PD / 2 + 1.8), 21.4, 1.0, 2.6, 0xfaf3e2, { ao: 0 });
   sb.roof(pf.px(0, PD / 2 + 1.8), pf.y + 9.6, pf.pz(0, PD / 2 + 1.8), 3.0, 2.0, 21.4, 0xfaf3e2, { ry: Math.PI / 2, ao: 0 });
   const ped = A.panel(14.0, 1.9, (g, W, H) => {
@@ -80,7 +90,15 @@ export function buildSquare(T) {
     g.fillStyle = '#8a7450'; g.fillText('nine lives · one term · no departures', W / 2, H * 0.8);
   }, 68);
   sb.sign(ped, pf.px(0, PD / 2 + 3.15), pf.y + 10.5, pf.pz(0, PD / 2 + 3.15), 14.0, 1.9, {});
-  doorUnit(sb, pf, 0, PD / 2 + 0.2, { w: 3.4, h: 5.0, color: 0x6a4a24, surround: 0xfaf3e2, humanSide: -1, humanSignCell: T.humansLabel(), mat: false, leaf: false, recess: false });
+  // the chamber doorway: a green casing and lintel, a fanlight in a stone
+  // archivolt, and the HUMANS door beside it inside the central bay — on the
+  // RIGHT: the bay's left side is 0.83 wide between the archivolt and the
+  // bakery's ghost-sign wall, and a 1.02 door there was cut in half ("UMANS").
+  // The
+  // fanlight is four metres across and stands in the portico's shade: in plain
+  // dark glass with three thin bars it read as a black hole over the doors, so
+  // it is a gilt sunburst on paler glass (lit from inside after dark)
+  doorUnit(sb, pf, 0, PD / 2 + 0.16, { w: 3.4, h: 5.0, color: 0x6a4a24, surround: 0xfaf3e2, casing: 0x3a5a4a, casingW: 0.26, band: 0.26, lintelH: 0.34, headOver: 0.14, fanGlass: 0x5d8a8c, fanBars: 7, fanBar: PAL.gold, fanBarW: 0.1, fanHub: PAL.gold, fanHubR: 0.46, humanSide: 1, humanSignCell: T.humansLabel(), mat: false, leaf: false, recess: false, clear: 3.7, clearH: 5.1, sill: pY, humanAt: 3.03, humanY: pSteps?.[0]?.top });
   for (const s of [-1, 1]) for (let i = 0; i < 2; i++) {
     windowUnit(sb, pf, s * (5.6 + i * 4.2), PD / 2, 3.0, 2.0, 3.4, { trim: 0x3a5a4a, shutters: false, cushion: i === 0 });
   }
@@ -134,11 +152,12 @@ export function buildSquare(T) {
   }
   T.solidify(pSegs, pf.y + PH);
   T.claimRing(pf.x, pf.z, PW + 1, PD + 5, 0);
-  T.stoop(pf, 0, PD / 2, 4.4, pY);
   const chamber = T.room({ id: 'purrliament', x: pf.x, z: pf.z, w: PW - PT * 2, d: PD - PT * 2, rot: 0, y: pf.y, floorY: pY, h: PCEIL, label: 'The Purrliament' });
+  // a pair of panelled oak chamber doors, brass knobs, swinging in either side
+  // of the gangway through the front benches (interiors.js)
   T.door({
-    id: 'purrliament', room: chamber, y: pf.y, ry: 0, w: 3.7, h: 5.0, color: 0x6a4a24,
-    x: pf.px(0, PD / 2 + 0.4), z: pf.pz(0, PD / 2 + 0.4), swing: -1.7,
+    id: 'purrliament', room: chamber, y: pf.y, ry: 0, w: 3.7, color: 0x7a5230, field: 0x8a5f38, flap: 0xe8d9b8, double: true,
+    x: pf.px(0, PD / 2 + 0.4), z: pf.pz(0, PD / 2 + 0.4), inset: 0.4 + PT, sill: pY, top: pf.y + 5.1,
     say: 'the chamber doors are never locked. "the house sits," says a cat, "more or less permanently."', speaker: 'PURRLIAMENT',
   });
   T.roomDetail('purrliament', () => purrliamentInterior(T, frame(pf.x, pY, pf.z, 0), { hw: (PW - PT * 2) / 2, hd: (PD - PT * 2) / 2 }));
@@ -146,7 +165,7 @@ export function buildSquare(T) {
   // lit portico: the columns stand in a warm pool, the pediment is washed
   pool(b, pf.x, pf.y + 0.2, pf.pz(0, PD / 2 + 4.4), 13.0);
   wash(b, pf.px(0, PD / 2 + 3.3), pf.y + 10.5, pf.pz(0, PD / 2 + 3.3), 16.0, 4.0, pf.ry);
-  for (let i = 0; i < 8; i++) halo(b, pf.px(-9.1 + i * 2.6, PD / 2 + 1.8), pf.y + 8.2, pf.pz(-9.1 + i * 2.6, PD / 2 + 1.8), 0.9);
+  for (const cx of PCOLS) halo(b, pf.px(cx, PD / 2 + 1.8), pf.y + 8.2, pf.pz(cx, PD / 2 + 1.8), 0.9);
   T.act('purrliament', pf.px(0, PD / 2 + 6.2), pf.pz(0, PD / 2 + 6.2), 'The Purrliament', [
     'PURRLIAMENT. nine lives, one term, no departures.',
     'today’s order paper, pinned by the door: "1. the guest question. 2. lunch. 3. the guest question."',
@@ -355,14 +374,21 @@ export function buildSquare(T) {
     { a: 2.30, r: 14.6, kind: 'bench' },
     { a: 3.05, r: 15.2, kind: 'lantern', h: 5.8 },
     { a: 3.78, r: 16.2, kind: 'bench' },
-    { a: 4.42, r: 14.8, kind: 'globe', h: 5.4 },
-    { a: 5.10, r: 15.6, kind: 'bench' },
+    { a: 3.85, r: 14.8, kind: 'globe', h: 5.4 },   // (4.42 put it in the portico, in front of the HUMANS door)
+    // (at a 5.10 the portico pulled this bench back into the colonnade: it ran
+    // through the column at s 4.1 and stood across the HUMANS door, which now
+    // lives on the right of the chamber doors. It sits out in front of the
+    // right-hand bays instead, its back to the columns, facing the square.)
+    { at: [160.4, -0.8], ry: 0, len: 2.6, kind: 'bench' },
     { a: 5.72, r: 14.4, kind: 'lantern', h: 6.0 },
   ];
   for (const st of ring) {
+    if (st.at) { bench(b, st.at[0], GY + 0.14, st.at[1], st.ry, { len: st.len }); continue; }
     const a = st.a;
     let rr = st.r;
-    const inHouse = (r2) => Math.abs(CX + Math.cos(a) * r2 - pf.x) < PW / 2 + 1.4 && (CZ + Math.sin(a) * r2) < pf.z + PD / 2 + 1.6;
+    // a lamp stands clear of the portico and its steps, not in the colonnade
+    const front = st.kind === 'bench' ? 1.6 : 3.6;
+    const inHouse = (r2) => Math.abs(CX + Math.cos(a) * r2 - pf.x) < PW / 2 + 1.4 && (CZ + Math.sin(a) * r2) < pf.z + PD / 2 + front;
     while (rr > 8 && inHouse(rr)) rr -= 0.5;
     const lx = CX + Math.cos(a) * rr, lz = CZ + Math.sin(a) * rr;
     if (st.kind === 'bench') { bench(b, lx, GY + 0.14, lz, -a + Math.PI / 2, { len: 3.0 }); continue; }
@@ -391,4 +417,41 @@ export function buildSquare(T) {
     'a brass line runs across the square marked "0 km FROM HOME". it is the only distance sign on the island.',
     'pigeons here are enormous and very relaxed. the cats ignore them. everyone has an understanding.',
   ], { r: 5.0, speaker: 'THE SQUARE' });
+
+  // ── the square's raised rim (Contract O). The plaza is laid flat at its
+  //    centre's height, so on the Whisker Heights side (+z) its kerb stands
+  //    1.2–1.7 over the hillside. Civic ironwork on the paving just inside the
+  //    kerb — navy bars, a gold ball on every post, a mid rail — measured span
+  //    by span (railRun: only where the drop is over 1.2, plus a lead span),
+  //    stepping round anything already standing on the rim, and OPEN where the
+  //    road to Whisker Heights (cat_main, 4 u wide) leaves the square at 58°.
+  {
+    const RR = 17.95, deckY = (x, z) => { const y = sqFloor(x, z); return y == null ? GY + 0.2 : y; };
+    const solids = (T.ctx.colliders || []).filter((c) => c && c.solid !== false && !c.rail && Math.abs(Math.hypot(c.x - CX, c.z - CZ) - RR) < 4);
+    const blocked = (a) => {
+      const x = CX + Math.cos(a) * RR, z = CZ + Math.sin(a) * RR;
+      for (const c of solids) {
+        if (c.box) {
+          const dx = x - c.x, dz = z - c.z, cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0);
+          const lx = dx * cs + dz * sn, lz = -dx * sn + dz * cs;
+          if (Math.abs(lx) < (c.w || 0) / 2 + 0.35 && Math.abs(lz) < (c.d || 0) / 2 + 0.35) return true;
+        } else if (Math.hypot(x - c.x, z - c.z) < (c.r || 0) + 0.35) return true;
+      }
+      return false;
+    };
+    const style = wroughtStyle({ iron: 0x24394a, finial: 0x24394a, goldAll: true });
+    for (const [d0, d1, edge] of [[10, 48, 'east rim'], [68, 90, 'heights rim'], [110, 152, 'west rim']]) {
+      const A0 = (d0 * Math.PI) / 180, A1 = (d1 * Math.PI) / 180, STEP = 0.004, runs = [];
+      let cur = null;
+      for (let a = A0; a <= A1 + 1e-9; a += STEP) {
+        if (blocked(a)) { cur = null; continue; }
+        if (!cur) runs.push(cur = [a, a]); else cur[1] = a;
+      }
+      for (const [r0, r1] of runs) {
+        if ((r1 - r0) * RR < 1.0) continue;
+        const pts = arcPts(CX, CZ, RR, r0, r1, (a) => deckY(CX + Math.cos(a) * RR, CZ + Math.sin(a) * RR));
+        catRail(T.ctx, b, pts, { site: 'cat_square', edge, out: 1, style, mid: true, lead: 1, claim: T });
+      }
+    }
+  }
 }

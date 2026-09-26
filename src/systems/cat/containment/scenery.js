@@ -147,6 +147,147 @@ function relocate(ctx, claims, key, follow, o = {}) {
   };
 }
 
+// ── THE SMOOTHIE STAND + THE TUNNEL BEHIND IT (Contract O) ───────────────────
+// The stand is catArchitecture's (outskirts.js buildGym: the GAINS SHAKE stand,
+// frame(CX + 13.5, …, CZ + 5, −0.9), colBox 5.4 × 3.8). We find it by that box —
+// wall() stores rot = −ry — so a nudge over there carries the tunnel with it.
+const GYM_STAND = { x: 211.5, z: -21, ry: -0.9, w: 5.4, d: 3.8 };
+function findGymStand(ctx) {
+  let best = null;
+  for (const c of (ctx.colliders || [])) {
+    if (!c || !c.box || c.w == null || Math.abs(c.w - GYM_STAND.w) > 0.06 || Math.abs(c.d - GYM_STAND.d) > 0.06) continue;
+    const d = Math.hypot(c.x - GYM_STAND.x, c.z - GYM_STAND.z);
+    if (d < 14 && (!best || d < best.dist)) best = { x: c.x, z: c.z, ry: -(c.rot || 0), dist: d };
+  }
+  const s = best || GYM_STAND;
+  return { x: s.x, z: s.z, ry: s.ry, hw: GYM_STAND.w / 2, hd: GYM_STAND.d / 2, found: !!best };
+}
+/** A point in the tunnel mouth's frame: `d` metres INTO the bank, `off` along its width. */
+export function tunnelPoint(t, d, off = 0, out = { x: 0, z: 0 }) {
+  const nx = Math.sin(t.ry), nz = Math.cos(t.ry);
+  out.x = t.x - nx * d + Math.cos(t.ry) * off;
+  out.z = t.z - nz * d - Math.sin(t.ry) * off;
+  return out;
+}
+// Everything the arch, its bank and its spoil heap stand on, as [d, off, r,
+// strict] circles in the mouth's frame (see section 8 of buildScenery for the
+// lumps). The gym's back lawn is dotted with agaves, rocks and nature's nine
+// "chunky cacti" (r 0.85, merged — they never move out of the way), and they
+// shift whenever anyone upstream edits a placement, so a 13 u bank cannot be
+// asked to miss them all. The INSTANCED plants do not count at all: the bank
+// registers a BOX collider, and nature's world:ready clearance pass blanks every
+// instanced plant inside a box (+1.5 u) and zeroes its collider before the
+// first frame. What stays is what cannot be blanked (the merged cacti, other
+// systems' props, every claim): STRICT circles — the bore you look into — must
+// clear all of it; the rest of the bank may swallow a cactus (r ≤ 1: a cactus
+// growing out of a grassy bank is just a bank).
+const TUNNEL_FOOTPRINT = [
+  [0.4, 0, 1.3, 1], [2.4, 0, 1.7, 1],                         // the bore's first metres
+  [0, -2.3, 1.1, 0], [0, 2.3, 1.1, 0],                        // stone shoulders
+  [0.9, -3.1, 1.3, 0], [0.9, 3.1, 1.3, 0], [0, 3.6, 1.4, 0],  // collar + spoil heap
+  [1.2, -4.4, 1.6, 0], [1.2, 4.4, 1.6, 0], [3.2, -4.4, 2.1, 0], [3.2, 4.4, 2.1, 0], [5.4, -4.4, 1.7, 0], [5.4, 4.4, 1.7, 0],   // flanks
+  [3.6, 0, 2.8, 0], [6.8, 0, 2.6, 0], [9.6, 0, 3.0, 0],       // the hump over the bore
+];
+
+/**
+ * Where the tunnel goes: BEHIND the stand (the far side from its counter), its
+ * mouth turned towards the default camera (az π/4 — the old mouth faced dead
+ * away from it, hidden behind its own bank) and towards the stand, the whole
+ * bank clear of every footprint already on the ground, off the roads, and a
+ * walkable way round the end of the stand to the apron in front of the mouth.
+ */
+function placeTunnel(ctx, claims, st) {
+  const W = ctx.world;
+  const sc = Math.cos(st.ry), ss = Math.sin(st.ry);
+  const toW = (u, v) => ({ x: st.x + u * sc + v * ss, z: st.z - u * ss + v * sc });   // stand-local → world (kit frame)
+  // nature's instanced plants near here: the colliders sitting exactly on one of
+  // them are blanked by the box pass, so the search looks straight through them
+  const blankable = new Set();
+  const m4 = new THREE.Matrix4(), pv = new THREE.Vector3();
+  ctx.scene?.traverse?.((o) => {
+    if (!o.isInstancedMesh || !/^cat_nature_/.test(o.name || '')) return;
+    for (let i = 0; i < o.count; i++) {
+      o.getMatrixAt(i, m4); pv.setFromMatrixPosition(m4);
+      if (Math.abs(pv.x - st.x) < 44 && Math.abs(pv.z - st.z) < 44) blankable.add(`${pv.x.toFixed(3)},${pv.z.toFixed(3)}`);
+    }
+  });
+  const all = [...(ctx.colliders || []), ...claims].filter((c) => c && Number.isFinite(c.x) && Math.hypot(c.x - st.x, c.z - st.z) < 42);
+  const local = all;
+  const fixed = all.filter((c) => !(c.r != null && c.w == null && blankable.has(`${c.x.toFixed(3)},${c.z.toFixed(3)}`)));
+  const dist = (c, x, z) => {
+    if (c.r != null) return Math.hypot(x - c.x, z - c.z) - c.r;
+    if (c.w == null || c.d == null) return 99;
+    const rot = c.rot || 0, cs = Math.cos(rot), sn = Math.sin(rot), dx = x - c.x, dz = z - c.z;
+    const lx = dx * cs + dz * sn, lz = -dx * sn + dz * cs;
+    return Math.hypot(Math.max(Math.abs(lx) - c.w / 2, 0), Math.max(Math.abs(lz) - c.d / 2, 0));
+  };
+  const memo = new Map();
+  const cached = (tag, x, z, f) => { const k = tag + (Math.round(x * 4) * 4096 + Math.round(z * 4)); let v = memo.get(k); if (v === undefined) { v = f(x, z); memo.set(k, v); } return v; };
+  const gapBig = (x, z) => cached('b', x, z, (px, pz) => { let m = 99; for (const c of fixed) { if (c.r != null && c.r <= 1.0) continue; const d = dist(c, px, pz); if (d < m) m = d; } return m; });
+  const gapFix = (x, z) => cached('f', x, z, (px, pz) => { let m = 99; for (const c of fixed) { const d = dist(c, px, pz); if (d < m) m = d; } return m; });
+  const swallowed = (x, z, r) => { let n = 0; for (const c of fixed) if (c.r != null && c.r > 0 && c.r <= 1.0 && Math.hypot(x - c.x, z - c.z) < r + c.r) n++; return n; };
+  // what a visitor actually bumps into: solid, and not a low prop he steps onto
+  const gapSolid = (x, z) => cached('s', x, z, (px, pz) => {
+    let m = 99;
+    for (const c of local) { if (c.solid === false || (c.h != null && c.h <= 1.6)) continue; const d = dist(c, px, pz); if (d < m) m = d; }
+    return m;
+  });
+  const road = (x, z) => cached('p', x, z, (px, pz) => W.nearestPath(px, pz, 'cat').d);
+  const ht = (x, z) => cached('h', x, z, (px, pz) => W.height(px, pz));
+  const P = { x: 0, z: 0 };
+  const segClear = (a, b, t, need) => {
+    const L = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(L / 0.4));
+    for (let i = 0; i <= n; i++) {
+      const x = a.x + (b.x - a.x) * i / n, z = a.z + (b.z - a.z) * i / n;
+      if (gapSolid(x, z) < need) return false;
+      for (const [d, off, r] of TUNNEL_FOOTPRINT) { tunnelPoint(t, d, off, P); if (Math.hypot(x - P.x, z - P.z) - r < need) return false; }
+    }
+    return true;
+  };
+  const front = toW(0, st.hd + 1.5);
+  const why = { ground: 0, foot: 0, apron: 0, route: 0 };
+  let best = null;
+  for (let v = -3.5; v >= -13.01; v -= 0.5) for (let u = -8; u <= 8.01; u += 0.5) {
+    const m = toW(u, v);
+    if (ht(m.x, m.z) < 2.6 || W.slope(m.x, m.z) > 0.28) { why.ground++; continue; }
+    const tx = st.x - m.x, tz = st.z - m.z, dS = Math.hypot(tx, tz);
+    if (dS > 9.2) continue;                            // "behind the stand", not across the lawn
+    for (let k = 0; k < 48; k++) {
+      const ry = (k / 48) * Math.PI * 2 - Math.PI, nx = Math.sin(ry), nz = Math.cos(ry);
+      const cam = (nx + nz) * Math.SQRT1_2;              // turned to the default camera
+      const face = (nx * tx + nz * tz) / dS;             // …and to the stand he comes round
+      if (cam < 0.15 || face < 0.2) continue;
+      const t = { x: m.x, z: m.z, ry };
+      let head = 9;
+      for (const [d, off, r, strict] of TUNNEL_FOOTPRINT) {
+        tunnelPoint(t, d, off, P);
+        if (ht(P.x, P.z) < 2.2 || road(P.x, P.z) < r + 0.8) { head = -9; break; }
+        head = Math.min(head, (strict ? gapFix(P.x, P.z) : gapBig(P.x, P.z)) - r);
+        if (head < 0.15) break;
+      }
+      if (head < 0.15) { why.foot++; continue; }
+      // the apron he stands on to look in, and the walk round the stand's end to it
+      const apron = { x: m.x + nx * 2.4, z: m.z + nz * 2.4 };
+      if (gapSolid(apron.x, apron.z) < 0.9) { why.apron++; continue; }
+      // round either end: front → front corner → back corner → apron, 1 u off the box
+      let way = 0;
+      for (const sg of [1, -1]) {
+        const c1 = toW(sg * (st.hw + 1.0), st.hd + 1.0), c2 = toW(sg * (st.hw + 1.0), -st.hd - 1.0);
+        if (segClear(front, c1, t, 0.5) && segClear(c1, c2, t, 0.5) && segClear(c2, apron, t, 0.5)) { way = sg; break; }
+      }
+      if (!way) { why.route++; continue; }
+      let eaten = 0;
+      for (const [d, off, r, strict] of TUNNEL_FOOTPRINT) if (!strict) { tunnelPoint(t, d, off, P); eaten += swallowed(P.x, P.z, r); }
+      const score = Math.min(head, 1.5) + cam * 2.2 + face * 0.8 - dS * 0.3 - eaten * 0.12;
+      if (!best || score > best.score) best = { x: +m.x.toFixed(2), z: +m.z.toFixed(2), ry: +ry.toFixed(4), head: +head.toFixed(2), score, dS: +dS.toFixed(2), cam: +cam.toFixed(2), way };
+    }
+  }
+  if (best) return Object.assign(best, { why });
+  // nowhere clean: straight behind the stand, facing it, and say so in the log
+  const m = toW(0, -6.5);
+  return { x: +m.x.toFixed(2), z: +m.z.toFixed(2), ry: +Math.atan2(st.x - m.x, st.z - m.z).toFixed(4), head: -1, dS: 6.5, cam: 0, fallback: true, why };
+}
+
 /**
  * Purrliament Square's monument (152, 12.8) is the plaza's hero shot, and the
  * default camera sits up and to the +x/+z side of whatever it is looking at
@@ -417,16 +558,24 @@ export function buildScenery(ctx) {
   moves.push(relocate(ctx, claims, 'tower', null, {
     need: 2.7, hard: 2.3, rMax: 10, hMin: 1.4, hMax: 3.6, slopeMax: 0.45, pull: 0.22,
   }));
-  // ── smoothie stand + the tunnel mouth behind it, inside the gym grounds ───
+  // ── THE smoothie stand (the gym's GAINS SHAKE) + the tunnel dug in behind it ─
+  // Contract O: there used to be TWO smoothie stands 20 u apart — the gym's
+  // signed GAINS SHAKE stand (whose prompt only served the menu) and our pink
+  // one tucked behind the deck, with the tunnel off to its side, facing away from
+  // the camera behind a 13 u bank. "Look behind the smoothie stand" meant the
+  // wrong stand, and behind the right one there was nothing. Now there is one
+  // stand — the gym's — and the tunnel is dug in right behind it.
   {
-    const dx = +(SPOTS.tunnel.x - SPOTS.smoothie.x).toFixed(2);
-    const dz = +(SPOTS.tunnel.z - SPOTS.smoothie.z).toFixed(2);
-    moves.push(relocate(ctx, claims, 'smoothie', ['tunnel'], {
-      // the tunnel mouth has to stay under Muscle Beach Gym (198,−26, r 18)
-      need: 2.6, hard: 2.2, rMax: 6, hMin: 2.6, slopeMax: 0.28, pathMin: 2.2, pull: 0.4,
-      also: [{ dx, dz, need: 3.4 }],                          // the tunnel arch behind it
-      reject: (x, z) => Math.hypot(x + dx - 198, z + dz + 26) > 17.0,
-    }));
+    const st = findGymStand(ctx);
+    Object.assign(SPOTS.smoothie, { x: +st.x.toFixed(2), z: +st.z.toFixed(2), ry: st.ry, hw: st.hw, hd: st.hd, found: st.found });
+    const t = placeTunnel(ctx, claims, st);
+    Object.assign(SPOTS.tunnel, { x: t.x, z: t.z, ry: t.ry, way: t.way || 1 });   // way: the end of the stand you walk round
+    moves.push({ key: 'tunnel', at: [t.x, t.z], ry: t.ry, need: 0, hard: 0, clear: t.head, stand: [SPOTS.smoothie.x, SPOTS.smoothie.z], standFound: st.found, fromStand: t.dS, cam: t.cam, stuck: !!t.fallback, why: t.why });
+    // the mound's footprint is ours now: nothing else in this pass lands on it
+    for (const [d, off, r] of TUNNEL_FOOTPRINT) {
+      const p = tunnelPoint(SPOTS.tunnel, d, off);
+      claims.push({ x: p.x, z: p.z, r });
+    }
   }
   // ── the boom gate: a kerbside checkpoint on the last leg of the gym road,
   //    aimed back down the road so you read it walking towards the beach ──────
@@ -727,22 +876,22 @@ export function buildScenery(ctx) {
   }
 
   // ═══ 8. SMOOTHIE STAND + THE TUNNEL UNDER MUSCLE BEACH GYM ══════════════════
+  // The stand itself is catArchitecture's (the gym's GAINS SHAKE stand, found in
+  // the placement pass). Our pink second stand is gone — two smoothie stands was
+  // exactly the confusion — but its ludicrous roof cup moves onto the real one,
+  // so THE smoothie stand reads from across the gym.
   {
-    const { x, z } = SPOTS.smoothie, y = H(x, z), ry = SE;
-    const fx = Math.sin(ry), fz = Math.cos(ry);
-    B.box(3.0, 1.5, 1.8, 0xf2b6c6, x, y + 0.95, z, ry);
-    B.box(3.3, 0.2, 2.1, CAT.cream, x, y + 1.78, z, ry);
-    for (const s of [-1, 1]) B.cyl(0.07, 0.07, 1.9, 4, CAT.cream, x + fz * 1.35 * s, y + 2.7, z - fx * 1.35 * s);
-    B.box(3.6, 0.16, 2.2, 0xff7aa2, x, y + 3.6, z, ry);
-    for (const s of [-1, 1]) B.cyl(0.2, 0.2, 0.55, 6, CAT.furBlack, x + fz * 1.5 * s, y + 0.28, z - fx * 1.5 * s, 0, Math.PI / 2, 0);
-    // ludicrous smoothie cup on the roof
-    B.cyl(0.55, 0.42, 1.5, 10, 0xfff0f4, x - fz * 0.9, y + 4.5, z + fx * 0.9);
-    B.sph(0.56, 8, 5, 0xff6f9c, x - fz * 0.9, y + 5.2, z + fx * 0.9, [1, 0.6, 1]);
-    B.cyl(0.07, 0.07, 1.3, 5, 0x4ec3e8, x - fz * 0.9 + 0.2, y + 5.7, z + fx * 0.9, 0, 0, 0.35);
-    colliders.push({ x, z, r: 1.9 });
+    const st = SPOTS.smoothie, ry = st.ry ?? -0.9, c = Math.cos(ry), s = Math.sin(ry);
+    const px = (lx, lz) => st.x + lx * c + lz * s, pz = (lx, lz) => st.z - lx * s + lz * c;
+    const lx = 1.35, lz = -0.55, cx = px(lx, lz), cz = pz(lx, lz), roof = H(st.x, st.z) + 2.9;
+    B.cyl(0.72, 0.55, 1.9, 10, 0xfff0f4, cx, roof + 0.95, cz);
+    B.cyl(0.74, 0.74, 0.22, 10, 0xff9cc0, cx, roof + 1.2, cz);                          // label band
+    B.sph(0.73, 8, 5, 0xff6f9c, cx, roof + 1.9, cz, [1, 0.6, 1]);
+    B.cyl(0.09, 0.09, 1.7, 5, 0x4ec3e8, cx + 0.26, roof + 2.6, cz, 0, 0, 0.35);
   }
   {
-    const { x, z } = SPOTS.tunnel, y = H(x, z), ry = NW + 0.25;    // mouth faces the stand
+    // placeTunnel() turned the mouth to the camera and to the stand you come round
+    const { x, z } = SPOTS.tunnel, y = H(x, z), ry = SPOTS.tunnel.ry ?? (NW + 0.25);
     const fx = Math.sin(ry), fz = Math.cos(ry);
     const wx = Math.cos(ry), wz = -Math.sin(ry);                   // the mouth's width axis
 
@@ -766,6 +915,16 @@ export function buildScenery(ctx) {
     for (const s of [-1, 1]) lump(0.9, 3.1 * s, 0.45, 1.5, 0.85, 0.95, 0.85, CAT.cobble);     // stone collar
     colliders.push({ x: x - fx * 3.6, z: z - fz * 3.6, r: 2.8 });
     colliders.push({ x: x - fx * 6.8, z: z - fz * 6.8, r: 2.6 });
+    // the flanks and the back of the hump are 3.5 u of turf too — the bank used to
+    // be solid only down its spine, so you could stroll through either shoulder
+    for (const [d, off, r] of [[1.2, 4.4, 1.5], [3.2, 4.4, 2.0], [5.4, 4.4, 1.6]]) {
+      for (const sg of [-1, 1]) colliders.push({ x: x - fx * d + wx * off * sg, z: z - fz * d + wz * off * sg, r });
+    }
+    colliders.push({ x: x - fx * 9.6, z: z - fz * 9.6, r: 2.9 });
+    // …and one oriented BOX over the body of the bank (d 0.9 → 11.5, ±4.6): solid
+    // like the rest, and the shape nature's world:ready clearance pass reads, so
+    // no stray undergrowth pokes up through the turf or out of the bore
+    colliders.push({ x: x - fx * 6.2, z: z - fz * 6.2, w: 9.2, d: 10.6, rot: -ry, box: true });
 
     // pale stone shoulders so the mouth reads at distance
     for (const s of [-1, 1]) {

@@ -330,7 +330,7 @@ export function create(ctx, escape) {
             if (p && Math.hypot(p.x - m.foot.x, p.z - m.foot.z) < LADDER_GRAB) { gp.x = p.x; gp.z = p.z; } else { gp.x = m.foot.x; gp.z = m.foot.z; }
             return gp;
           },
-          label: 'Climb the rope ladder · SUGAR blimp to ' + (name === 'candy' ? 'Cat Island' : 'the Candy Kingdom'),
+          label: 'Blimp ride to ' + (name === 'candy' ? 'Cat Island' : 'the Candy Kingdom'),
           onInteract() { route.board(name); },
         }) || null;
         if (gates[name]) gates[name].enabled = false;

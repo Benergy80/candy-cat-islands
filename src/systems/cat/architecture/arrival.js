@@ -4,7 +4,7 @@
 // plaza that is genuinely lovely about it.
 // ─────────────────────────────────────────────────────────────────────────────
 import { PAL, frame, at, windowUnit, doorUnit, block, tileRoof, awning, fascia, lamppost, bench, planter, crate, barrel, sittingCat, loafCat, catEars, bunting, paving, ribbon, column, hedge, pool, wash, halo, hangingPlate, billboard } from './parts.js';
-import { ripple } from './kit.js';
+import { ripple, catRail, timberStyle, landingFloor, rod } from './kit.js';
 import { drawLines, board, catFace, humanFace, FONTS } from './signs.js';
 
 const DECK_Y = 4.06;
@@ -43,19 +43,41 @@ export function buildArrival(T) {
   }
   T.addDeck(X0, 46.5, Z0, Z1, DECK_Y);
 
-  // ── railings (open at the west end where the ferry ties up) ───────────────
+  // ── railings (Contract O) ─────────────────────────────────────────────────
+  // Both long sides, the whole way from the ferry head to the arch columns: the
+  // deck stands 4.9 over the sea bed, and the old rail was a picture of one —
+  // no collider — that also stopped 1.8 short of the head on either side, so
+  // you could walk round its end and off the corner. Now one measured run per
+  // side (shared helper, candy/architecture/rails.js; the same timber, knob and
+  // plank rails as before, posts ≈ 1.5 apart) with thin solid colliders on the
+  // rail line, dying into each column's base block at x 37.4. The WEST HEAD is
+  // left open on purpose: the ferry moors off it and her gangplank lands there
+  // (ferry.js pierEnd probes along z 22), and the bollards' rope already hangs
+  // across it at knee height. Past the columns the deck meets the stone apron
+  // and the island (measured drop < 1.2): no rail.
+  const railStyle = timberStyle({ post: PAL.wood, knob: PAL.woodLight, top: PAL.woodLight, mid: PAL.wood, midShift: 0.07 });
   for (const s of [-1, 1]) {
     const pz = cz + s * ((Z1 - Z0) / 2 - 0.15);
-    for (let x = 30.2; x <= 40.4; x += 1.7) {
-      b.box(x, DECK_Y, pz, 0.18, 1.15, 0.18, PAL.wood, { ao: 0.4, aoBase: DECK_Y });
-      b.sph(x, DECK_Y + 1.2, pz, 0.13, PAL.woodLight, { seg: 7, rings: 5 });
-    }
-    b.box(35.3, DECK_Y + 0.95, pz, 10.2, 0.15, 0.26, PAL.woodLight, { ao: 0 });
-    b.box(35.3, DECK_Y + 0.52, pz, 10.2, 0.12, 0.2, PAL.wood, { ao: 0 });
-    // hanging buoys
-    for (const x of [32.6, 37.4]) {
-      b.cyl(x, DECK_Y - 0.55, pz + s * 0.2, 0.28, 0.28, 0.7, s > 0 ? 0xe8514a : 0xf2f0e6, { seg: 9, ao: 0 });
-      b.cyl(x, DECK_Y - 0.66, pz + s * 0.2, 0.1, 0.1, 0.14, 0x3f3226, { seg: 6, ao: 0 });
+    catRail(T.ctx, b, [[28.6, pz, DECK_Y], [37.4, pz, DECK_Y]], {
+      site: 'cat_pier', edge: s < 0 ? 'south side' : 'north side', out: s < 0 ? 1 : -1,
+      style: railStyle, h: 1.025, mid: true, force: true, below: landingFloor(T.world),
+    });
+  }
+  for (const s of [-1, 1]) {
+    const pz = cz + s * ((Z1 - Z0) / 2 - 0.15);
+    // FENDERS hung over the side on a rope from the rail: a rounded body with
+    // peppermint bands (the ferry gangway's stripes), hanging against the
+    // deck's edge below the planks — not a bare cylinder standing through it
+    const body = s > 0 ? 0xe8514a : 0xf2f0e6, band = s > 0 ? 0xf6f2ea : 0xe8514a;
+    for (const x of [32.6, 36.2]) {
+      const fz = pz + s * 0.42, fy = DECK_Y - 0.72, L = 0.5, R = 0.22;
+      b.cyl(x, fy - L / 2, fz, R, R, L, body, { seg: 10, open: true, ao: 0 });
+      b.sph(x, fy + L / 2, fz, R, body, { seg: 10, rings: 3, phiLength: Math.PI / 2 });
+      b.sph(x, fy - L / 2, fz, R, body, { seg: 10, rings: 3, phiLength: Math.PI / 2, rx: Math.PI });
+      for (const t of [-0.13, 0.13]) b.cyl(x, fy + t - 0.045, fz, R + 0.012, R + 0.012, 0.09, band, { seg: 10, open: true, ao: 0 });
+      b.torus(x, fy + L / 2 + R + 0.03, fz, 0.07, 0.025, 0x6d5a3c, { seg: 7, tseg: 3 });                        // the eye
+      rod(b, [x, fy + L / 2 + R + 0.08, fz], [x, DECK_Y + 0.02, pz + s * 0.2], 0.03, 0x6d5a3c, { seg: 5 });      // over the edge…
+      rod(b, [x, DECK_Y + 0.02, pz + s * 0.2], [x, DECK_Y + 0.52, pz], 0.03, 0x6d5a3c, { seg: 5 });              // …and tied to the mid rail
     }
   }
 
@@ -497,7 +519,8 @@ export function buildPlaza(T) {
     g.strokeStyle = '#7a6a4a'; g.setLineDash([W * 0.02, W * 0.015]); g.lineWidth = W * 0.008;
     g.beginPath(); g.moveTo(W * 0.42, H * 0.5); g.lineTo(W * 0.54, H * 0.5); g.stroke(); g.setLineDash([]);
     g.fillStyle = '#5a4a32'; g.font = `bold ${H * 0.075}px ${FONTS.SANS}`; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText('CANDYLAND', W * 0.26, H * 0.86);
+    g.fillText('THE CANDY', W * 0.26, H * 0.83);
+    g.fillText('KINGDOM', W * 0.26, H * 0.91);
     g.fillText('CAT ISLAND', W * 0.72, H * 0.86);
     // a big red dot with rings
     for (let i = 3; i >= 1; i--) { g.globalAlpha = 0.2; g.fillStyle = '#e01f2d'; g.beginPath(); g.arc(W * 0.63, H * 0.47, W * 0.02 * i * 1.6, 0, Math.PI * 2); g.fill(); }

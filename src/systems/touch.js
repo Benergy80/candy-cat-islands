@@ -762,7 +762,7 @@ export function create(ctx) {
     const who = String(speaker || '').split(/\s+[—–-]\s+/)[0].trim().toLowerCase();
     if (!who) return false;
     if (convoLabel && convoLabel.includes(who)) return false;           // 'Talk to Marmalade' ← Marmalade
-    if (who === 'sour patch kids') return true;
+    if (who === 'sourlings' || who === 'sour patch kids') return true;
     const named = (list, keys) => {
       try {
         for (const o of list ?? []) for (const k of keys) { const n = String(k(o) || '').toLowerCase(); if (n && n === who) return true; }

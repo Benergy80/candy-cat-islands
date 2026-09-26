@@ -311,5 +311,569 @@
     -1.1
    ]
   }
+ },
+ "doors_cat_travel_shut": {
+  "free": [
+   129.51,
+   -4.75
+  ],
+  "y": 8.62,
+  "time": 11,
+  "frames": 45,
+  "az": -0.065,
+  "el": 0.14,
+  "dist": 7.2,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "travel",
+    false
+   ],
+   "player.teleport": [
+    131.58,
+    -2.61
+   ]
+  }
+ },
+ "doors_cat_meow_shut": {
+  "free": [
+   125.8,
+   -21.5
+  ],
+  "y": 7.55,
+  "time": 11,
+  "frames": 45,
+  "az": 0.0,
+  "el": 0.14,
+  "dist": 7.5,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "meow",
+    false
+   ],
+   "player.teleport": [
+    128.1,
+    -19.5
+   ]
+  }
+ },
+ "doors_cat_purrliament_shut": {
+  "free": [
+   152.0,
+   -4.1
+  ],
+  "y": 9.58,
+  "time": 11,
+  "frames": 45,
+  "az": 0.0,
+  "el": 0.1,
+  "dist": 8.5,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "purrliament",
+    false
+   ],
+   "player.teleport": [
+    156.2,
+    -1.1
+   ]
+  }
+ },
+ "doors_cat_watch": {
+  "free": [
+   214.2,
+   35.3
+  ],
+  "y": 13.13,
+  "time": 11,
+  "frames": 45,
+  "az": 0.62,
+  "el": 0.16,
+  "dist": 6.2,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "watch",
+    true
+   ],
+   "player.teleport": [
+    215.7,
+    35.8
+   ]
+  }
+ },
+ "doors_cat_watch_shut": {
+  "free": [
+   214.2,
+   35.3
+  ],
+  "y": 13.13,
+  "time": 11,
+  "frames": 45,
+  "az": 0.62,
+  "el": 0.16,
+  "dist": 6.2,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "watch",
+    false
+   ],
+   "player.teleport": [
+    215.7,
+    35.8
+   ]
+  }
+ },
+ "doors_cat_watch_flight": {
+  "free": [
+   214.0,
+   36.0
+  ],
+  "y": 11.4,
+  "time": 11,
+  "frames": 45,
+  "az": -1.15,
+  "el": 0.2,
+  "dist": 12,
+  "fov": 45,
+  "call": {
+   "player.teleport": [
+    214.0,
+    36.0
+   ]
+  }
+ },
+ "doors_cat_guest_game_open": {
+  "pos": [
+   169.3,
+   58.35
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": 1.485,
+  "el": 0.5,
+  "dist": 31,
+  "fov": 30,
+  "call": {
+   "catArchitecture.openDoor": [
+    "guest",
+    true
+   ]
+  }
+ },
+ "doors_cat_guest_game_shut": {
+  "pos": [
+   169.3,
+   58.35
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": 1.485,
+  "el": 0.5,
+  "dist": 31,
+  "fov": 30,
+  "call": {
+   "catArchitecture.openDoor": [
+    "guest",
+    false
+   ]
+  }
+ },
+ "doors_cat_purrbucks_game_open": {
+  "pos": [
+   99.09,
+   2.72
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": 0.031,
+  "el": 0.5,
+  "dist": 31,
+  "fov": 30,
+  "call": {
+   "catArchitecture.openDoor": [
+    "purrbucks",
+    true
+   ]
+  }
+ },
+ "doors_cat_purrbucks_game_shut": {
+  "pos": [
+   99.09,
+   2.72
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": 0.031,
+  "el": 0.5,
+  "dist": 31,
+  "fov": 30,
+  "call": {
+   "catArchitecture.openDoor": [
+    "purrbucks",
+    false
+   ]
+  }
+ },
+ "doors_cat_travel_game_open": {
+  "pos": [
+   127.72,
+   -3.36
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": -0.765,
+  "el": 0.5,
+  "dist": 31,
+  "fov": 30,
+  "call": {
+   "catArchitecture.openDoor": [
+    "travel",
+    true
+   ]
+  }
+ },
+ "doors_cat_travel_game_shut": {
+  "pos": [
+   127.72,
+   -3.36
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": -0.765,
+  "el": 0.5,
+  "dist": 31,
+  "fov": 30,
+  "call": {
+   "catArchitecture.openDoor": [
+    "travel",
+    false
+   ]
+  }
+ },
+ "doors_cat_meow_game_open": {
+  "pos": [
+   127.5,
+   -20.0
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": -0.35,
+  "el": 0.5,
+  "dist": 31,
+  "fov": 30,
+  "call": {
+   "catArchitecture.openDoor": [
+    "meow",
+    true
+   ]
+  }
+ },
+ "doors_cat_meow_game_shut": {
+  "pos": [
+   127.5,
+   -20.0
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": -0.35,
+  "el": 0.5,
+  "dist": 31,
+  "fov": 30,
+  "call": {
+   "catArchitecture.openDoor": [
+    "meow",
+    false
+   ]
+  }
+ },
+ "doors_cat_purrliament_game_open": {
+  "pos": [
+   154.4,
+   -1.5
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": 0.12,
+  "el": 0.5,
+  "dist": 31,
+  "fov": 30,
+  "call": {
+   "catArchitecture.openDoor": [
+    "purrliament",
+    true
+   ]
+  }
+ },
+ "doors_cat_purrliament_game_shut": {
+  "pos": [
+   154.4,
+   -1.5
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": 0.12,
+  "el": 0.5,
+  "dist": 31,
+  "fov": 30,
+  "call": {
+   "catArchitecture.openDoor": [
+    "purrliament",
+    false
+   ]
+  }
+ },
+ "doors_cat_watch_game_open": {
+  "pos": [
+   215.7,
+   35.8
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": 0.12,
+  "el": 0.5,
+  "dist": 31,
+  "fov": 30,
+  "call": {
+   "catArchitecture.openDoor": [
+    "watch",
+    true
+   ]
+  }
+ },
+ "doors_cat_watch_game_shut": {
+  "pos": [
+   215.7,
+   35.8
+  ],
+  "time": 11,
+  "frames": 50,
+  "az": 0.12,
+  "el": 0.5,
+  "dist": 31,
+  "fov": 30,
+  "call": {
+   "catArchitecture.openDoor": [
+    "watch",
+    false
+   ]
+  }
+ },
+ "doors_cat_purrliament_humans": {
+  "free": [
+   154.3,
+   -4.0
+  ],
+  "y": 8.6,
+  "time": 11,
+  "frames": 45,
+  "az": -0.25,
+  "el": 0.14,
+  "dist": 7.5,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "purrliament",
+    false
+   ],
+   "player.teleport": [
+    140.0,
+    0.0
+   ]
+  }
+ },
+ "doors_cat_purrliament_left": {
+  "free": [
+   149.2,
+   -4.3
+  ],
+  "y": 8.6,
+  "time": 11,
+  "frames": 45,
+  "az": -0.75,
+  "el": 0.3,
+  "dist": 7.5,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "purrliament",
+    false
+   ],
+   "player.teleport": [
+    140.0,
+    0.0
+   ]
+  }
+ },
+ "doors_cat_purrliament_steps_visitor": {
+  "free": [
+   152.0,
+   -1.6
+  ],
+  "y": 7.35,
+  "time": 11,
+  "frames": 45,
+  "az": 1.25,
+  "el": 0.16,
+  "dist": 4.6,
+  "fov": 50,
+  "call": {
+   "catArchitecture.openDoor": [
+    "purrliament",
+    true
+   ],
+   "player.teleport": [
+    152.0,
+    -1.6
+   ]
+  }
+ },
+ "doors_cat_travel_stoop_visitor": {
+  "free": [
+   129.42,
+   -3.25
+  ],
+  "y": 7.95,
+  "time": 11,
+  "frames": 45,
+  "az": 1.185,
+  "el": 0.16,
+  "dist": 4.6,
+  "fov": 50,
+  "call": {
+   "catArchitecture.openDoor": [
+    "travel",
+    true
+   ],
+   "player.teleport": [
+    129.42,
+    -3.25
+   ]
+  }
+ },
+ "doors_cat_purrbucks_stoop_visitor": {
+  "free": [
+   100.86,
+   2.55
+  ],
+  "y": 5.4,
+  "time": 11,
+  "frames": 45,
+  "az": 1.63,
+  "el": 0.16,
+  "dist": 4.6,
+  "fov": 50,
+  "call": {
+   "catArchitecture.openDoor": [
+    "purrbucks",
+    true
+   ],
+   "player.teleport": [
+    100.86,
+    2.55
+   ]
+  }
+ },
+ "doors_cat_meow_forecourt_visitor": {
+  "free": [
+   125.8,
+   -20.5
+  ],
+  "y": 6.65,
+  "time": 11,
+  "frames": 45,
+  "az": 1.25,
+  "el": 0.16,
+  "dist": 4.6,
+  "fov": 50,
+  "call": {
+   "catArchitecture.openDoor": [
+    "meow",
+    true
+   ],
+   "player.teleport": [
+    125.8,
+    -20.5
+   ]
+  }
+ },
+ "doors_cat_purrbucks_window": {
+  "free": [
+   97.09,
+   2.44
+  ],
+  "y": 6.3,
+  "time": 11,
+  "frames": 45,
+  "az": 0.381,
+  "el": 0.12,
+  "dist": 4.6,
+  "fov": 50,
+  "call": {
+   "player.teleport": [
+    106.0,
+    4.5
+   ]
+  }
+ },
+ "doors_cat_purrbucks_cafe": {
+  "free": [
+   96.4,
+   2.7
+  ],
+  "y": 4.7,
+  "time": 11,
+  "frames": 45,
+  "az": 1.35,
+  "el": 0.26,
+  "dist": 6.2,
+  "fov": 50,
+  "call": {
+   "player.teleport": [
+    99.0,
+    3.6
+   ]
+  }
+ },
+ "doors_cat_forecourt_edge_visitor": {
+  "free": [
+   112.4,
+   -17.4
+  ],
+  "y": 5.6,
+  "time": 11,
+  "frames": 45,
+  "az": -1.9,
+  "el": 0.14,
+  "dist": 4.4,
+  "fov": 50,
+  "call": {
+   "player.teleport": [
+    112.4,
+    -17.4
+   ]
+  }
+ },
+ "doors_cat_square_edge_visitor": {
+  "free": [
+   138.3,
+   18.4
+  ],
+  "y": 6.3,
+  "time": 11,
+  "frames": 45,
+  "az": -1.1,
+  "el": 0.14,
+  "dist": 4.4,
+  "fov": 50,
+  "call": {
+   "player.teleport": [
+    138.3,
+    18.4
+   ]
+  }
  }
 }

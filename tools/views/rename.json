@@ -1,0 +1,11 @@
+{
+ "rename_banner_wide": { "pos": [ -100, 62 ], "time": 10, "frames": 110, "call": { "ui.setMapMode": "local", "planes.debugPose": [ { "biplane": 0.1 }, true ], "planes.debugFrame": [ "biplane", { "rel": 1.75, "el": 0.1, "dist": 74, "fov": 40 } ] } },
+ "rename_banner_refuel": { "free": [ -152, 73 ], "y": 5, "az": 0.55, "el": 0.42, "dist": 66, "fov": 40, "time": 10, "frames": 60, "call": { "ui.setMapMode": "local", "escape.routes.blimp.debugReset": [], "escape.routes.biplane.debugReset": [], "planes.debugBiplane": [ "refuel", 0.4 ] } },
+ "rename_banner_dropoff": { "free": [ 205, 8 ], "y": 6, "az": 2.4, "el": 0.35, "dist": 48, "fov": 40, "time": 11, "frames": 60, "call": { "ui.setMapMode": "local", "escape.routes.blimp.debugReset": [], "escape.routes.biplane.debugReset": [], "planes.debugBiplane": [ "dropoff", 0 ] } },
+ "rename_atlas_footer": { "pos": [ -140, 40 ], "time": 12, "frames": 40, "call": { "ui.setMapMode": "history" } },
+ "rename_intro_banner": { "time": 18.2, "frames": 45, "call": { "ui.setMapMode": "local", "intro.play": 16.6 } },
+ "rename_travel_posters": { "pos": [ 128.2, -8.4 ], "az": -0.4, "el": 0.44, "dist": 11, "time": 12, "frames": 60, "call": { "ui.setMapMode": "local", "catArchitecture.enter": "travel" } },
+ "rename_travel_posters_b": { "pos": [ 128.2, -8.4 ], "az": 0.3, "el": 0.5, "dist": 10, "time": 12, "frames": 60, "call": { "ui.setMapMode": "local", "catArchitecture.enter": "travel" } },
+ "rename_ferry_cat_prompt": { "pos": [ 30.5, 22 ], "az": -0.78, "el": 0.5, "dist": 26, "time": 10, "frames": 150, "call": { "ui.setMapMode": "local", "story.set": [ "honorary_citizen", true ], "ferry.moor": "cat", "ui.clear": [] } },
+ "rename_atlas_route": { "pos": [ -104, 34 ], "time": 12, "frames": 30, "walk": { "x": 0.95, "y": -0.3, "n": 150 }, "call": { "ui.setMapMode": "history" } }
+}

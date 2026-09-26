@@ -281,19 +281,29 @@ body.cci-touch #ui .cci-atlas-close em.t { display: inline; }
 }
 #ui .cci-atlas-chart canvas { display: block; }
 #ui .cci-atlas-chart canvas.rt, #ui .cci-atlas-chart canvas.pl, #ui .cci-atlas-chart canvas.dy { position: absolute; left: 0; top: 0; }
-#ui .cci-atlas-foot { display: flex; align-items: center; gap: 16px; padding: 9px 4px 1px; min-width: 0; }
-/* the footer reports what you have seen: 'Explored: Candyland 37% · Cat Island 12%',
-   each island's figure over a progress rule in its colour (--p from minimap.js) */
+/* (inline-size containment — the footer never widens the sheet: the chart, which
+   minimap.js fits to the screen, sets its width, and the footer lives inside it;
+   as a size container it sheds legend entries when that width is short, below) */
+#ui .cci-atlas-foot { display: flex; align-items: center; gap: 16px; padding: 9px 4px 1px; min-width: 0;
+  contain: inline-size; container-type: inline-size; }
+/* the footer reports what you have seen: 'Explored: the Candy Kingdom 37% · Cat Island 12%',
+   each island's figure over a progress rule in its colour (--p from minimap.js);
+   a figure never breaks inside itself ('the Candy / Kingdom') */
 #ui .cci-map-xp { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font: 800 13.5px/1.3 var(--fbody); letter-spacing: .02em; color: var(--ink-soft); }
 #ui .cci-map-xp-lab { font-weight: 900; color: var(--ink); letter-spacing: .12em; text-transform: uppercase; font-size: 10.5px; }
 #ui .cci-map-xp-isl {
-  color: var(--ink); font-weight: 900; padding-bottom: 3px;
+  color: var(--ink); font-weight: 900; padding-bottom: 3px; white-space: nowrap;
   background: linear-gradient(90deg, var(--xpc) var(--p, 0%), rgba(43,36,66,.14) var(--p, 0%)) left bottom / 100% 3px no-repeat;
 }
 #ui .cci-map-xp-isl.c { --xpc: var(--pink); }
 #ui .cci-map-xp-isl.k { --xpc: var(--teal); }
-#ui .cci-atlas-legend { display: flex; align-items: center; gap: 14px; margin-left: auto; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+/* once the figures stack (minimap.js sets .stack) the ' · ' would dangle at the
+   end of line one: it goes invisible but keeps its room, so the wrap holds */
+#ui .cci-map-xp.stack .cci-map-xp-sep { visibility: hidden; }
+#ui .cci-atlas-legend { display: flex; align-items: center; gap: 14px; margin-left: auto; flex: 0 0 auto; min-width: 0; overflow: hidden; }
+/* 'your route' is only in the key while there is a route on the sheet */
+#ui .cci-atlas-legend.no-route .lg-r { display: none; }
 #ui .cci-atlas-leg { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 #ui .cci-atlas-leg em { font: 700 11.5px/1 var(--fbody); font-style: normal; color: var(--ink-soft); }
 #ui .cci-atlas-leg em b { font-weight: 900; color: var(--ink); }
@@ -304,6 +314,15 @@ body.cci-touch #ui .cci-atlas-close em.t { display: inline; }
 #ui .cci-atlas-leg .lg-fog { width: 18px; height: 12px; border-radius: 4px; border: 1.5px solid var(--edge);
   background: repeating-linear-gradient(45deg, rgba(176,140,92,.3) 0 1px, transparent 1px 5px), #f8efd8; }
 #ui .cci-atlas .cci-map-modes { margin-left: 0; }
+/* a footer too short for the figures + the whole key drops key entries rather
+   than clip them or cut the figures off: 'not yet explored' first, then 'your
+   route', and 'places n/26' — the one count toward the goal — last. (Widths
+   measured with the widest figures, 'the Candy Kingdom 100% · Cat Island 100%'.) */
+@container (max-width: 765px) { #ui .cci-atlas-leg:nth-child(3) { display: none; } }
+@media (min-width: 761px) and (min-height: 541px) {
+  @container (max-width: 636px) { #ui .cci-atlas-leg:nth-child(2) { display: none; } }
+  @container (max-width: 535px) { #ui .cci-atlas-legend { display: none; } }
+}
 
 /* ── map chip: what is left of the map while it is OFF (tap / M brings it back) ── */
 #ui .cci-mapchip {
@@ -544,7 +563,7 @@ body.cci-touch #ui .cci-atlas-close em.t { display: inline; }
      .cci-ti-motes  sprinkles (three depths, all BEHIND the type)
      .cci-ti-stage  .cci-ti-top (the logo ALONE, in the sky zone) and
                     .cci-ti-lower (tagline + pill, over the defocused sea)
-   The logo is staged: ribbon eyebrow · CANDYLAND (bouncy candy-stripe letters)
+   The logo is staged: ribbon eyebrow · CANDY KINGDOM (bouncy candy-stripe letters)
    · a gold AND badge · CAT ISLAND (calm mint letters, ears and a tail).
    Every letter is two layers — a fat ink outline (.o) under a clipped fill
    (.f) — so the stroke sits OUTSIDE the glyph instead of eating the stripes.
@@ -751,11 +770,20 @@ body.cci-touch #ui .cci-atlas-close em.t { display: inline; }
   #ui .cci-atlas-title .cci-eyebrow { display: none; }
   #ui .cci-atlas-title b { font-size: 17px; }
   #ui .cci-atlas-foot { padding-top: 5px; gap: 10px; }
-  #ui .cci-map-xp { font-size: 12px; }
+  /* a narrow sheet puts Cat Island's figure on a second line rather than cut it off */
+  #ui .cci-map-xp { font-size: 12px; line-height: 1.6; white-space: normal; overflow: visible; }
   #ui .cci-atlas-leg:nth-child(3) { display: none; }
+  /* (the figures may take two lines here, so the key only has to clear line one) */
+  @container (max-width: 492px) { #ui .cci-atlas-leg:nth-child(2) { display: none; } }
+  @container (max-width: 391px) { #ui .cci-atlas-legend { display: none; } }
 }
-@media (max-width: 640px) {
-  #ui .cci-atlas-legend { display: none; }
+@supports not (container-type: inline-size) {
+  @media (max-width: 640px) { #ui .cci-atlas-legend { display: none; } }
+}
+/* a narrow desktop window: the objective card leaves the clock its corner
+   (ui.js drops the banner column below the two) */
+@media (max-width: 560px) {
+  body:not(.cci-touch) #ui .cci-obj { max-width: calc(100vw - 150px); }
 }
 @media (max-width: 760px) {
   #ui .cci-hint { display: none !important; }

@@ -13,6 +13,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+// the shared handrail helper (measuring, spans, colliders, jump gate) — see HANDRAILS at the end
+import { railRun, RAILS, RAIL_H, POST_GAP, MIN_DROP, GATE, ABOVE, landingFloor, arcPts } from '../../candy/architecture/rails.js';
 
 const _cache = new Map();
 function cached(key, make) {
@@ -293,3 +295,181 @@ export function ripple(group, fn) {
     }
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDRAILS (Contract O, "Ramps and handrails") — the Cat Island half.
+//
+// The measuring, the spans, the colliders and the jump gate are the Candy
+// Kingdom's shared helper (candy/architecture/rails.js railRun: every span is
+// MEASURED and only a drop > 1.2 u gets a rail unless o.force; thin box
+// colliders, ≤ 1.2 u long, h = RAIL_SOLID — solid, no top; o.gate makes them
+// solid only while the visitor's feet are in a band round the deck). What is
+// Cat Island's own is the LOOK, drawn by the styles below with this Kit's
+// primitives into the SITE'S OWN builder (the district kit, or a shell Part so
+// the rail fades with its building) — merged into buckets the site already
+// draws: +0 draw calls.
+//
+//   catRail(ctx, B, pts, o) → railRun's registry entry (pts [[x, z, y], …])
+//   timberStyle(o)   the harbour language: square posts, a ball knob, plank rails
+//   wroughtStyle(o)  the lighthouse language: iron bars and a round iron rail
+//   tubeStyle(o)     Meow Donald's: red steel posts, yellow tube rails
+//   spiralStyle(o)   a turned timber handrail on existing iron balusters
+// Every style takes o.foot(x, z, y) → where a post's FOOT stands (a stair's
+// post stands on its own tread, not on the rail's sloped deck line).
+// ─────────────────────────────────────────────────────────────────────────────
+export { RAILS, RAIL_H, POST_GAP, MIN_DROP, landingFloor, arcPts };
+
+/** A timber/iron BAR from a to b ([x, y, z], its centre line): a box w wide × h tall, long axis along a→b. */
+export function beam(B, a, b, w, h, color, o = {}) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+  const hz = Math.hypot(dx, dz), len = Math.hypot(hz, dy);
+  if (len < 1e-3) return null;
+  const ry = Math.atan2(dx, dz), rx = -Math.atan2(dy, hz);
+  // the box is bottom-anchored: step down half its height along its own up
+  const sx = Math.sin(rx), ux = Math.sin(ry) * sx, uy = Math.cos(rx), uz = Math.cos(ry) * sx;
+  return B.box((a[0] + b[0]) / 2 - ux * h / 2, (a[1] + b[1]) / 2 - uy * h / 2, (a[2] + b[2]) / 2 - uz * h / 2,
+    w, h, len + (o.over ?? 0), color, { ry, rx, ao: 0, mat: o.mat, shade: o.shade });
+}
+/** A round rod from a to b ([x, y, z]), open-ended (its ends bury in a post). */
+export function rod(B, a, b, r, color, o = {}) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+  const hz = Math.hypot(dx, dz), len = Math.hypot(hz, dy);
+  if (len < 1e-3) return null;
+  return B.cyl((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2, r, r, len + (o.over ?? 0), color,
+    { center: true, open: true, seg: o.seg || 6, rx: Math.PI / 2 - Math.atan2(dy, hz), ry: Math.atan2(dx, dz), ao: 0, mat: o.mat });
+}
+
+/**
+ * TIMBER (the Arrivals Pier's own railing, and anything built of harbour
+ * timber): square posts with a ball knob, a broad plank top rail, a narrower
+ * mid rail. Defaults reproduce the pier's original rail exactly (posts 0.18,
+ * knob r 0.13, top 0.26 × 0.15, mid 0.2 × 0.12 at deck + 0.58).
+ */
+export function timberStyle(o = {}) {
+  const post = o.post ?? 0x8d5a34, knob = o.knob ?? 0xb4834f, top = o.top ?? 0xb4834f, mid = o.mid ?? 0x8d5a34;
+  const pw = o.postW ?? 0.18, midShift = o.midShift ?? 0;
+  return {
+    post(B, x, y, z, h, i) {
+      const f = o.foot ? o.foot(x, z, y) : y, t = y + h + 0.125;
+      B.box(x, f, z, pw, t - f, pw, post, { ao: 0.4, aoBase: f, ry: o.yaw ?? 0 });
+      B.sph(x, t + 0.05, z, 0.13, knob, { seg: 7, rings: 5 });
+    },
+    rail(B, a, b, kind) {
+      if (kind === 'top') beam(B, a, b, 0.26, 0.15, top, { over: 0.02 });
+      else beam(B, [a[0], a[1] + midShift, a[2]], [b[0], b[1] + midShift, b[2]], 0.2, 0.12, mid, { over: 0.02 });
+    },
+  };
+}
+
+/**
+ * WROUGHT IRON (the Watchtower: the same dark iron as its lantern gallery):
+ * square bars with a ball finial, a round top rail, a thinner mid rail. All on
+ * the 'metal' material (a shell's own ironwork bucket, or the town pool).
+ */
+export function wroughtStyle(o = {}) {
+  const iron = o.iron ?? 0x3a4a4c, fin = o.finial ?? 0x3a4a4c, midShift = o.midShift ?? 0;
+  const tall = o.tall ?? [];                     // [[x, z]]: newel posts, a head taller with a gold ball
+  // o.goldAll: EVERY post wears a gold ball (the flight's treatment, carried
+  // round the drum ledge: a black bar with an iron pip read as site fencing)
+  return {
+    post(B, x, y, z, h, i) {
+      const f = o.foot ? o.foot(x, z, y) : y;
+      const newel = tall.some(([tx, tz]) => Math.hypot(tx - x, tz - z) < 0.3);
+      const gold = newel || !!o.goldAll;
+      const t = y + h + (newel ? 0.22 : 0.04);
+      const pw = newel ? 0.14 : (o.goldAll ? 0.1 : 0.09);
+      B.box(x, f, z, pw, t - f, pw, iron, { ao: 0, mat: 'metal', ry: o.yaw ?? 0 });
+      if (o.goldAll && !newel) B.cyl(x, t - 0.02, z, 0.075, 0.06, 0.05, iron, { seg: 6, mat: 'metal', ao: 0 });   // a collar under the ball
+      B.sph(x, t + (newel ? 0.1 : gold ? 0.09 : 0.05), z, newel ? 0.13 : gold ? 0.1 : 0.075, gold ? (o.gold ?? 0xf2c14e) : fin, { seg: 7, rings: 5, mat: gold ? undefined : 'metal' });
+    },
+    rail(B, a, b, kind) {
+      if (kind === 'top') rod(B, a, b, 0.06, iron, { mat: 'metal', over: 0.04 });
+      else rod(B, [a[0], a[1] + midShift, a[2]], [b[0], b[1] + midShift, b[2]], 0.035, iron, { mat: 'metal', over: 0.02 });
+    },
+  };
+}
+
+/**
+ * TUBE (Meow Donald's forecourt: the restaurant's own red and yellow): round
+ * red steel posts with a yellow ball cap, a fat yellow top tube, a thinner
+ * yellow mid tube — the drive-thru's crowd rail. 'matte' only (the district's
+ * own bucket), so it costs no draw call.
+ */
+export function tubeStyle(o = {}) {
+  const post = o.post ?? 0xd52b1e, rail = o.rail ?? 0xffc72c, cap = o.cap ?? 0xffc72c;
+  return {
+    post(B, x, y, z, h) {
+      const f = o.foot ? o.foot(x, z, y) : y;
+      B.cyl(x, f - 0.05, z, 0.07, 0.08, y + h - f + 0.07, post, { seg: 8, ao: 0.4, aoBase: f });
+      B.cyl(x, f - 0.02, z, 0.13, 0.15, 0.08, post, { seg: 8, ao: 0 });                 // base plate
+      B.sph(x, y + h + 0.06, z, 0.11, cap, { seg: 8, rings: 5 });
+    },
+    rail(B, a, b, kind) {
+      if (kind === 'top') rod(B, a, b, 0.07, rail, { seg: 8, over: 0.06 });
+      else rod(B, a, b, 0.045, rail, { seg: 6, over: 0.04 });
+    },
+  };
+}
+
+/**
+ * SPIRAL (the Watchtower's stair inside the drum): the iron balusters are
+ * already there, one per tread (interiors.js watchInterior); each gets a collar
+ * up to the handrail, the handrail is a turned timber rail following the helix,
+ * and an iron mid rail threads the balusters.
+ */
+export function spiralStyle(o = {}) {
+  const iron = o.iron ?? 0x3a4a4c, wood = o.wood ?? 0x8a6238, from = o.from ?? 0.86;
+  return {
+    post(B, x, y, z, h) {
+      B.cyl(x, y + from, z, 0.05, 0.05, h - from + 0.02, iron, { seg: 6, mat: 'metal', ao: 0 });
+      B.sph(x, y + h + 0.02, z, 0.085, wood, { seg: 7, rings: 5 });
+      // a foot plate bolted to the tread: seen from above the flight, a bare
+      // baluster under the helix read as hanging from the rail through the
+      // tread above it rather than standing on its own
+      if (o.foot !== false) B.cyl(x, y - 0.01, z, 0.1, 0.12, 0.05, iron, { seg: 8, mat: 'metal', ao: 0 });
+    },
+    rail(B, a, b, kind) {
+      if (kind === 'top') rod(B, a, b, 0.065, wood, { seg: 7, over: 0.03 });
+      else rod(B, a, b, 0.032, iron, { mat: 'metal', over: 0.02 });
+    },
+  };
+}
+
+/**
+ * The highest walkable surface at (x, z) no higher than y + 0.3, or the
+ * landing floor (terrain / the wading floor over the sea): what a walker
+ * stepping off a deck at height y lands on. Read ONCE per sample at build time.
+ */
+export function landingBelow(ctx) {
+  const land = landingFloor(ctx.world);
+  return (x, z, y) => {
+    let best = land(x, z);
+    const ws = ctx.walkables || [];
+    for (let i = 0; i < ws.length; i++) {
+      const w = ws[i]; if (!w || !w.test) continue;
+      let t = null;
+      try { t = w.test(x, z); } catch (e) { t = null; }
+      if (typeof t === 'number' && t === t && t <= y + 0.3 && t > best) best = t;
+    }
+    return best;
+  };
+}
+
+/**
+ * One railed edge. `o` is railRun's (site, edge, out, style, force, mid, gate,
+ * lead, leadBack, have, below, h, noPosts, noRail) plus:
+ *   o.gateLo  — for a gated run, how far under the deck the band starts
+ *               (railRun's GATE is 2.3: right for a deck whose walkable lifts
+ *               anyone within 2.2 of it; a walkable that only lifts within a
+ *               step, like the Watchtower's helix, needs its own)
+ *   o.claim   — T (the architecture's authoring api): claim each span's
+ *               footprint so nothing is planted through the rail
+ */
+export function catRail(ctx, B, pts, o = {}) {
+  const e = railRun(ctx, B, pts, { below: o.below || landingBelow(ctx), ...o });
+  if (o.gate && o.gateLo != null) for (const c of e.cols) if (c.gateY != null) c.gateY += GATE - o.gateLo;
+  // (a collider's rot is the player's sense, a claim's yaw the kit's: negate)
+  if (o.claim) for (const c of e.cols) o.claim.claim(c.x, c.z, 0.7, c.d + 0.2, -c.rot);
+  return e;
+}
+export { GATE, ABOVE };

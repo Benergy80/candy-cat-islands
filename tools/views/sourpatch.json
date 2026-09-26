@@ -26,7 +26,7 @@
    -140,
    40
   ],
-  "time": 19,
+  "time": 18.52,
   "frames": 50,
   "dist": 27,
   "el": 0.46,
@@ -406,7 +406,7 @@
    -52,
    24
   ],
-  "time": 21,
+  "time": 22.4,
   "frames": 120,
   "call": {
    "ui.clear": [],
@@ -433,7 +433,7 @@
    -52,
    24
   ],
-  "time": 21.3,
+  "time": 22.7,
   "frames": 120,
   "call": {
    "ui.clear": [],
@@ -445,10 +445,10 @@
     0.393,
     {
      "frame": {
-      "dist": 56,
-      "el": 0.14,
-      "az": 1.25,
-      "fov": 42,
+      "dist": 28,
+      "el": 0.44,
+      "az": 1.05,
+      "fov": 40,
       "dy": 1
      }
     }
@@ -553,6 +553,157 @@
       "dy": 0
      }
     }
+   ]
+  }
+ },
+ "sour_ritual_freeze": {
+  "free": [
+   -137.5,
+   36.0
+  ],
+  "y": 5.2,
+  "time": 18.52,
+  "frames": 55,
+  "az": -1.744,
+  "el": 0.161,
+  "dist": 10.6,
+  "fov": 32,
+  "call": {
+   "ui.clear": [],
+   "player.teleport": [
+    -143.7,
+    36.7
+   ],
+   "sourPatch.debug.faceVisitor": [
+    -136,
+    37
+   ]
+  }
+ },
+ "sour_ritual_run": {
+  "free": [
+   -205,
+   -26.5
+  ],
+  "y": 9.3,
+  "time": 18.98,
+  "frames": 45,
+  "az": 3.78,
+  "el": 0.22,
+  "dist": 11,
+  "fov": 40,
+  "call": {
+   "ui.clear": [],
+   "player.teleport": [
+    -199.0,
+    -34.0
+   ],
+   "sourPatch.debug.ritual": [
+    7.5
+   ]
+  }
+ },
+ "sour_ritual_rings": {
+  "free": [
+   -220.5,
+   -47
+  ],
+  "y": 8.0,
+  "time": 20.7,
+  "frames": 45,
+  "az": -2.3,
+  "el": 0.75,
+  "dist": 33,
+  "fov": 40,
+  "call": {
+   "ui.clear": [],
+   "player.teleport": [
+    -207.5,
+    -30.0
+   ],
+   "sourPatch.debug.ritual": [
+    27.5
+   ]
+  }
+ },
+ "sour_ritual_backs": {
+  "free": [
+   -225.6,
+   -33.1
+  ],
+  "y": 7.1,
+  "time": 21.3,
+  "frames": 24,
+  "az": -0.61,
+  "el": 0.08,
+  "dist": 7.5,
+  "fov": 44,
+  "call": {
+   "ui.clear": [],
+   "player.teleport": [
+    -227.4,
+    -30.5
+   ],
+   "sourPatch.debug.ritual": [
+    35.0
+   ],
+   "sourPatch.debug.faceVisitor": [
+    -218,
+    -44
+   ]
+  }
+ },
+ "sour_ritual_reveal": {
+  "free": [
+   -225.6,
+   -33.1
+  ],
+  "y": 7.1,
+  "time": 21.46,
+  "frames": 36,
+  "az": -0.61,
+  "el": 0.08,
+  "dist": 7.5,
+  "fov": 44,
+  "call": {
+   "ui.clear": [],
+   "player.teleport": [
+    -227.4,
+    -30.5
+   ],
+   "sourPatch.debug.ritual": [
+    37.0
+   ],
+   "sourPatch.debug.faceVisitor": [
+    -218,
+    -44
+   ]
+  }
+ },
+ "sour_ritual_snap": {
+  "free": [
+   -223.6,
+   -36.6
+  ],
+  "y": 6.9,
+  "time": 20.26,
+  "frames": 36,
+  "az": -0.5,
+  "el": 0.5,
+  "dist": 11,
+  "fov": 44,
+  "call": {
+   "ui.clear": [],
+   "player.teleport": [
+    -225.2,
+    -34.4
+   ],
+   "sourPatch.debug.ritual": [
+    22
+   ],
+   "sourPatch.debug.faceVisitor": [
+    -218,
+    -44
    ]
   }
  }

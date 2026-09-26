@@ -71,17 +71,26 @@ export function createNav(world, o) {
 
   function buildLand() {
     const t0 = performance.now();
-    const coarse = new Uint8Array(LNX * LNZ), R2 = o.radius ? (o.radius + 6) ** 2 : Infinity;
-    for (let gz = 0; gz < LNZ; gz++) for (let gx = 0; gx < LNX; gx++) {
+    const coarse = new Uint8Array(LNX * LNZ);
+    landRows(coarse, 0, LNZ);
+    landSpread(coarse);
+    stats.landMs = performance.now() - t0;
+  }
+  /** Sample the waterline on coarse rows [g0, g1). */
+  function landRows(coarse, g0, g1) {
+    const R2 = o.radius ? (o.radius + 6) ** 2 : Infinity;
+    for (let gz = g0; gz < g1; gz++) for (let gx = 0; gx < LNX; gx++) {
       const x = X0 + (gx + 0.5) * LC, z = Z0 + (gz + 0.5) * LC;
       if ((x - (o.cx || 0)) ** 2 + (z - (o.cz || 0)) ** 2 > R2) continue;
       coarse[gz * LNX + gx] = world.height(x, z) > 0.55 ? 1 : 0;
     }
+  }
+  function landSpread(coarse) {
     for (let i = 0; i < N; i++) {
       const gx = Math.min(LNX - 1, Math.floor((cx(i) - X0) / LC)), gz = Math.min(LNZ - 1, Math.floor((cz(i) - Z0) / LC));
       land[i] = coarse[gz * LNX + gx];
     }
-    landDone = true; stats.landMs = performance.now() - t0;
+    landDone = true;
   }
 
   /** Signed distance from (x,z) to a collider's footprint (negative inside). */
@@ -128,8 +137,13 @@ export function createNav(world, o) {
     if (!landDone) buildLand();
     for (let i = 0; i < N; i++) blocked[i] = land[i] ? 0 : 1;
     if (KEEP) bkMap.clear();
+    stampRange(colliders, 0, colliders.length, isBlocker);
+    finishBuild();
+    stats.buildMs = performance.now() - t0;
+  }
+  function stampRange(colliders, from, to, isBlocker) {
     const xa = X0 - 20, xb = X0 + NX * C + 20, za = Z0 - 20, zb = Z0 + NZ * C + 20;
-    for (let k = 0; k < colliders.length; k++) {
+    for (let k = from; k < to; k++) {
       const c = colliders[k];
       if (!c || typeof c.x !== 'number' || typeof c.z !== 'number') continue;
       if (c.x < xa || c.x > xb || c.z < za || c.z > zb) continue;
@@ -137,11 +151,49 @@ export function createNav(world, o) {
       stamp(c);
       if (KEEP) keep(c);
     }
+  }
+  function finishBuild() {
     let free = 0; for (let i = 0; i < N; i++) if (!blocked[i]) free++;
     stats.free = free;
     label();
     fields.clear();                          // every field is stale now
-    built = true; stats.builds++; stats.ver++; stats.buildMs = performance.now() - t0;
+    built = true; stats.builds++; stats.ver++;
+  }
+  /**
+   * The same build, spread over several calls by a FIXED quota of work per
+   * call (so how many frames it takes never depends on the machine): up to
+   * `rows` coarse waterline rows, else up to `cols` colliders stamped, else
+   * the labelling. True once built. (The scruff-carry's own grid is built
+   * this way over the catch's frames — citizens.js navFine.)
+   */
+  let inc = null;
+  function buildSome(colliders, isBlocker, rows = 24, cols = 900) {
+    if (built && !inc) return true;
+    const t0 = performance.now();
+    if (!inc) { built = false; inc = { phase: landDone ? 1 : 0, row: 0, k: 0, coarse: landDone ? null : new Uint8Array(LNX * LNZ), ms: 0 }; }
+    if (inc.phase === 0) {
+      const g1 = Math.min(LNZ, inc.row + rows);
+      landRows(inc.coarse, inc.row, g1);
+      inc.row = g1;
+      if (g1 >= LNZ) { landSpread(inc.coarse); inc.coarse = null; inc.phase = 1; }
+    } else if (inc.phase === 1) {
+      for (let i = 0; i < N; i++) blocked[i] = land[i] ? 0 : 1;
+      if (KEEP) bkMap.clear();
+      inc.phase = 2; inc.k = 0;
+    } else if (inc.phase === 2) {
+      const k1 = Math.min(colliders.length, inc.k + cols);
+      stampRange(colliders, inc.k, k1, isBlocker);
+      inc.k = k1;
+      if (k1 >= colliders.length) inc.phase = 3;
+    } else {
+      finishBuild();
+      inc.ms += performance.now() - t0;
+      stats.buildMs = inc.ms; inc = null;
+      return true;
+    }
+    inc.ms += performance.now() - t0;
+    stats.stepMs = Math.max(stats.stepMs || 0, performance.now() - t0);
+    return false;
   }
   /**
    * Colliders appended to the list since the build (indices from..to−1): stamp
@@ -379,7 +431,7 @@ export function createNav(world, o) {
   }
 
   return {
-    build, add, field, los, clip, next, ray, cellOf, nearestOpen, forRing, clearRun, stats,
+    build, buildSome, add, field, los, clip, next, ray, cellOf, nearestOpen, forRing, clearRun, stats,
     /** Signed distance from (x,z) to collider c's footprint (negative inside). */
     sdist: sd,
     /** The connected piece of open ground cell i belongs to (0 = shut). */

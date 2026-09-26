@@ -31,7 +31,7 @@ import { rng, hash, damp } from '../../core/util.js';
 import { Kit, Part } from './architecture/kit.js';
 import { SignAtlas, drawLines, board, stripes, catFace, humanFace, FONTS } from './architecture/signs.js';
 import * as P from './architecture/parts.js';
-import { setCollector, doorLeaf, frame } from './architecture/parts.js';
+import { setCollector, doorLeaf, hungLeaf, frame } from './architecture/parts.js';
 import { buildArrival, buildPlaza } from './architecture/arrival.js';
 import { buildStreet, buildMeowDonalds } from './architecture/mainstreet.js';
 import { buildSquare } from './architecture/square.js';
@@ -84,6 +84,37 @@ export function create(ctx) {
   const shells = [];       // fadeable building shells { id, p, holder, meshes, mats }
   const rooms = [];        // interiors { id, x, z, w, d, rot, y, h, inside, shell }
   const doorList = [];     // swinging doors { id, room, holder, open, t, blocker }
+  /**
+   * An OPEN leaf is solid (Contract A: nothing solid is walked through), so
+   * door() and hungDoor() give each leaf the footprint of parts.js hungLeaf's
+   * joinery at its rest pose, as boxes [x0, x1, z0, z1] in its hinge frame (x
+   * along the leaf from the pivot, z across it; A = the pivot's set-back, Wl
+   * the leaf's width, TH its thickness, Z0 its shift). Each box follows the
+   * piece it covers and no more — on the face toward the opening a box that
+   * was a few centimetres too generous at the hinge end stood in the doorway.
+   */
+  function leafBoxes(A, Wl, TH, Z0) {
+    const fh = (Math.min(0.62, Wl * 0.34) + 0.16) / 2;
+    return [
+      [A, A + Wl, Z0, Z0 + TH],                                              // the slab
+      [A + 0.04, A + Wl, Z0 - 0.025, Z0 + TH + 0.025],                       // glazing beads, rails, flap frames
+      [A + 0.2, A + Wl, Z0 - 0.035, Z0 + TH + 0.035],                        // raised panels, muntins
+      [A - 0.06, A + 0.06, Z0 - 0.08, Z0 + 0.04],                            // hinge knuckles
+      [A + Wl - 0.25, A + Wl - 0.09, Z0 - 0.16, Z0 + TH + 0.16],             // knobs and roses, both faces
+      [A + Wl / 2 - fh, A + Wl / 2 + fh, Z0 + TH - 0.01, Z0 + TH + 0.09],    // the cat flap's hood
+    ];
+  }
+  /** Push `boxes` as colliders for a leaf pivoting at (px, pz), rest yaw
+   *  `yaw`, running along u·x; solid:false until the door opens. */
+  function leafColliders(px, pz, yaw, u, boxes, out) {
+    const ct = Math.cos(yaw), st = Math.sin(yaw);
+    for (const [x0, x1, z0, z1] of boxes) {
+      const lx = (u * (x0 + x1)) / 2, lz = (z0 + z1) / 2;
+      const col = { x: px + lx * ct + lz * st, z: pz - lx * st + lz * ct, w: x1 - x0, d: z1 - z0, rot: -yaw, box: true, solid: false };
+      ctx.colliders.push(col);
+      out.push(col);
+    }
+  }
   const claims = [];       // build-time footprint claims, dissolved on frame 1
   let stoops = 0;          // entrance step runs (see T.stoop)
   ctx.colliders = ctx.colliders || [];
@@ -295,30 +326,114 @@ export function create(ctx) {
     addDeck(x0, x1, z0, z1, y) { deck.push({ x0, x1, z0, z1, y }); },
 
     /**
+     * PAVING IS GROUND (Contract A). The town's street, sidewalks and plazas
+     * are raised slabs — a ribbon's pieces are laid flat at the highest ground
+     * along them, so on Main Street's hillside they stand 0.1–1 u over the
+     * terrain — and none of them was a walkable: the visitor, every cat and
+     * every tiger waded through them, knee-deep on the Travel Agency's step.
+     * `boxes` are ribbon()'s o.out pieces { x, z, c, s, hw, hd, top }; `discs`
+     * paving()'s returned surfaces ({ at(x, z) → top | null }, exact to the
+     * drawn polygon and rim facets). Registers one walkable and returns its
+     * test (x, z) → the paving top there, or null. No allocation per call.
+     */
+    paved(id, boxes = [], discs = []) {
+      const n = boxes.length, CS = 4;
+      const bx = new Float64Array(n), bz = new Float64Array(n), bc = new Float64Array(n), bs = new Float64Array(n);
+      const bw = new Float64Array(n), bd = new Float64Array(n), bt = new Float64Array(n);
+      let X0 = Infinity, X1 = -Infinity, Z0 = Infinity, Z1 = -Infinity;
+      boxes.forEach((q, i) => {
+        bx[i] = q.x; bz[i] = q.z; bc[i] = q.c; bs[i] = q.s; bw[i] = q.hw; bd[i] = q.hd; bt[i] = q.top;
+        const ex = Math.abs(q.c) * q.hw + Math.abs(q.s) * q.hd, ez = Math.abs(q.s) * q.hw + Math.abs(q.c) * q.hd;
+        X0 = Math.min(X0, q.x - ex); X1 = Math.max(X1, q.x + ex); Z0 = Math.min(Z0, q.z - ez); Z1 = Math.max(Z1, q.z + ez);
+      });
+      // a coarse grid over the boxes' bounds: each cell lists the boxes that reach it
+      const NX = n ? Math.max(1, Math.ceil((X1 - X0) / CS)) : 0, NZ = n ? Math.max(1, Math.ceil((Z1 - Z0) / CS)) : 0;
+      const lists = Array.from({ length: NX * NZ }, () => []);
+      boxes.forEach((q, i) => {
+        const ex = Math.abs(q.c) * q.hw + Math.abs(q.s) * q.hd, ez = Math.abs(q.s) * q.hw + Math.abs(q.c) * q.hd;
+        const gx0 = Math.max(0, Math.floor((q.x - ex - X0) / CS)), gx1 = Math.min(NX - 1, Math.floor((q.x + ex - X0) / CS));
+        const gz0 = Math.max(0, Math.floor((q.z - ez - Z0) / CS)), gz1 = Math.min(NZ - 1, Math.floor((q.z + ez - Z0) / CS));
+        for (let gz = gz0; gz <= gz1; gz++) for (let gx = gx0; gx <= gx1; gx++) lists[gz * NX + gx].push(i);
+      });
+      const start = new Int32Array(NX * NZ + 1), idx = new Int32Array(lists.reduce((a, l) => a + l.length, 0));
+      lists.forEach((l, ci) => { start[ci + 1] = start[ci] + l.length; idx.set(l, start[ci]); });
+      const dsc = discs.filter(Boolean);
+      const test = (x, z) => {
+        let best = null;
+        if (n && x >= X0 && x <= X1 && z >= Z0 && z <= Z1) {
+          const ci = Math.min(NZ - 1, ((z - Z0) / CS) | 0) * NX + Math.min(NX - 1, ((x - X0) / CS) | 0);
+          for (let k = start[ci], e = start[ci + 1]; k < e; k++) {
+            const i = idx[k], dx = x - bx[i], dz = z - bz[i];
+            const u = dx * bc[i] - dz * bs[i];
+            if (u > bw[i] || u < -bw[i]) continue;
+            const v = dx * bs[i] + dz * bc[i];
+            if (v > bd[i] || v < -bd[i]) continue;
+            if (best === null || bt[i] > best) best = bt[i];
+          }
+        }
+        // (a disc knows its own drawn n-gon and faceted rim: parts.js discSurface)
+        for (let i = 0; i < dsc.length; i++) {
+          const y = dsc[i].at(x, z);
+          if (y !== null && (best === null || y > best)) best = y;
+        }
+        return best;
+      };
+      ctx.walkables.push({ id, test });
+      return test;
+    },
+
+    /**
      * A short flight of stone steps from the ground outside a door up to a
      * raised interior floor (see padY), and the walkable that makes them
      * climbable rather than a ledge the visitor pops onto. `f` is the building
      * frame, `lx` the door centre along the facade, `lz0` the outer wall face.
      */
-    stoop(f, lx, lz0, w, toY) {
+    stoop(f, lx, lz0, w, toY, o = {}) {
       const outX = f.px(lx, lz0 + 1.5), outZ = f.pz(lx, lz0 + 1.5);
-      const fromY = world.height(outX, outZ);
-      const rise = toY - fromY;
-      if (rise < 0.16) return null;
-      const n = Math.min(4, Math.max(1, Math.round(rise / 0.3)));
-      const steps = [];
-      for (let i = 0; i < n; i++) {
-        const top = toY - (rise * (i + 1)) / (n + 1);
-        const lz = lz0 + 0.42 + i * 0.66;
-        kit.box(f.px(lx, lz), top - 1.3, f.pz(lx, lz), w, 1.3, 1.0, P.PAL.stone, { ry: f.ry, ao: 0 });
-        steps.push({ lz, top });
+      // o.floor(x, z) → y|null: paving the flight stands on (T.paved's test).
+      // The flight climbs from the HIGHEST of it between the face and the out
+      // point, or its bottom steps are buried in the sidewalk / the square's
+      // flagstones and the paving shows through them as one tall first step.
+      // (No further out: a kerb beyond the flight would set its first riser.)
+      let fromY = world.height(outX, outZ);
+      if (o.floor) for (let i = 0; i <= 4; i++) for (let k = 0; k <= 3; k++) {
+        const qx = lx + (i / 4 - 0.5) * w, qz = lz0 + (o.front ?? 0) + 0.05 + k * 0.33;
+        const y = o.floor(f.px(qx, qz), f.pz(qx, qz));
+        if (y != null && y > fromY) fromY = y;
       }
+      const rise = toY - fromY;
+      const col = o.color ?? P.PAL.stone;
+      const steps = [];
+      if (rise >= 0.16) {
+        const n = Math.min(4, Math.max(1, Math.round(rise / 0.3)));
+        for (let i = 0; i < n; i++) {
+          const top = toY - (rise * (i + 1)) / (n + 1);
+          const lz = lz0 + 0.42 + i * 0.66;
+          kit.box(f.px(lx, lz), top - 1.3, f.pz(lx, lz), w, 1.3, 1.0, col, { ry: f.ry, ao: 0 });
+          steps.push({ lz, top });
+        }
+      }
+      // THE THRESHOLD (Contract O: "the threshold must be walkable"). A doorway's
+      // gap had no floor of its own: the ground there was the bare hillside, so
+      // the visitor dropped INTO the wall crossing it (0.6 u at Purrbucks, 0.7 at
+      // the Purrliament) and climbed out onto the boards, while the plinth or the
+      // turf showed through the opening as a ledge. Now the gap is paved at floor
+      // height from the room's own floor out to the outer face (+ o.front: a
+      // shopfront's facade slab stands proud of its wall), and the walkable
+      // says so. o.wall = the wall's thickness, o.gap = the doorway's width.
+      const wT = o.wall ?? 0, gw = o.gap ?? 0, fr = o.front ?? 0, sill = wT > 0 && gw > 0;
+      if (sill) {
+        const z0 = lz0 - wT + 0.02, z1 = lz0 + fr + 0.03, base = Math.min(fromY, toY) - 0.4;
+        kit.box(f.px(lx, (z0 + z1) / 2), base, f.pz(lx, (z0 + z1) / 2), gw + 0.06, toY - base, z1 - z0, o.sillColor ?? col, { ry: f.ry, ao: 0 });
+      }
+      if (!steps.length && !sill) return null;
       const c = Math.cos(f.ry), s = Math.sin(f.ry);
       ctx.walkables.push({
         id: 'cat_stoop_' + (stoops++),
         test(x, z) {
           const dx = x - f.x, dz = z - f.z;
           const plx = dx * c - dz * s, plz = dx * s + dz * c;
+          if (sill && Math.abs(plx - lx) < gw / 2 + 0.05 && plz > lz0 - wT - 0.06 && plz < lz0 + fr + 0.04) return toY;
           if (Math.abs(plx - lx) > w / 2) return null;
           for (let i = 0; i < steps.length; i++) if (Math.abs(plz - steps[i].lz) < 0.52) return steps[i].top;
           return null;
@@ -369,14 +484,20 @@ export function create(ctx) {
      * open, the blocker is off and the leaf has swung out of the way.
      */
     door(o) {
+      if (o.inset != null) return T.hungDoor(o);
       const W = o.w ?? 1.9, H = o.h ?? 3.0, ry = o.ry || 0;
       const c = Math.cos(ry), s = Math.sin(ry);
       // hinge on the -X side of the opening (local X = (c,-s), local Z = (s,c))
       const side = o.hinge ?? -1;
       const hx = o.x + side * (W / 2) * c, hz = o.z - side * (W / 2) * s;
+      // o.style: the same joinery as a hung door (parts.js hungLeaf: moulded
+      // panels, brass on both faces, the flap), set in the old leaf's plane
       const holder = T.part((p) => {
-        doorLeaf(p, frame(0, 0, 0, 0), -side * W / 2, 0.0, W, H, o.color ?? P.PAL.wood, { flap: o.flap, ao: 0 });
-        p.sph(-side * (W - 0.3), 1.45, 0.26, 0.13, P.PAL.gold, { seg: 6, rings: 4 });
+        if (o.style) hungLeaf(p, { ...o, W: W - 0.04, H, u: -side, a: 0.02, th: 0.12, z0: 0.12 });
+        else {
+          doorLeaf(p, frame(0, 0, 0, 0), -side * W / 2, 0.0, W, H, o.color ?? P.PAL.wood, { flap: o.flap, ao: 0 });
+          p.sph(-side * (W - 0.3), 1.45, 0.26, 0.13, P.PAL.gold, { seg: 6, rings: 4 });
+        }
       }, 'door_' + o.id);
       holder.position.set(hx, o.y, hz);
       holder.rotation.y = ry;
@@ -384,8 +505,12 @@ export function create(ctx) {
       // are above it), so it is the floor plus the head of the opening.
       const blocker = { x: o.x + s * 0.12, z: o.z + c * 0.12, w: W + 0.5, d: 0.6, rot: -ry, h: o.y + H, box: true };
       ctx.colliders.push(blocker);
+      // the open leaf is solid, as a hung door's is (see leafBoxes): its rest
+      // pose's footprint in the holder's frame (hinge, yaw ry + swing)
+      const swing = o.swing ?? -1.85, leafCols = [];
+      if (o.style) leafColliders(hx, hz, ry + swing, -side, leafBoxes(0.02, W - 0.04, 0.12, 0.12), leafCols);
       const d = {
-        id: o.id, room: o.room, holder, blocker, base: ry, swing: o.swing ?? -1.85,
+        id: o.id, room: o.room, holder, blocker, leafCols, base: ry, swing,
         open: false, t: 0, w: W, h: H, x: o.x, z: o.z,
       };
       doorList.push(d);
@@ -397,6 +522,84 @@ export function create(ctx) {
         onInteract(c2, self) {
           d.open = !d.open;
           blocker.solid = !d.open;
+          for (const lc of leafCols) lc.solid = d.open;
+          self.label = d.open ? 'Close door' : 'Open door';
+          c2.systems.ui?.prompt(self.label, self);
+          ctx.events.emit('interior:door', { id: d.id, open: d.open });
+          if (o.say && d.open) c2.systems.ui?.say(o.say, { speaker: o.speaker ?? (o.room?.label || 'DOOR').toUpperCase() });
+        },
+      });
+      return d;
+    },
+    /**
+     * A HUNG door (Contract O), for every enterable doorway that has a gap in a
+     * wall behind it. The leaf fills that gap at the wall's INNER face and swings
+     * IN until it stands square to the wall beside the opening; it used to hang
+     * 0.4 u proud of the facade and swing out across the pavement like a loose
+     * board. Its pivot sits one leaf-thickness behind the jamb line, so the open
+     * leaf never narrows the opening (the gap you see is the gap you walk), and
+     * it hangs from the threshold to the head of the gap, not 10% short of it.
+     *   o.x, o.z   the doorway's centre, `o.inset` in front of the inner face
+     *   o.w        the gap's width;  o.sill / o.top  world y of threshold / head
+     *   o.hinge    -1 / +1: which jamb (local X) it hangs from; o.double: both
+     *   o.style, o.color, o.field, o.trim, o.glass, o.glassMat, o.glassFrom,
+     *   o.flap    how the leaf is made (parts.js hungLeaf)
+     */
+    hungDoor(o) {
+      const ry = o.ry || 0, c = Math.cos(ry), s = Math.sin(ry);
+      const TH = 0.1, A = TH + 0.01;
+      const Wg = o.w ?? 1.9, sill = o.sill ?? o.y;
+      const Hl = (o.top ?? (o.y + (o.h ?? 3.0))) - sill - 0.03;
+      const ix = o.x - s * o.inset, iz = o.z - c * o.inset;       // the gap's centre on the inner face
+      const leaves = o.double ? [-1, 1] : [o.hinge ?? -1];
+      const Wl = (o.double ? Wg / 2 : Wg) - 0.02;
+      // 1.75 rad: a little past square, so the brass knob on the leaf's open
+      // face stands clear of the jamb line too (at 1.62 it poked 2 cm into the
+      // opening at hand height)
+      const swing = Math.abs(o.swing ?? 1.75);
+      const hung = leaves.map((side, k) => {
+        const u = -side;                                          // hinge → latch, along local X
+        const holder = T.part((p) => hungLeaf(p, { ...o, W: Wl, H: Hl, u, a: A, th: TH }), 'door_' + o.id + (k ? '_b' : ''));
+        // pivot: on the hinge-side jamb line, A further into the wall
+        const off = side * (Wg / 2 + A - 0.01);
+        holder.position.set(ix + c * off, sill + 0.005, iz - s * off);
+        holder.rotation.y = ry;
+        return { holder, swing: u * swing };
+      });
+      // closed, the leaf's own plane is what stops you (from inside as well: the
+      // old blocker stood in the street, so from indoors you could walk up into
+      // the reveal and through the shut door)
+      const blocker = { x: ix + s * TH / 2, z: iz + c * TH / 2, w: Wg + 0.4, d: 0.3, rot: -ry, h: sill + Hl, box: true };
+      ctx.colliders.push(blocker);
+      // THE OPEN LEAF IS SOLID. Folded back into the room it is a board as tall
+      // as the doorway with no collider (the lining beside the doorway is cut
+      // wider than the gap for it): from indoors you walked straight through
+      // it. Each leaf gets its REST pose's footprint (leafBoxes, in the
+      // holder's own frame: pivot, then yaw ry + swing). Its face toward the
+      // opening sits 2 cm outside the jamb line at the hinge and leans away,
+      // so the gap stays Wg. Solid only while the door is open (the blocker
+      // has it shut).
+      const leafCols = [], lb = leafBoxes(A, Wl, TH, 0);
+      hung.forEach((hg, k) => {
+        const side = leaves[k], off = side * (Wg / 2 + A - 0.01);
+        leafColliders(ix + c * off, iz - s * off, ry + hg.swing, -side, lb, leafCols);
+      });
+      const d = {
+        id: o.id, room: o.room, holder: hung[0].holder, blocker, leafCols, base: ry, swing: hung[0].swing,
+        pair: hung[1]?.holder ?? null, swing2: hung[1]?.swing ?? 0,
+        open: false, t: 0, w: Wg, h: Hl, x: o.x, z: o.z, sill,
+      };
+      doorList.push(d);
+      if (o.room) o.room.doors.push(d);
+      // the interactable, just outside the doorway: close enough to reach from
+      // indoors too, now that a shut door stops you at the inner face
+      const px = o.x + s * 1.1, pz = o.z + c * 1.1;
+      pending.push({
+        id: 'door_' + o.id, x: px, z: pz, r: o.r ?? 3.0, label: 'Open door',
+        onInteract(c2, self) {
+          d.open = !d.open;
+          blocker.solid = !d.open;
+          for (const lc of leafCols) lc.solid = d.open;
           self.label = d.open ? 'Close door' : 'Open door';
           c2.systems.ui?.prompt(self.label, self);
           ctx.events.emit('interior:door', { id: d.id, open: d.open });
@@ -624,6 +827,7 @@ export function create(ctx) {
   function setDoor(d, open) {
     d.open = open;
     d.blocker.solid = !open;
+    if (d.leafCols) for (const lc of d.leafCols) lc.solid = open;
   }
 
   const ms = (typeof performance !== 'undefined' ? performance.now() : 0) - t0;
@@ -670,6 +874,7 @@ export function create(ctx) {
           d.t = damp(d.t, want, 7, dt);
           if (Math.abs(d.t - want) <= 0.001) d.t = want;
           d.holder.rotation.y = d.base + d.t * d.swing;
+          if (d.pair) d.pair.rotation.y = d.base + d.t * d.swing2;
         }
       }
       const dl = c.state.daylight ?? 1;

@@ -5,10 +5,12 @@
 //   and a bandstand + statue inside Catnip Commons 140,-58 (nature owns the rest)
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
-import { PAL, frame, at, windowUnit, doorUnit, block, tileRoof, flatRoof, awning, lamppost, bench, planter, crate, barrel, fence, hedge, sittingCat, loafCat, catEars, bunting, paving, ribbon, column, pool, wash, halo, cornice, balcony, humanFigure, billboard, hangingPlate } from './parts.js';
+import { PAL, frame, at, windowUnit, doorUnit, doorLeaf, block, tileRoof, flatRoof, awning, lamppost, bench, planter, crate, barrel, fence, hedge, sittingCat, loafCat, catEars, bunting, paving, ribbon, column, pool, wash, halo, cornice, balcony, humanFigure, billboard, hangingPlate } from './parts.js';
 import { drawLines, board, catFace, humanFace, FONTS } from './signs.js';
-import { ripple } from './kit.js';
+import { ripple, catRail, spiralStyle, wroughtStyle, arcPts, RAILS } from './kit.js';
 import { guestInterior, watchInterior, TOWER_STAIR } from './interiors.js';
+import { buildWatchYard } from './outskirts_yard.js';
+import { rng, hash } from '../../../core/util.js';
 
 /** A round wall built from tangential slabs, with a doorway left out of it.
  *  Returns the world-space segments so the caller can make them solid.
@@ -68,6 +70,153 @@ function bigSign(T, x, z, ry, w, h, cell, o = {}) {
 // ═════════════════════════════════════════════════════════════════════════════
 // WHISKER HEIGHTS — houses built to cat proportions
 // ═════════════════════════════════════════════════════════════════════════════
+// THE PLAN (Contract N: "too crowded with too many fences and few ways in or
+// out"). Nine big houses and the Guest House are packed round a green, and
+// the Guest House stands where the old green's west quarter was — so the green
+// moved 7 u east into the one court the houses leave open (the point with the
+// most clearance: 10.96 u to the nearest wall), and everything else is laid out
+// round LANES: a ring lane round the green and five ways out, each a centreline
+// + a width that no fence, hedge, bench, planter, lamp, scratching post or
+// mailbox may touch. Every garden element asks laneClear() before it is built
+// (the houses that face the green head-on keep their flank fences only), and
+// tools/_tmp/heights_check.mjs proves the built result: no collider in
+// ctx.colliders intersects a lane polygon, and a pushOut-legal walker gets
+// from every entry to the green and to every front door within 1.6× the
+// straight line. The ways out follow the medial line between the houses'
+// (honest) footprints, so each is its full 3 u at its narrowest pinch.
+const HG = { x: 185, z: 48.25 };
+export const HEIGHTS_PLAN = {
+  green: { x: HG.x, z: HG.z, r: 5.6 },
+  ring: { x: HG.x, z: HG.z, rIn: 5.6, rOut: 9.0 },
+  lanes: [
+    // west: the cat_main path end, between the tabby's and the grey's houses, to Purrliament Square
+    { id: 'west', to: 'Purrliament Square', width: 3.0, pts: [[178.9, 44.2], [171.1, 39.4], [171.04, 36.5], [170.5, 33.5], [169.7, 30.0], [168.6, 24.5]] },
+    // north: between the grey's and the calico's houses, round the back of the calico's and up
+    // the east side of the lilac house, to the open ground below the gym road
+    { id: 'north', to: 'the gym road', width: 3.0, pts: [[185.0, 41.8], [185.1, 37.0], [185.44, 36.0], [185.9, 33.0], [186.4, 29.3], [187.5, 27.2], [189.2, 26.42], [190.0, 26.46], [192.0, 26.98], [194.0, 27.38], [195.6, 26.6], [196.4, 24.5], [197.2, 18.5], [198.0, 11.0]] },
+    // east: the lighthouse path, between the calico's and the ginger's houses
+    { id: 'east', to: 'the Watchtower', width: 3.0, pts: [[187.8, 41.4], [194.0, 41.66], [196.0, 41.6], [198.0, 41.18], [200.0, 40.68], [202.0, 39.8], [206.5, 38.6]] },
+    // south: past the Guest House door and out between the white and the siamese houses
+    { id: 'south', to: 'Fish Harbor', width: 3.0, pts: [[179.0, 52.4], [172.6, 57.0], [170.7, 60.0], [170.3, 62.0], [169.4, 65.0], [168.6, 68.0], [167.6, 73.5]] },
+    // south-east: between the white and the tuxedo houses, down to the shore
+    { id: 'southeast', to: 'the shore', width: 3.0, pts: [[185.3, 55.6], [185.3, 59.0], [185.6, 61.0], [186.4, 64.0], [187.3, 68.0], [188.4, 73.5]] },
+  ],
+  entries: [
+    { id: 'W', lane: 'west', x: 168.6, z: 24.5 }, { id: 'N', lane: 'north', x: 198.0, z: 11.0 },
+    { id: 'E', lane: 'east', x: 206.5, z: 38.6 }, { id: 'S', lane: 'south', x: 167.6, z: 73.5 },
+    { id: 'SE', lane: 'southeast', x: 188.4, z: 73.5 },
+  ],
+  doors: [],          // filled by buildHeights: the doormat in front of every front door
+  lamps: [],          // filled by buildHeights: the ring's lamps [x, z]
+  kerb: [],           // filled by buildHeights: the kerb-side clusters [x, z, kind]
+};
+function segDist(px, pz, ax, az, bx, bz) {
+  const ex = bx - ax, ez = bz - az, l2 = ex * ex + ez * ez;
+  const t = l2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * ex + (pz - az) * ez) / l2)) : 0;
+  return Math.hypot(px - ax - ex * t, pz - az - ez * t);
+}
+/** Is a disc (x, z, r) at least m clear of the ring lane and of every way out?
+ *  (inside the green is fine: that is where the benches and lamps stand) */
+function laneClear(x, z, r, m = 0.25) {
+  const R = HEIGHTS_PLAN.ring, dr = Math.hypot(x - R.x, z - R.z);
+  if (dr + r + m > R.rIn && dr - r - m < R.rOut) return false;
+  for (const L of HEIGHTS_PLAN.lanes) {
+    const lim = L.width / 2 + r + m, p = L.pts;
+    for (let i = 0; i < p.length - 1; i++) if (segDist(x, z, p[i][0], p[i][1], p[i + 1][0], p[i + 1][1]) < lim) return false;
+  }
+  return true;
+}
+/** Nothing SOLID registered yet within r of (x, z)? (build-time placement) */
+function solidClear(T, x, z, r) {
+  for (const c of T.ctx.colliders) {
+    if (!c || c.solid === false) continue;
+    const dx = x - c.x, dz = z - c.z;
+    if (c.box) {
+      if (Math.hypot(dx, dz) > Math.hypot(c.w || 0, c.d || 0) / 2 + r) continue;
+      const cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0), lx = dx * cs + dz * sn, lz = -dx * sn + dz * cs;
+      if (Math.hypot(Math.max(Math.abs(lx) - c.w / 2, 0), Math.max(Math.abs(lz) - c.d / 2, 0)) < r) return false;
+    } else if (c.r > 0 && Math.hypot(dx, dz) < c.r + r) return false;
+  }
+  return true;
+}
+/** The same for an oriented box (kit yaw ry): discs down its long axis. */
+function boxLaneClear(x, z, w, d, ry, m = 0.25) {
+  const c = Math.cos(ry), s = Math.sin(ry);
+  const long = Math.max(w, d), short = Math.min(w, d), n = Math.max(1, Math.ceil(long / Math.max(short, 0.3)));
+  const step = long / n, r = Math.hypot(short / 2, step / 2);
+  for (let i = 0; i < n; i++) {
+    const u = -long / 2 + step * (i + 0.5), lx = w >= d ? u : 0, lz = w >= d ? 0 : u;
+    if (!laneClear(x + lx * c + lz * s, z - lx * s + lz * c, r, m)) return false;
+  }
+  return true;
+}
+
+/** A gable roof that faces the right way out. kit.js's b.roof() prism is wound
+ *  inside out (the normals of both slopes point in and down), so from outside
+ *  both slopes are back faces and get culled: every roof on the hill read as its
+ *  eaves slab plus the underside of the far slope lit from below, a "flat grey
+ *  slab with coloured ribs floating over it", and the dormer roofs were missing
+ *  altogether. Two of kit's wedges back to back (the wedge IS wound outward)
+ *  build the same prism: ridge along local Z, slopes falling to ±X, bottom at y.
+ *  It is lifted `lift` so it still wins cleanly if the prism is ever turned the
+ *  right way out, and it stays under the ribs and ridge tiles tileRoof lays on it. */
+function gableRoof(b, x, y, z, w, h, d, color, ry, lift = 0.04) {
+  const c = Math.cos(ry), s = Math.sin(ry), q = w / 4;
+  b.wedge(x + q * c, y + lift, z - q * s, w / 2, h, d, color, { ry, ao: 0 });
+  b.wedge(x - q * c, y + lift, z + q * s, w / 2, h, d, color, { ry: ry + Math.PI, ao: 0 });
+}
+
+/** The Heights' front door: a big cat door under a round fanlight, and the
+ *  small, grudging HUMANS door beside it. parts.js doorUnit's solid-door head
+ *  was a half-disc standing on its side (its thetaStart 0 is the half BESIDE the
+ *  centre once rx turns the disc into the wall plane), so on every house on the
+ *  hill a cream half-moon hung across the top of the door like a paper fin.
+ *  This one is a real round head, all of it flush on the wall (0.29 proud at the
+ *  keystone): the leaf stops at the springing, and over it a semicircular
+ *  fanlight (glass lit from inside after dark like every window here, a gilt
+ *  sunburst and hub, a ring in the house's trim) set in a cream archivolt, locked
+ *  by a keystone with ears on it. The doorway is still 2.8 × 4.2 ("the doors are
+ *  four metres tall"); the crown sits under the upper windows' sills. */
+function heightsDoor(T, f, lx, lz, o) {
+  const b = T.b, { ry } = f, W = o.w, H = o.h;
+  const X = (a, c) => f.px(a, c), Z = (a, c) => f.pz(a, c);
+  const sur = o.surround, trim = o.trim, gilt = PAL.gold;
+  const Ra = W / 2 + 0.25, Rt = Ra - 0.24, Rg = Rt - 0.14;   // archivolt · trim ring · glass
+  const ys = f.y + H - Ra + 0.25, LH = ys - f.y;              // the springing = the leaf's head
+  const arc = { ry, rx: Math.PI / 2, seg: 18, theta: Math.PI, thetaStart: Math.PI / 2, ao: 0 };
+  // the surround (jambs and the flat between them) up to the springing
+  b.box(X(lx, lz + 0.02), f.y, Z(lx, lz + 0.02), W + 0.5, LH, 0.24, sur, { ry, ao: 0.5, aoBase: f.y });
+  // the round head: archivolt (face lz + 0.16), trim ring (+0.20), glass (+0.21)
+  b.cyl(X(lx, lz - 0.1), ys, Z(lx, lz - 0.1), Ra, Ra, 0.26, sur, arc);
+  b.cyl(X(lx, lz - 0.1), ys, Z(lx, lz - 0.1), Rt, Rt, 0.3, trim, arc);
+  b.cyl(X(lx, lz - 0.1), ys, Z(lx, lz - 0.1), Rg, Rg, 0.31, PAL.glass, { ...arc, mat: 'win' });
+  for (let i = 1; i <= 5; i++) {                              // the sunburst
+    const ang = (Math.PI * i) / 6;
+    b.box(X(lx, lz + 0.215), ys, Z(lx, lz + 0.215), 0.08, Rg, 0.03, gilt, { ry, rz: ang - Math.PI / 2, ao: 0 });
+  }
+  b.cyl(X(lx, lz - 0.1), ys, Z(lx, lz - 0.1), 0.34, 0.34, 0.34, gilt, arc);                      // hub
+  b.box(X(lx, lz + 0.1), ys - 0.12, Z(lx, lz + 0.1), W + 0.14, 0.2, 0.3, trim, { ry, ao: 0 });     // transom bar (face +0.25)
+  // the keystone, proud of everything, and its ears
+  const ky = ys + Rg - 0.1, kh = Ra - Rg + 0.24;
+  b.box(X(lx, lz + 0.08), ky, Z(lx, lz + 0.08), 0.5, kh, 0.42, sur, { ry, ao: 0, shade: 1.04 });
+  b.box(X(lx, lz + 0.09), ky + kh, Z(lx, lz + 0.09), 0.66, 0.1, 0.46, sur, { ry, ao: 0, shade: 0.94 });
+  // (no ears where the window box upstairs comes down to meet them: o.ceil)
+  if (ky + kh + 0.42 < (o.ceil ?? Infinity)) catEars(b, X(lx, lz + 0.1), ky + kh + 0.08, Z(lx, lz + 0.1), 0.2, 0.3, sur, { ry, seg: 5, inner: trim });
+  // the dark reveal, the leaf with its cat flap, a handle at cat height
+  b.box(X(lx, lz + 0.12), f.y, Z(lx, lz + 0.12), W, LH, 0.1, 0x1b1410, { ry, ao: 0 });
+  doorLeaf(b, f, lx, lz, W, LH, o.color);
+  b.sph(X(lx + W * 0.32, lz + 0.3), f.y + 1.5, Z(lx + W * 0.32, lz + 0.3), 0.13, gilt, { seg: 6, rings: 4 });
+  // the human door, half a metre off the surround, with its label
+  const hx = lx + (o.humanSide ?? 1) * (W / 2 + 0.75), hy = f.y;
+  b.box(X(hx, lz + 0.02), hy, Z(hx, lz + 0.02), 1.02, 2.0, 0.2, sur, { ry, ao: 0.4, aoBase: hy });
+  b.box(X(hx, lz + 0.14), hy, Z(hx, lz + 0.14), 0.78, 1.82, 0.12, 0xb8552f, { ry, ao: 0.4, aoBase: hy });
+  b.sph(X(hx + 0.26, lz + 0.22), hy + 1.0, Z(hx + 0.26, lz + 0.22), 0.07, PAL.chrome, { seg: 6, rings: 4, mat: 'metal' });
+  if (o.humanSignCell) b.sign(o.humanSignCell, X(hx, lz + 0.24), hy + 2.16, Z(hx, lz + 0.24), 1.0, 0.3, { ry });
+  // step + doormat
+  b.box(X(lx, lz + 0.62), f.y - 0.02, Z(lx, lz + 0.62), W + 1.0, 0.16, 1.0, PAL.stone, { ry, ao: 0 });
+  b.box(X(lx, lz + 0.72), f.y + 0.14, Z(lx, lz + 0.72), W * 0.7, 0.05, 0.6, 0x6b5a3e, { ry, ao: 0 });
+}
+
 function catHouse(T, f, o) {
   const b = T.b, { ry } = f;
   const w = o.w, d = o.d, h = o.h;
@@ -78,18 +227,26 @@ function catHouse(T, f, o) {
     top: h, alongX: o.alongX !== false, pitch: o.pitch ?? 0.35, kind: o.roofKind || 'tile',
     eave: o.band ?? PAL.stoneLight, ridgeColor: o.ridge,
   });
+  {
+    // …and the slopes themselves, which kit's inside-out gable never showed
+    const along = o.alongX !== false, rw = (along ? d : w) + 1.1, rd = (along ? w : d) + 1.1;
+    gableRoof(b, f.x, f.y + h, f.z, rw, Math.tan(o.pitch ?? 0.35) * rw / 2, rd, o.roof, ry + (along ? Math.PI / 2 : 0));
+  }
   // a deep eaves fascia + a moulded band under it, so what the eye measures is
   // the WALL, not the tile
   cornice(b, f, 0, d / 2 + 0.16, f.y + h - 1.0, w + 0.6, o.band ?? PAL.stoneLight, { capColor: o.trim, d: 0.42, dentils: false });
   // enormous windows with deep sills
   const fz = d / 2;
-  doorUnit(b, f, -w * 0.24, fz + 0.02, { w: 2.8, h: 4.2, color: o.trim, surround: o.band ?? PAL.stoneLight, humanSide: 1, humanSignCell: T.humansLabel() });
+  heightsDoor(T, f, -w * 0.24, fz + 0.02, { w: 2.8, h: 4.2, color: o.trim, trim: o.trim, surround: o.band ?? PAL.stoneLight, humanSide: 1, humanSignCell: T.humansLabel(), ceil: f.y + h - 3.5 });
   windowUnit(b, f, w * 0.26, fz, 1.5, 3.0, 3.0, { trim: o.trim, cushion: true, cushionColor: o.cushion ?? PAL.cloth[0] });
   loafCat(b, f.px(w * 0.26 + 0.3, fz + 0.36), f.y + 1.68, f.pz(w * 0.26 + 0.3, fz + 0.36), 1.5, PAL.fur[Math.abs(Math.round(w * 3)) % PAL.fur.length], { ry: ry + 1.6 });
   for (let i = 0; i < 2; i++) windowUnit(b, f, (i - 0.5) * w * 0.5, fz, h - 3.3, 2.4, 2.4, { trim: o.trim, flowers: i === 0, cushion: i === 1, cushionColor: o.cushion ?? PAL.cloth[1] });
-  // side elevation gets one too
+  // side elevation gets one too. This frame's origin IS the side wall, so the
+  // window sits at lz 0: at lz d/2 − 0.5 it stood alone in the grass 4 u off the
+  // house — a window frame in the middle of the gap between two houses, in the
+  // way of the lanes. Sill at 2.4, over a visitor's head in a 3 u alley.
   const sf = frame(f.px(w / 2, 0), f.y, f.pz(w / 2, 0), ry + Math.PI / 2);
-  windowUnit(b, sf, 0, d / 2 - 0.5, 2.0, 2.6, 2.8, { trim: o.trim, cushionColor: o.cushion ?? PAL.cloth[2] });
+  windowUnit(b, sf, 0.3, 0, 2.6, 2.4, 2.6, { trim: o.trim, cushionColor: o.cushion ?? PAL.cloth[2] });
   const bf = frame(f.x, f.y, f.z, ry + Math.PI);
   windowUnit(b, bf, 0, fz, h - 3.3, 2.2, 2.2, { trim: o.trim, shutters: false });
 
@@ -174,8 +331,9 @@ function catHouse(T, f, o) {
     b.cyl(tw.x, f.y + TH2 + 1.95, tw.z, 0.24, 0.4, 0.5, band, { seg: 10, ao: 0 });
     b.sph(tw.x, f.y + TH2 + 2.75, tw.z, 0.42, PAL.gold, { seg: 8, rings: 6 });
     catEars(b, tw.x, f.y + TH2 + 2.0, tw.z, 0.8, 1.1, o.roof, { inner: PAL.gold, seg: 7, ry });
-    // the ladder
-    const la = ry + 2.4;
+    // the ladder, on the tower's far side from the house (at ry + 2.4 it stood
+    // in the slot between drum and wall and read as leaning on the roof)
+    const la = ry + (o.towerAng ?? 1.35) + 0.45;
     for (const sx of [-1, 1]) b.cyl(tw.x + Math.sin(la) * 2.72 + Math.cos(la) * sx * 0.34, f.y, tw.z + Math.cos(la) * 2.72 - Math.sin(la) * sx * 0.34, 0.07, 0.08, TH2 - 1.6, 0x8d5a34, { seg: 5, ao: 0 });
     for (let i = 0; i < 9; i++) b.box(tw.x + Math.sin(la) * 2.72, f.y + 0.7 + i * 0.75, tw.z + Math.cos(la) * 2.72, 0.72, 0.09, 0.09, 0x8d5a34, { ry: la, ao: 0 });
     T.col(tw.x, tw.z, 2.9);
@@ -193,7 +351,11 @@ function catHouse(T, f, o) {
     const surf = f.y + h + rH * (1 - lz / halfSlope);
     const dw = 1.9, dd = 1.7, dh = 1.75;
     b.box(f.px(lx, lz), f.y + h + 0.1, f.pz(lx, lz), dw, dh + (surf - f.y - h), dd, o.wall, { ry, ao: 0 });
-    b.roof(f.px(lx, lz - 0.05), f.y + h + 0.1 + dh + (surf - f.y - h), f.pz(lx, lz - 0.05), dw + 0.7, 0.72, dd + 0.75, o.roof, { ry, ao: 0 });
+    // (its own gable: b.roof here was the inside-out prism, i.e. no roof at all)
+    const dY = f.y + h + 0.1 + dh + (surf - f.y - h);
+    gableRoof(b, f.px(lx, lz - 0.05), dY, f.pz(lx, lz - 0.05), dw + 0.7, 0.72, dd + 0.75, o.roof, ry, 0);
+    // and every dormer on the hill has ears, at the front of its ridge
+    catEars(b, f.px(lx, lz + dd / 2 + 0.05), dY + 0.4, f.pz(lx, lz + dd / 2 + 0.05), 0.36, 0.66, o.roof, { ry, seg: 6, inner: o.band ?? PAL.stoneLight, splay: 0.2 });
     b.box(f.px(lx, lz + dd / 2 + 0.04), surf + dh - 0.1, f.pz(lx, lz + dd / 2 + 0.04), dw + 0.5, 0.2, 0.44, o.band ?? PAL.stoneLight, { ry, ao: 0 });
     // its window, its sill, and — of course — a cat on the sill
     b.box(f.px(lx, lz + dd / 2 + 0.02), surf + 0.35, f.pz(lx, lz + dd / 2 + 0.02), 1.42, 1.18, 0.14, o.trim, { ry, ao: 0 });
@@ -221,29 +383,118 @@ function catHouse(T, f, o) {
   b.sph(sr.x, srY + 2.5, sr.z, 0.22, PAL.gold, { seg: 7, rings: 5 });
   wash(b, sr.x, srY + 0.8, sr.z + 1.2, 3.0, 2.2, ry);
 
-  // ── exterior scratching pillars ───────────────────────────────────────────
-  for (const s of [-1, 1]) {
-    const p = at(f, s * 0.62, Math.hypot(w, d) * 0.44);
+  // ── exterior scratching posts ─────────────────────────────────────────────
+  // Against the wall at a corner (o.posts: [sx, sz] = local (sx·(w/2−0.62),
+  // sz·(d/2+0.62)), front corners by default), not 0.3 out in front of the
+  // window where they used to stand; solid now, and never in a lane.
+  const taken = [];                                          // world discs [x, z, r] the garden may not overlap
+  const free = (x, z, r) => taken.every(([tx, tz, tr]) => Math.hypot(x - tx, z - tz) >= r + tr + 0.06);
+  for (const [sx, sz] of (o.posts ?? [[-1, 1], [1, 1]])) {
+    const lx = sx * (w / 2 - 0.62), lz = sz * (fz + 0.62);
+    const p = { x: f.px(lx, lz), z: f.pz(lx, lz) };
+    if (!laneClear(p.x, p.z, 0.62)) continue;
+    taken.push([p.x, p.z, 0.62]);
     b.cyl(p.x, f.y, p.z, 0.55, 0.62, 5.2, 0xd9b483, { seg: 10, ao: 0.5, aoBase: f.y });
     for (let i = 0; i < 4; i++) b.torus(p.x, f.y + 0.7 + i * 1.15, p.z, 0.62, 0.13, i % 2 ? 0xc9a271 : 0xe4c69a, { rx: -Math.PI / 2, seg: 8, tseg: 3 });
     b.cyl(p.x, f.y + 5.2, p.z, 0.95, 0.95, 0.3, o.trim, { seg: 10, ao: 0 });
+    T.col(p.x, p.z, 0.62);
   }
 
-  // ── garden ────────────────────────────────────────────────────────────────
-  // (o.garden pulls the fence in where a neighbour — the guest house — has been
-  //  built inside what used to be open ground)
-  const g = (o.garden ?? 1) * (Math.max(w, d) * 0.75 + 3.2);
-  const pts = [];
-  for (let i = 0; i <= 10; i++) { const a = -1.05 + i * 0.21; pts.push([f.px(Math.sin(a) * g, Math.cos(a) * g), f.pz(Math.sin(a) * g, Math.cos(a) * g)]); }
-  fence(T.b, pts, f.y, { h: 1.15, color: o.fence ?? 0xf6ead0, ground: (x, z) => T.ground(x, z) });
-  hedge(b, f.px(-g * 0.55, g * 0.5), f.y, f.pz(-g * 0.55, g * 0.5), 4.0, 1.6, 1.4, { ry });
-  planter(b, f.px(w * 0.42, fz + 1.8), f.y, f.pz(w * 0.42, fz + 1.8), 0.95, { seed: Math.round(w), pot: Math.round(w) % 3, plant: (o.tower ?? 0) % 3 });
-  // fish-shaped mailbox
-  const mb = at(f, 0.32, g * 0.92);
-  b.cyl(mb.x, T.ground(mb.x, mb.z), mb.z, 0.12, 0.14, 1.5, PAL.wood, { seg: 6, ao: 0.4, aoBase: f.y });
-  b.sph(mb.x, T.ground(mb.x, mb.z) + 1.8, mb.z, 0.55, o.trim, { seg: 9, rings: 6, sx: 1.5, sy: 0.75, ry: ry + 1.2 });
-  b.cone(mb.x - Math.sin(ry + 1.2) * 0.8, T.ground(mb.x, mb.z) + 1.8, mb.z - Math.cos(ry + 1.2) * 0.8, 0.4, 0.55, o.trim, { seg: 4, rz: Math.PI / 2, ry: ry + 1.2, ao: 0 });
-  T.colBox(f.x, f.z, w + 1.0, d + 1.0, ry);
+  // ── garden (Contract N) ───────────────────────────────────────────────────
+  // A front garden, not a paddock. The old one was an arc of radius
+  // 0.75·max(w,d)+3.2 (≈ 10.5 u) round the house centre: 6 u deep, and the
+  // nine of them overlapped into corridors and dead ends. Now: a picket bow
+  // from front corner to front corner reaching ≤ 0.6 of that radius (≈ 2 u in
+  // front of the wall), a GATE in front of the door, and nothing in a lane —
+  // any stretch of fence, the hedge, the planter or the mailbox that would
+  // stand in the ring lane or a way out is simply not built there, so a house
+  // that faces the green head-on keeps its flank fences only. o.garden 0: no
+  // fence (the two houses whose front gardens the Guest House was built in);
+  // o.open ±1 leaves that flank unfenced, open to the way out beside it.
+  const reach = Math.min(o.garden ?? 0.6, 0.6) * (Math.max(w, d) * 0.75 + 3.2);
+  const D = Math.min(2.2, reach - fz), WG = w / 2 + 0.25;  // bow depth · half-width (0.1 outside the plinth)
+  const dlx = -w * 0.24, GATE = 1.25;                       // the front door (doorUnit above) · half the gate
+  const fenceCol = o.fence ?? 0xf6ead0, gnd = (x, z) => T.ground(x, z);
+  const P = (lx, lz) => [f.px(lx, lz), f.pz(lx, lz)];
+  const bow = (a) => P(Math.sin(a) * WG, fz + Math.cos(a) * D);
+  let gateL = null, gateR = null;
+  const aL = Math.asin((dlx - GATE) / WG), aR = Math.asin((dlx + GATE) / WG);
+  if (D >= 1.2) {
+    for (const [a0, a1, side] of [[-Math.PI / 2, aL, -1], [aR, Math.PI / 2, 1]]) {
+      if (o.open === side) continue;                        // this flank stays open to the lane beside it
+      const n = Math.max(1, Math.round(Math.abs(a1 - a0) * (WG + D) / 2 / 1.1));
+      const runs = [];
+      let run = [];
+      for (let i = 0; i <= n; i++) {
+        const p = bow(a0 + (a1 - a0) * i / n);
+        if (run.length) {
+          const q = run[run.length - 1], len = Math.hypot(p[0] - q[0], p[1] - q[1]), mx = (p[0] + q[0]) / 2, mz = (p[1] + q[1]) / 2;
+          if (!boxLaneClear(mx, mz, 0.3, len, Math.atan2(p[0] - q[0], p[1] - q[1])) || !free(mx, mz, 0.15) || !free(p[0], p[1], 0.15)) { runs.push(run); run = []; }
+        }
+        if (!run.length && (!laneClear(p[0], p[1], 0.15) || !free(p[0], p[1], 0.15))) continue;
+        run.push(p);
+      }
+      runs.push(run);
+      for (const r of runs) {
+        let len = 0; for (let i = 1; i < r.length; i++) len += Math.hypot(r[i][0] - r[i - 1][0], r[i][1] - r[i - 1][1]);
+        if (len < 1.5) continue;
+        fence(T.b, r, f.y, { h: 1.15, color: fenceCol, ground: gnd });
+        // the run that still reaches the gate gets its gate post
+        const gp = bow(side < 0 ? a1 : a0), end = side < 0 ? r[r.length - 1] : r[0];
+        if (Math.hypot(end[0] - gp[0], end[1] - gp[1]) < 0.01) { if (side < 0) gateL = gp; else gateR = gp; }
+      }
+    }
+  }
+  // gate posts (square, capped, a size up from the pickets) and the gate
+  // itself, standing open inside the garden: every garden says come in
+  for (const gp of [gateL, gateR]) {
+    if (!gp) continue;
+    const gy = T.ground(gp[0], gp[1]);
+    b.box(gp[0], gy, gp[1], 0.26, 1.5, 0.26, fenceCol, { ry, ao: 0.4, aoBase: gy });
+    b.sph(gp[0], gy + 1.62, gp[1], 0.17, o.trim, { seg: 7, rings: 5 });
+    T.wall(gp[0], gp[1], 0.34, 0.34, ry);
+  }
+  if (gateR) {
+    // hinged on the right post, swung 75° in: three pickets + two rails
+    const gy = T.ground(gateR[0], gateR[1]), ga = ry + Math.PI - 1.3;   // −x_house turned 75° toward the house
+    const gf = frame(gateR[0], gy, gateR[1], ga);
+    for (let i = 0; i < 3; i++) b.box(gf.px(0.3 + i * 0.36, -0.1), gy + 0.05, gf.pz(0.3 + i * 0.36, -0.1), 0.1, 1.05, 0.08, fenceCol, { ry: ga, ao: 0 });
+    for (const yy of [0.32, 0.8]) b.box(gf.px(0.66, -0.1), gy + yy, gf.pz(0.66, -0.1), 1.0, 0.09, 0.07, fenceCol, { ry: ga, ao: 0 });
+  }
+  // a clipped box hedge under the big window (lower than its sill), the
+  // fish-shaped mailbox inside the gate, a planter outside it
+  {
+    const hx = w * 0.26, hz = fz + 0.95, [x, z] = P(hx, hz), ends = [P(hx - 1.0, hz), P(hx + 1.0, hz)];
+    if (boxLaneClear(x, z, 2.6, 0.7, ry) && free(x, z, 0.4) && ends.every(([ex, ez]) => free(ex, ez, 0.4))) {
+      // SOLID, not a 1.15 u step: as a low prop the visitor auto-hopped onto it
+      // wherever a route brushed the garden, and was held there (N→tabby)
+      hedge(b, x, f.y, z, 2.6, 0.7, 0.8, { ry, collide: false });
+      T.wall(x, z, 2.6, 0.7, ry);
+      taken.push([x, z, 0.4], ...ends.map(([ex, ez]) => [ex, ez, 0.4]));
+    }
+  }
+  {
+    const [mx, mz] = gateL ? P(dlx - GATE - 0.3, fz + Math.cos(aL) * D - 0.45) : P(dlx - 2.35, fz + 1.0);
+    if (laneClear(mx, mz, 0.4) && free(mx, mz, 0.3)) {
+      const my = T.ground(mx, mz);
+      b.cyl(mx, my, mz, 0.12, 0.14, 1.5, PAL.wood, { seg: 6, ao: 0.4, aoBase: my });
+      b.sph(mx, my + 1.8, mz, 0.55, o.trim, { seg: 9, rings: 6, sx: 1.5, sy: 0.75, ry: ry + 1.2 });
+      b.cone(mx - Math.sin(ry + 1.2) * 0.8, my + 1.8, mz - Math.cos(ry + 1.2) * 0.8, 0.4, 0.55, o.trim, { seg: 4, rz: Math.PI / 2, ry: ry + 1.2, ao: 0 });
+      T.col(mx, mz, 0.3);
+      taken.push([mx, mz, 0.3]);
+    }
+  }
+  if (gateR) {
+    const [px, pz] = P(dlx + GATE + 0.8, fz + Math.cos(aR) * D + 0.95);
+    if (boxLaneClear(px, pz, 1.33, 1.33, 0) && free(px, pz, 0.7)) planter(b, px, f.y, pz, 0.7, { seed: Math.round(w), pot: Math.round(w) % 3, plant: (o.tower ?? 0) % 3 });
+  }
+  // THE FOOTPRINT, honest to the plinth (0.15 proud of the wall): it used to be
+  // padded 0.5 all round, which made every gap between two houses a metre
+  // narrower than it looks. The strip in front covers the door surround, the
+  // little HUMANS door and the sill line (not the corners, where the alleys are).
+  T.colBox(f.x, f.z, w + 0.3, d + 0.3, ry);
+  T.wall(f.px(0, fz + 0.175), f.pz(0, fz + 0.175), w - 0.7, 0.35, ry);
+  HEIGHTS_PLAN.doors.push({ id: o.id ?? ('house' + HEIGHTS_PLAN.doors.length), x: +f.px(dlx, fz + 0.95).toFixed(2), z: +f.pz(dlx, fz + 0.95).toFixed(2) });
 }
 
 // ── THE GUEST HOUSE ──────────────────────────────────────────────────────────
@@ -254,19 +505,27 @@ function catHouse(T, f, o) {
 function buildGuestHouse(T) {
   const GX = 167.6, GZ = 51.0, GRY = Math.PI / 4;              // door faces SE, like the nook
   const GY = T.ground(GX, GZ);
-  const GW = 9.4, GD = 9.0, GH = 6.4, GT = 0.5, GCEIL = 5.9, gDX = -1.7;
+  // gDX -2.3 (was -1.7): the doorway is 2.2 wide now, and moving it left leaves
+  // half a metre of wall between its casing and the little HUMANS door
+  const GW = 9.4, GD = 9.0, GH = 6.4, GT = 0.5, GCEIL = 5.9, gDX = -2.3, GGAP = 2.2, GGH = 3.2;
   const sb = T.shell('guest');
   const f = frame(GX, GY, GZ, GRY);
   const GFY = T.padY(GX, GZ, GW - GT * 2, GD - GT * 2, GRY) + 0.16;
   const segs = block(sb, f, GW, GH, GD, 0xf6ead0, {
     quoins: true, plinthColor: PAL.stone, bandColor: 0xfdf6e4, sink: 1.0,
-    hollow: { t: GT, gaps: [{ face: 0, lx: gDX, w: 2.2, h: 3.2 }], ceil: GCEIL, ceilColor: 0xe8dcc0, floorColor: 0xa8875c, floorInto: T.b, floorTop: GFY },
+    hollow: { t: GT, gaps: [{ face: 0, lx: gDX, w: GGAP, h: GGH }], ceil: GCEIL, ceilColor: 0xe8dcc0, floorColor: 0xa8875c, floorInto: T.b, floorTop: GFY },
   });
   tileRoof(sb, f, GW, 0, GD, 0xcf5a3c, { top: GH, alongX: true, pitch: 0.35, kind: 'tile', ridge: 0x9c3d26, eave: 0xfdf6e4 });
-  doorUnit(sb, f, gDX, GD / 2 + 0.02, { w: 2.0, h: 3.1, color: 0x2a8f8a, surround: 0xfdf6e4, humanSide: 1, humanSignCell: T.humansLabel(), leaf: false, recess: false });
+  gableRoof(sb, f.x, f.y + GH, f.z, GD + 1.1, Math.tan(0.35) * (GD + 1.1) / 2, GW + 1.1, 0xcf5a3c, GRY + Math.PI / 2);   // the slopes (see gableRoof)
+  // a teal casing and lintel, a fanlight in a cream stone archivolt, and the
+  // little HUMANS door beside it, short of the window's shutter
+  doorUnit(sb, f, gDX, GD / 2 + 0.02, { w: 2.0, h: 3.1, color: 0x2a8f8a, surround: 0xfdf6e4, casing: 0x2a8f8a, band: 0.22, humanSide: 1, humanSignCell: T.humansLabel(), leaf: false, recess: false, clear: GGAP, clearH: GGH, sill: GFY, humanGap: 0.3 });
   windowUnit(sb, f, 2.6, GD / 2, 1.7, 2.4, 2.4, { trim: 0x2a8f8a, cushion: true, cushionColor: 0x7fbfb2, flowers: true });
+  // on the side wall: this frame's origin IS that wall (at lz GD/2 − 0.5 the
+  // window stood by itself in the grass 4 u out, beside the west lane); sill
+  // at 2.3, over a visitor's head, as on the houses
   const sfr = frame(f.px(GW / 2, 0), f.y, f.pz(GW / 2, 0), GRY + Math.PI / 2);
-  windowUnit(sb, sfr, 0, GD / 2 - 0.5, 1.9, 2.2, 2.2, { trim: 0x2a8f8a, cushionColor: 0xf2c14e });
+  windowUnit(sb, sfr, 0, 0, 2.5, 2.2, 2.2, { trim: 0x2a8f8a, cushionColor: 0xf2c14e });
   const bfr = frame(f.x, f.y, f.z, GRY + Math.PI);
   windowUnit(sb, bfr, -1.2, GD / 2, 3.0, 1.8, 1.8, { trim: 0x2a8f8a, shutters: false, cushion: false });
   // chimney + a lantern over the door
@@ -297,14 +556,17 @@ function buildGuestHouse(T) {
   // stays at 168.2,52.1) — which also left the garden path free for the nature
   // system to plant a twelve-metre cypress squarely across the doorway.
   for (let i = 1; i <= 3; i++) T.claim(f.px(gDX, GD / 2 + i * 3.2), f.pz(gDX, GD / 2 + i * 3.2), 4.4, 4.4, GRY);
-  T.stoop(f, gDX, GD / 2, 3.0, GFY);
+  // terracotta treads to go with the roof, a cream stone sill to go with the band
+  T.stoop(f, gDX, GD / 2, 3.0, GFY, { wall: GT, gap: GGAP, color: 0xc0714c, sillColor: 0xe8dcc0 });
   const room = T.room({ id: 'guest', x: GX, z: GZ, w: GW - GT * 2, d: GD - GT * 2, rot: GRY, y: GY, floorY: GFY, h: GCEIL, label: 'The Guest House' });
+  // hung on the RIGHT: the room's side wall is 0.8 u left of the doorway, and
+  // a 2.2 leaf folded back there buried its latch edge and knob in the dado
   T.door({
-    id: 'guest', room, y: GY, ry: GRY, w: 2.15, h: 3.1, color: 0x2a8f8a,
-    x: f.px(gDX, GD / 2 + 0.4), z: f.pz(gDX, GD / 2 + 0.4),
+    id: 'guest', room, y: GY, ry: GRY, w: GGAP, color: 0x2a8f8a, field: 0x33a39c, flap: 0xfdf6e4,
+    x: f.px(gDX, GD / 2 + 0.4), z: f.pz(gDX, GD / 2 + 0.4), inset: 0.4 + GT, sill: GFY, top: GY + GGH, hinge: 1,
     say: 'unlocked. of course it is unlocked. it is your room.', speaker: 'THE GUEST HOUSE',
   });
-  T.roomDetail('guest', () => guestInterior(T, frame(GX, GFY, GZ, GRY), { hw: (GW - GT * 2) / 2, hd: (GD - GT * 2) / 2, doorX: gDX }));
+  T.roomDetail('guest', () => guestInterior(T, frame(GX, GFY, GZ, GRY), { hw: (GW - GT * 2) / 2, hd: (GD - GT * 2) / 2, doorX: gDX, doorW: GGAP }));
   T.act('guesthouse', f.px(gDX + 0.6, GD / 2 + 4.6), f.pz(gDX + 0.6, GD / 2 + 4.6), 'The Guest House', [
     'THE GUEST HOUSE. your room is ready. it always was.',
     'the mailbox is a fish, and it says YOU on it, and there is already post in it.',
@@ -314,47 +576,395 @@ function buildGuestHouse(T) {
 
 export function buildHeights(T) {
   const b = T.b;
-  const CX = 178, CZ = 48;
+  const CX = HG.x, CZ = HG.z;
+  HEIGHTS_PLAN.doors.length = 0; HEIGHTS_PLAN.lamps.length = 0; HEIGHTS_PLAN.kerb.length = 0;
   // Nine houses, three tower patterns, four roof materials. The `tower` field is
-  // what stops the hill reading as one house stamped nine times.
+  // what stops the hill reading as one house stamped nine times. (x, z, ry, w,
+  // d, h are copied into cat/citizens/sills.js for the sill cats: they stay.)
+  // towerAng moves a tower that used to stand IN an alley (the tabby's in the
+  // path to Purrliament, the grey's and the lilac's in the way north, the
+  // tuxedo's and the white's between the southern houses) round to a side the
+  // lanes do not use — and the ginger's 19 m cat tree round to its back, out of
+  // the line from the ring to the game camera (which looks in from the
+  // south-east: it stood right in that line, and the camera dithered it into a
+  // magenta screen-door over the ring); posts are the scratching posts (see catHouse); garden 0 =
+  // the two houses the Guest House was built in front of keep no fence.
   const homes = [
-    { x: 163, z: 34, ry: 0.35, w: 10.0, d: 9.0, h: 9.0, wall: 0xf0dcae, roof: 0xc4482f, roofKind: 'tile', ridge: 0x94331f, trim: 0x2a8f8a, tower: 0, tiers: 3 },
-    { x: 178, z: 31, ry: 0.05, w: 11.0, d: 9.5, h: 10.0, wall: 0xe8b491, roof: 0x66737f, roofKind: 'slate', ridge: 0x47525c, trim: 0x1d3557, tower: 1, quoins: true, towerH: 11.5 },
-    { x: 193, z: 34, ry: -0.32, w: 9.6, d: 9.0, h: 8.6, wall: 0xdcc9a0, roof: 0xd8993f, roofKind: 'tile', ridge: 0xa8722a, trim: 0x4f8a5b, tower: 2 , dormers: [0] },
-    { x: 201, z: 48, ry: -1.45, w: 10.4, d: 9.2, h: 9.4, wall: 0xf2d9a0, roof: 0x4f9d8c, roofKind: 'copper', ridge: 0x357a6c, trim: 0xb03a63, tower: 0, tiers: 4, quoins: true },
-    { x: 194, z: 62, ry: -2.7, w: 9.8, d: 9.0, h: 8.8, wall: 0xd9694a, roof: 0x5d6b78, roofKind: 'slate', ridge: 0x434e58, trim: 0xf2c14e, tower: 1, towerH: 9.4 , dormers: [0] },
-    // garden pulled in: at full size this one's fence swept straight across the
-    // guest house's front door at (169.9, 55.7) and you could not get in
-    { x: 178, z: 66, ry: Math.PI, w: 11.0, d: 9.4, h: 9.6, wall: 0xf6ead0, roof: 0xb8503a, roofKind: 'tile', ridge: 0x8a3a28, trim: 0x2a8f8a, tower: 2, towerH: 9.2, garden: 0.5 },
-    { x: 162, z: 62, ry: 2.6, w: 9.6, d: 9.0, h: 8.8, wall: 0xc6dee6, roof: 0x4f9d8c, roofKind: 'copper', ridge: 0x357a6c, trim: 0x1d3557, tower: 0, tiers: 3, garden: 0.55 , dormers: [0] },
-    { x: 154, z: 48, ry: 1.5, w: 10.2, d: 9.2, h: 9.2, wall: 0xf0c2d2, roof: 0xe0a848, roofKind: 'tile', ridge: 0xa8742c, trim: 0xb03a63, tower: 1, towerH: 10.2, quoins: true, garden: 0.55 , dormers: [0] },
-    { x: 190, z: 20, ry: -0.2, w: 9.4, d: 8.8, h: 8.4, wall: 0xdcc4e4, roof: 0x707d88, roofKind: 'slate', ridge: 0x4f5a64, trim: 0x6a4a8a, tower: 2, towerH: 7.6 , dormers: [0] },
+    { id: 'tabby', x: 163, z: 34, ry: 0.35, w: 10.0, d: 9.0, h: 9.0, wall: 0xf0dcae, roof: 0xc4482f, roofKind: 'tile', ridge: 0x94331f, trim: 0x2a8f8a, tower: 0, tiers: 3, towerAng: -1.75, posts: [[-1, -1]], open: 1 },
+    { id: 'grey', x: 178, z: 31, ry: 0.05, w: 11.0, d: 9.5, h: 10.0, wall: 0xe8b491, roof: 0x66737f, roofKind: 'slate', ridge: 0x47525c, trim: 0x1d3557, tower: 1, quoins: true, towerH: 11.5, towerAng: -2.4, posts: [[-1, 1]] },
+    { id: 'calico', x: 193, z: 34, ry: -0.32, w: 9.6, d: 9.0, h: 8.6, wall: 0xdcc9a0, roof: 0xd8993f, roofKind: 'tile', ridge: 0xa8722a, trim: 0x4f8a5b, tower: 2, dormers: [0], posts: [] },
+    { id: 'ginger', x: 201, z: 48, ry: -1.45, w: 10.4, d: 9.2, h: 9.4, wall: 0xf2d9a0, roof: 0x4f9d8c, roofKind: 'copper', ridge: 0x357a6c, trim: 0xb03a63, tower: 0, tiers: 4, quoins: true, towerAng: Math.PI, posts: [[-1, 1]] },
+    { id: 'tuxedo', x: 194, z: 62, ry: -2.7, w: 9.8, d: 9.0, h: 8.8, wall: 0xd9694a, roof: 0x5d6b78, roofKind: 'slate', ridge: 0x434e58, trim: 0xf2c14e, tower: 1, towerH: 9.4, dormers: [0], towerAng: Math.PI, posts: [[-1, 1], [1, -1]] },
+    { id: 'white', x: 178, z: 66, ry: Math.PI, w: 11.0, d: 9.4, h: 9.6, wall: 0xf6ead0, roof: 0xb8503a, roofKind: 'tile', ridge: 0x8a3a28, trim: 0x2a8f8a, tower: 2, towerH: 9.2, towerAng: Math.PI, posts: [[-1, 1]] },
+    { id: 'siamese', x: 162, z: 62, ry: 2.6, w: 9.6, d: 9.0, h: 8.8, wall: 0xc6dee6, roof: 0x4f9d8c, roofKind: 'copper', ridge: 0x357a6c, trim: 0x1d3557, tower: 0, tiers: 3, dormers: [0], garden: 0, posts: [[1, 1]] },
+    { id: 'black', x: 154, z: 48, ry: 1.5, w: 10.2, d: 9.2, h: 9.2, wall: 0xf0c2d2, roof: 0xe0a848, roofKind: 'tile', ridge: 0xa8742c, trim: 0xb03a63, tower: 1, towerH: 10.2, quoins: true, dormers: [0], garden: 0, posts: [[-1, 1], [1, 1]] },
+    { id: 'lilac', x: 190, z: 20, ry: -0.2, w: 9.4, d: 8.8, h: 8.4, wall: 0xdcc4e4, roof: 0x707d88, roofKind: 'slate', ridge: 0x4f5a64, trim: 0x6a4a8a, tower: 2, towerH: 7.6, dormers: [0], towerAng: Math.PI, garden: 0, posts: [[-1, -1]] },
   ];
   for (const o of homes) catHouse(T, frame(o.x, T.ground(o.x, o.z), o.z, o.ry), o);
   buildGuestHouse(T);
 
-  // ── the village green, with a cat-shaped hedge ────────────────────────────
-  paving(b, CX, T.ground(CX, CZ) + 0.1, CZ, 9.5, { seg: 22, rings: 1, color: 0xc2b092, border: 0x93836a, depth: 2.0 });
-  const gy = T.ground(CX, CZ) + 0.12;
+  // ── the village green + the ring lane round it ────────────────────────────
+  // A mown lawn with a stone kerb inside a cobbled ring: from the hill road
+  // the district now reads as a wheel — a green hub, a pale rim, five spokes.
+  // Both discs are laid flat at the highest ground under them and are GROUND
+  // (T.paved), so nobody wades through them any more.
+  const R = HEIGHTS_PLAN.ring;
+  let gy0 = -Infinity;
+  for (let k = 0; k <= 3; k++) for (let i = 0; i < 24; i++) {
+    const a = i / 24 * Math.PI * 2, rr = (R.rOut + 0.3) * k / 3;
+    gy0 = Math.max(gy0, T.ground(CX + Math.cos(a) * rr, CZ + Math.sin(a) * rr));
+  }
+  const ringDisc = paving(b, CX, gy0 + 0.02, CZ, R.rOut + 0.3, { seg: 44, rings: 0, color: 0xc6b596, border: 0x93836a, depth: 1.8 });
+  const lawnDisc = paving(b, CX, gy0 + 0.06, CZ, R.rIn, { seg: 36, rings: 0, color: 0x74a84a, border: 0xd9ccb0, depth: 0.5 });
+  // mown stripes, because somebody here owns a very small lawnmower
+  for (let i = -3; i <= 3; i++) {
+    const half = Math.sqrt(Math.max(0, (R.rIn - 0.45) ** 2 - (i * 1.4) ** 2));
+    if (i % 2 && half > 0.5) b.hquad(CX + i * 1.4, gy0 + 0.18, CZ, 0.7, half * 2, 0x82b654);
+  }
+  // a darker course of setts down the middle of the ring: it reads as a road
+  b.torus(CX, gy0 + 0.1, CZ, (R.rIn + R.rOut) / 2, 0.1, 0x9c8a6e, { rx: -Math.PI / 2, seg: 48, tseg: 4, ao: 0 });
+  T.paved('heights_green', [], [ringDisc, lawnDisc]);
+  const gy = gy0 + 0.16;
   // topiary cat, 6.5 tall
+  const TRY = 0.55, TH = 6.4, tf = frame(CX, gy + 1.2, CZ, TRY);
   hedge(b, CX, gy, CZ, 5.6, 3.0, 1.2, { ry: 0.4, color: 0x3a7030, color2: 0x4a8a3c });
-  sittingCat(b, CX, gy + 1.2, CZ, 6.4, 0x3f7a35, { ry: 0.55, flat: true, seg: 10, rings: 7, inner: 0x4f8f40, nose: 0x4f8f40, muzzle: 0x3f7a35, eye: 0xf2c14e, eyeMat: 'glow', tailSide: -1 });
+  sittingCat(b, CX, gy + 1.2, CZ, TH, 0x3f7a35, { ry: TRY, flat: true, seg: 10, rings: 7, inner: 0x4f8f40, nose: 0x4f8f40, muzzle: 0x3f7a35, eyes: false, tailSide: -1 });
+  // Her eyes. sittingCat's proportional eye (0.035·H, 0.165·H forward) is
+  // buried INSIDE a head this size, so after dark Mrs. Bramble was one unlit
+  // black blob in the middle of the green. Amber glass set proud of the clipped
+  // face, each with a slit of dark privet across it: dull amber by day, and at
+  // night the brightest thing on the green, looking at whoever is on the ring.
+  for (const sx of [-1, 1]) {
+    const ey = gy + 1.2 + 0.875 * TH;
+    b.sph(tf.px(sx * 0.5, 1.3), ey, tf.pz(sx * 0.5, 1.3), 0.32, 0xf2c14e, { seg: 8, rings: 6, sz: 0.5, ry: TRY, mat: 'glow' });
+    b.box(tf.px(sx * 0.5, 1.47), ey - 0.22, tf.pz(sx * 0.5, 1.47), 0.09, 0.44, 0.04, 0x1f3a1a, { ry: TRY, ao: 0 });
+  }
+  // …and two lamps sunk in the lawn at her feet, washing light up her front
+  for (const sx of [-1, 1]) {
+    const ux = tf.px(sx * 1.0, 2.55), uz = tf.pz(sx * 1.0, 2.55);
+    b.cyl(ux, gy - 0.02, uz, 0.2, 0.24, 0.16, PAL.stoneDark, { seg: 8, ao: 0 });
+    b.cyl(ux, gy + 0.12, uz, 0.15, 0.15, 0.06, PAL.amberPale, { seg: 8, mat: 'glow', ao: 0 });
+  }
+  wash(b, tf.px(0, 2.05), gy + 1.2 + 0.26 * TH, tf.pz(0, 2.05), 5.0, 6.4, TRY);    // rising up her front
+  pool(b, tf.px(0, 2.3), gy + 0.2, tf.pz(0, 2.3), 2.6);
   const topiaryPlaque = T.plaque(2.2, 0.7, [{ t: 'MRS. BRAMBLE', s: 0.4, c: '#f2f8ec' }, { t: 'trimmed weekly, fondly', s: 0.22, c: '#c8e4c0', weight: 'italic bold' }], { bg: '#2f5a2a', border: '#f2c14e', borderW: 0.06, dpu: 140 });
-  b.box(CX + 1.2, gy, CZ + 5.0, 0.2, 1.0, 0.2, PAL.wood, { ao: 0 });
-  b.sign(topiaryPlaque, CX + 1.2, gy + 1.3, CZ + 5.1, 2.2, 0.7, { rx: -0.35 });
-  for (let i = 0; i < 4; i++) { const a = i / 4 * Math.PI * 2 + 0.7; bench(b, CX + Math.cos(a) * 7.6, gy, CZ + Math.sin(a) * 7.6, -a + Math.PI / 2, { len: 2.6 }); }
-  // phase -0.35, not +0.2: at +0.2 one of the three posts stood in the guest
-  // house doorway (which nobody could see until the guest house had a doorway).
-  // Irregular angles and radii, and the two patterns mixed.
-  const greenLamps = [[-0.35, 10.6, 'lantern', 5.4], [1.55, 11.8, 'globe', 4.8], [3.05, 10.1, 'lantern', 5.0], [4.62, 12.2, 'globe', 5.2]];
-  for (const [a, rr, st, hh] of greenLamps) lamppost(b, CX + Math.cos(a) * rr, gy, CZ + Math.sin(a) * rr, { style: st, h: hh, arms: 2, ry: -a });
+  b.box(CX + 1.0, gy, CZ + 4.3, 0.2, 1.0, 0.2, PAL.wood, { ao: 0 });
+  b.sign(topiaryPlaque, CX + 1.0, gy + 1.3, CZ + 4.4, 2.2, 0.7, { rx: -0.35 });
+  // four benches on the lawn with their backs to Mrs. Bramble, looking out at
+  // the houses, all INSIDE the kerb. (Four lamps used to stand between them,
+  // two of them double-headed: at night that was a thicket of lamp heads
+  // round the topiary. The lamps are on the ring's outer kerb now.)
+  for (let i = 0; i < 4; i++) {
+    const a = i / 4 * Math.PI * 2 + 0.7;
+    bench(b, CX + Math.cos(a) * 4.35, gy, CZ + Math.sin(a) * 4.35, -a + Math.PI / 2, { len: 2.6 });
+  }
   T.col(CX, CZ, 3.4);
+
+  // ── the five ways out ─────────────────────────────────────────────────────
+  // Each lane is paved from the ring's rim to where it leaves the district
+  // (a flat-laid ribbon, walkable), a lamp stands beside each mouth, and the
+  // lane is CLAIMED so the nature planting keeps its trees out of it.
+  const laneBoxes = [];
+  for (const L of HEIGHTS_PLAN.lanes) {
+    const pts = [];
+    for (let i = 0; i < L.pts.length; i++) {
+      const [x, z] = L.pts[i], d0 = Math.hypot(x - CX, z - CZ);
+      if (d0 >= R.rOut + 0.1) { pts.push([x, z]); continue; }
+      const [nx, nz] = L.pts[i + 1] ?? L.pts[i], d1 = Math.hypot(nx - CX, nz - CZ);
+      if (d1 > R.rOut + 0.1) {                             // this span leaves the ring: start at its rim
+        let lo = 0, hi = 1;
+        for (let k = 0; k < 24; k++) { const t = (lo + hi) / 2; if (Math.hypot(x + (nx - x) * t - CX, z + (nz - z) * t - CZ) < R.rOut + 0.1) lo = t; else hi = t; }
+        pts.push([x + (nx - x) * lo, z + (nz - z) * lo]);
+      }
+    }
+    if (pts.length > 1) ribbon(b, pts, L.width, (x, z) => T.ground(x, z), 0xbcaa88, { th: 0.34, lift: 0.1, kerb: false, seg: 4, out: laneBoxes });
+    for (let i = 0; i < L.pts.length - 1; i++) {
+      const [ax, az] = L.pts[i], [bx, bz] = L.pts[i + 1];
+      T.claim((ax + bx) / 2, (az + bz) / 2, L.width + 1.0, Math.hypot(bx - ax, bz - az) + 1.0, Math.atan2(bx - ax, bz - az));
+    }
+  }
+  T.paved('heights_lanes', laneBoxes);
+  // Where nothing may stand: every front door's approach (the doormat to the
+  // ring's rim, toward the green; the Guest House's to its lane).
+  const approach = [...HEIGHTS_PLAN.doors, { x: 170.3, z: 56.9 }].map((d) => {
+    const dx = d.x - CX, dz = d.z - CZ, l = Math.hypot(dx, dz);
+    return [d.x, d.z, CX + dx / l * R.rOut, CZ + dz / l * R.rOut];
+  });
+  const offDoors = (x, z, m, mat = 0) => approach.every(([ax, az, bx, bz]) => segDist(x, z, ax, az, bx, bz) >= m && Math.hypot(x - ax, z - az) >= mat);
+  // ── the lamps round the ring ──────────────────────────────────────────────
+  // Goose-neck globes on the ring's OUTER kerb, leaning over the road, one in
+  // each gap between the ways out (two in the long gap before the ginger's):
+  // at night the ring is a necklace of light round a dark lawn, and the only
+  // thing lit on the lawn is Mrs. Bramble.
+  const mouths = HEIGHTS_PLAN.lanes.map((L) => {
+    for (let i = 0; i < L.pts.length - 1; i++) {
+      const [ax, az] = L.pts[i], [bx, bz] = L.pts[i + 1];
+      for (let t = 0; t <= 1; t += 0.02) { const x = ax + (bx - ax) * t, z = az + (bz - az) * t; if (Math.hypot(x - CX, z - CZ) >= R.rOut) return Math.atan2(z - CZ, x - CX); }
+    }
+    return Math.atan2(L.pts[0][1] - CZ, L.pts[0][0] - CX);
+  }).sort((p, q) => p - q);
+  const rimLamps = [];
+  for (let i = 0; i < mouths.length; i++) {
+    const a0 = mouths[i], gap = (i + 1 < mouths.length ? mouths[i + 1] : mouths[0] + Math.PI * 2) - a0;
+    const n = gap > 2.2 ? 2 : gap > 0.7 ? 1 : 0;
+    for (let k = 1; k <= n; k++) {
+      const a = a0 + gap * k / (n + 1);
+      // first strictly (clear of every doormat by 3.8), then — the east side,
+      // where the gardens come right down to the ring — a little closer and a
+      // little further round the gap, never within 3.5 of another lamp
+      let hit = null;
+      for (const [span, mat, app] of [[24, 3.8, 2.0], [36, 3.0, 1.6]]) {
+        for (let j = 0; j <= span && !hit; j++) {
+          const aa = a + (j % 2 ? 1 : -1) * Math.ceil(j / 2) * 0.035;
+          for (let m = 0; m < 3 && !hit; m++) {
+            const rr = R.rOut + 0.9 + m * 0.4, x = CX + Math.cos(aa) * rr, z = CZ + Math.sin(aa) * rr;
+            // (1.5: a lamp never leaves a slot narrower than a visitor against a
+            // fence, a gate post or a wall; it stands clear, or not at all)
+            if (laneClear(x, z, 0.6, 0.25) && solidClear(T, x, z, 1.5) && offDoors(x, z, app, mat)
+              && rimLamps.every(([px, pz]) => Math.hypot(x - px, z - pz) > 3.5)) hit = [x, z];
+          }
+        }
+        if (hit) break;
+      }
+      if (!hit) continue;
+      const [x, z] = hit;
+      lamppost(b, x, T.ground(x, z), z, { style: 'globe', h: 4.9, ry: Math.atan2(CX - x, CZ - z), pool: 4.2, poolY: gy0 + 0.15 });
+      rimLamps.push(hit);
+      HEIGHTS_PLAN.lamps.push([+x.toFixed(2), +z.toFixed(2)]);
+    }
+  }
+  // and one lamp out along every way out, on whichever side of it is clear
+  // (the first free spot 2.6 u off the lane's centreline, 5 u past the rim)
+  for (const L of HEIGHTS_PLAN.lanes) {
+    let done = false;
+    for (let i = 0; i < L.pts.length - 1 && !done; i++) {
+      const [ax, az] = L.pts[i], [bx, bz] = L.pts[i + 1], len = Math.hypot(bx - ax, bz - az);
+      for (let t = 0; t <= len && !done; t += 0.5) {
+        const px = ax + (bx - ax) * t / len, pz = az + (bz - az) * t / len;
+        if (Math.hypot(px - CX, pz - CZ) < R.rOut + 5.0) continue;
+        for (const s of [1, -1]) {
+          const lx = px + s * -(bz - az) / len * 2.6, lz = pz + s * (bx - ax) / len * 2.6;
+          if (!laneClear(lx, lz, 0.5, 0.3) || !solidClear(T, lx, lz, 0.9)) continue;
+          lamppost(b, lx, T.ground(lx, lz), lz, { style: s > 0 ? 'lantern' : 'globe', h: 4.8, arms: 1 });
+          done = true; break;
+        }
+      }
+    }
+  }
   const heightsSign = T.plaque(5.4, 1.6, [
     { t: 'WHISKER HEIGHTS', s: 0.46, c: '#fff4dc' },
     { t: 'a quiet neighbourhood for permanent residents', s: 0.2, c: '#ffd9a8', weight: 'italic bold' },
   ], { bg: '#2a8f8a', border: '#f2c14e', border2: '#1f6f6b', borderW: 0.05 });
-  bigSign(T, 168, 40, 0.6, 5.4, 1.6, heightsSign, { postH: 4.4 });
-  T.act('heights', 168, 42.6, 'Whisker Heights', [
+  // in the little square where the Purrliament path comes in (moved 1.6 u off
+  // the west lane: its east post stood in it)
+  bigSign(T, 166.4, 41.8, 0.6, 5.4, 1.6, heightsSign, { postH: 4.4 });
+  // ── a fingerpost on the green: every way out, named, and one more ──────────
+  // (on the lawn's west edge, midway between two benches and facing the way
+  // in from Purrliament: it used to be jammed in between a bench and a lamp)
+  {
+    const PX = CX + Math.cos(3.054) * 4.85, PZ = CZ + Math.sin(3.054) * 4.85;
+    b.cyl(PX, gy, PZ, 0.13, 0.16, 4.7, PAL.wood, { seg: 7, ao: 0.4, aoBase: gy });
+    b.sph(PX, gy + 4.75, PZ, 0.2, PAL.gold, { seg: 7, rings: 5 });
+    T.col(PX, PZ, 0.22);
+    const aim = (x, z, t) => ({ x, z, t });
+    const mouth = (id) => { const L = HEIGHTS_PLAN.lanes.find((l) => l.id === id); return L.pts[Math.min(3, L.pts.length - 1)]; };
+    const boards = [
+      aim(...mouth('west'), 'PURRLIAMENT SQ.'), aim(...mouth('north'), 'GYM ROAD'), aim(...mouth('east'), 'THE WATCHTOWER'),
+      aim(...mouth('south'), 'FISH HARBOR'), aim(...mouth('southeast'), 'THE SHORE'), aim(170.4, 55.6, 'YOUR ROOM'),
+    ];
+    boards.forEach((B, i) => {
+      const dx = B.x - PX, dz = B.z - PZ, l = Math.hypot(dx, dz), ux = dx / l, uz = dz / l, bry = Math.atan2(-uz, ux);
+      const cx = PX + ux * 1.08, cz = PZ + uz * 1.08, by = gy + 2.35 + i * 0.4;
+      b.box(cx, by, cz, 1.95, 0.34, 0.09, i === 5 ? 0x2a8f8a : 0xf6ead0, { ry: bry, ao: 0 });
+      b.cone(PX + ux * 2.05, by + 0.17, PZ + uz * 2.05, 0.2, 0.26, i === 5 ? 0x2a8f8a : 0xf6ead0, { seg: 3, rz: -Math.PI / 2, ry: bry, ao: 0 });
+      const cell = T.plaque(1.8, 0.28, [{ t: B.t, s: 0.2, c: i === 5 ? '#fff4dc' : '#2a3a3c' }], { bg: i === 5 ? '#2a8f8a' : '#f6ead0', border: i === 5 ? '#f2c14e' : '#8d5a34', borderW: 0.03, dpu: 160 });
+      for (const s of [1, -1]) b.sign(cell, cx + Math.sin(bry) * 0.055 * s, by + 0.17, cz + Math.cos(bry) * 0.055 * s, 1.8, 0.28, { ry: s > 0 ? bry : bry + Math.PI });
+    });
+  }
+  // ── kerb life ─────────────────────────────────────────────────────────────
+  // From the hill road the ring and its five spokes were bare stone, a quarter
+  // of the district with nothing on it. Now the kerbs are lived on: supper put
+  // out, the milk left, crates of fish, a cat asleep in a basket. Each cluster
+  // stands just OUTSIDE the lanes (laneClear: nothing solid in a lane, ever),
+  // off every door's approach and clear of the lamps; ON the stone there is
+  // only what you can walk over: chalk, puddles and footprints.
+  const rk = rng(hash('heights-kerb'));
+  const kerb = [];
+  const kerbFree = (x, z, r) => laneClear(x, z, r, 0.2) && solidClear(T, x, z, r + 0.2) && offDoors(x, z, r + 1.2, r + 2.2)
+    && rimLamps.every(([lx, lz]) => Math.hypot(x - lx, z - lz) > r + 1.5) && kerb.every((k) => Math.hypot(x - k[0], z - k[1]) > r + 4.0);
+  const ringCands = [], cands = [];
+  for (let i = 0; i < 48; i++) {                                // round the ring's outer kerb (compact ones)
+    const a = (i + 0.5) / 48 * Math.PI * 2, x = CX + Math.cos(a) * (R.rOut + 1.15), z = CZ + Math.sin(a) * (R.rOut + 1.15);
+    ringCands.push([x, z, Math.atan2(CX - x, CZ - z), true]);
+  }
+  for (const L of HEIGHTS_PLAN.lanes) {                         // and down both sides of every way out
+    for (let i = 0; i < L.pts.length - 1; i++) {
+      const [ax, az] = L.pts[i], [bx, bz] = L.pts[i + 1], len = Math.hypot(bx - ax, bz - az);
+      for (let t = 1.0; t < len; t += 2.5) {
+        const px = ax + (bx - ax) * t / len, pz = az + (bz - az) * t / len;
+        if (Math.hypot(px - CX, pz - CZ) < R.rOut + 2.0) continue;
+        for (const sd of [1, -1]) {
+          const off = L.width / 2 + 1.3, x = px + sd * -(bz - az) / len * off, z = pz + sd * (bx - ax) / len * off;
+          cands.push([x, z, Math.atan2(px - x, pz - z), false]);
+        }
+      }
+    }
+  }
+  const shuffle = (A) => { for (let i = A.length - 1; i > 0; i--) { const j = Math.floor(rk() * (i + 1)); [A[i], A[j]] = [A[j], A[i]]; } return A; };
+  const bowl = (x, z, col, food) => {
+    const y = T.ground(x, z);
+    b.cyl(x, y, z, 0.32, 0.25, 0.16, col, { seg: 10, ao: 0.3, aoBase: y });
+    b.cyl(x, y + 0.11, z, 0.27, 0.27, 0.06, food, { seg: 10, ao: 0 });
+    T.col(x, z, 0.34, 0.17);
+  };
+  const KIBBLE = 0x8a5a3a, MILK = 0xf6f2ea, WATER = 0x7fb3d9;
+  const recipes = [
+    (fr) => {                                                    // supper for two
+      bowl(fr.px(-0.42, 0), fr.pz(-0.42, 0), PAL.cloth[0], KIBBLE);
+      bowl(fr.px(0.42, 0.05), fr.pz(0.42, 0.05), PAL.cloth[1], MILK);
+    },
+    (fr, compact) => {                                           // the milk, in its wire carrier
+      const y = fr.y, M = 0x5a6468;
+      b.box(fr.x, y, fr.z, 0.9, 0.06, 0.36, M, { ry: fr.ry, mat: 'metal', ao: 0 });
+      for (const sx of [-1, 1]) b.box(fr.px(sx * 0.43, 0), y, fr.pz(sx * 0.43, 0), 0.04, 0.72, 0.04, M, { ry: fr.ry, mat: 'metal', ao: 0 });
+      b.box(fr.x, y + 0.7, fr.z, 0.9, 0.05, 0.05, M, { ry: fr.ry, mat: 'metal', ao: 0 });
+      for (let i = 0; i < 3; i++) {
+        const bx = fr.px(-0.28 + i * 0.28, 0), bz = fr.pz(-0.28 + i * 0.28, 0);
+        b.cyl(bx, y + 0.05, bz, 0.09, 0.12, 0.34, MILK, { seg: 8, ao: 0.3, aoBase: y });
+        b.cyl(bx, y + 0.39, bz, 0.06, 0.09, 0.1, MILK, { seg: 8, ao: 0 });
+        b.cyl(bx, y + 0.49, bz, 0.066, 0.066, 0.04, [0xd23c3c, PAL.gold, 0x2a8f8a][i], { seg: 8, ao: 0 });
+      }
+      T.col(fr.x, fr.z, 0.5, 0.74);
+      if (!compact) bowl(fr.px(0.95, 0.25), fr.pz(0.95, 0.25), PAL.cloth[3], WATER);
+    },
+    (fr, compact) => {                                           // the fish came in; the fish went nowhere
+      const y = fr.y;
+      crate(b, fr.x, y, fr.z, 0.82, fr.ry + 0.1, PAL.woodLight);
+      crate(b, fr.px(0.05, -0.04), y + 0.7, fr.pz(0.05, -0.04), 0.62, fr.ry - 0.25, 0xc49a62);
+      for (const sx of [-1, 1]) b.cone(fr.px(sx * 0.14, 0.05), y + 1.24, fr.pz(sx * 0.14, 0.05), 0.12, 0.3, 0x9fb3bd, { seg: 4, rz: sx * 0.5, ry: fr.ry, mat: 'metal', ao: 0 });
+      if (!compact) bowl(fr.px(-0.95, 0.3), fr.pz(-0.95, 0.3), PAL.cloth[2], WATER);
+    },
+    (fr) => {                                                    // a cat asleep in a basket, by the kerb
+      const y = fr.y;
+      b.cyl(fr.x, y, fr.z, 0.66, 0.52, 0.34, 0xc49a5c, { seg: 12, ao: 0.4, aoBase: y });
+      b.torus(fr.x, y + 0.34, fr.z, 0.62, 0.08, 0xa47a44, { rx: -Math.PI / 2, seg: 14, tseg: 4 });
+      b.sph(fr.x, y + 0.34, fr.z, 0.54, PAL.cloth[(kerb.length + 1) % 5], { seg: 10, rings: 4, sy: 0.3 });
+      loafCat(b, fr.x, y + 0.36, fr.z, 1.05, PAL.fur[kerb.length % PAL.fur.length], { ry: fr.ry + 1.2 });
+      T.col(fr.x, fr.z, 0.66);
+    },
+  ];
+  let onRing = 0;
+  for (const [x, z, fry, ring] of [...shuffle(ringCands), ...shuffle(cands)]) {
+    if (kerb.length >= 14) break;
+    if (ring && onRing >= 6) continue;
+    if (!kerbFree(x, z, ring ? 0.8 : 1.05)) continue;
+    if (ring) onRing++;
+    recipes[kerb.length % recipes.length](frame(x, T.ground(x, z), z, fry), ring);
+    HEIGHTS_PLAN.kerb.push([+x.toFixed(2), +z.toFixed(2), ['supper', 'milk', 'crates', 'basket'][kerb.length % recipes.length]]);
+    kerb.push([x, z]);
+  }
+
+  // and on the lawn, two bowls set out at Mrs. Bramble's feet, between her
+  // lamps. Nobody admits to filling them. (Inside her own collider, so they
+  // are never underfoot: as low props by the benches they tripped the walker.)
+  for (const [sx, col, food] of [[-0.42, PAL.cloth[0], KIBBLE], [0.42, PAL.cloth[1], MILK]]) {
+    const x = tf.px(sx, 2.95), z = tf.pz(sx, 2.95);
+    b.cyl(x, gy, z, 0.3, 0.23, 0.15, col, { seg: 10, ao: 0 });
+    b.cyl(x, gy + 0.1, z, 0.25, 0.25, 0.06, food, { seg: 10, ao: 0 });
+  }
+
+  // ── on the stone: chalk, mud and puddles ──────────────────────────────────
+  const ringTop = gy0 + 0.12;
+  const paveTop = (x, z) => {                                   // the paved top here, or null
+    const d = Math.hypot(x - CX, z - CZ);
+    if (d > R.rIn + 0.3 && d < R.rOut - 0.35) return Math.abs(d - (R.rIn + R.rOut) / 2) < 0.22 ? null : ringTop;   // (not on the centre course)
+    if (d <= R.rOut + 0.3) return null;                         // lawn, or the kerb stones
+    let top = -Infinity;
+    for (const q of laneBoxes) {
+      const dx = x - q.x, dz = z - q.z;
+      if (Math.abs(dx * q.c - dz * q.s) <= q.hw - 0.1 && Math.abs(dx * q.s + dz * q.c) <= q.hd - 0.1) top = Math.max(top, q.top);
+    }
+    return top > -Infinity ? top : null;
+  };
+  /** a print, `s` to scale, heading `a` (kit yaw): a pad and four toes, or a shoe */
+  const paw = (x, z, a, s, col) => {
+    const y = paveTop(x, z);
+    if (y == null) return;
+    const f2 = frame(x, y, z, a);
+    b.cyl(x, y - 0.004, z, 0.1 * s, 0.1 * s, 0.018, col, { seg: 7, ao: 0 });
+    for (const [tx, tz] of [[-0.105, 0.12], [-0.04, 0.17], [0.04, 0.17], [0.105, 0.12]]) {
+      b.hquad(f2.px(tx * s, tz * s), y + 0.016, f2.pz(tx * s, tz * s), 0.06 * s, 0.075 * s, col, { ry: a + Math.PI / 4 });
+    }
+  };
+  const shoe = (x, z, a, col) => {
+    const y = paveTop(x, z);
+    if (y == null) return;
+    const f2 = frame(x, y, z, a);
+    b.sph(f2.px(0, 0.07), y + 0.002, f2.pz(0, 0.07), 0.11, col, { seg: 8, rings: 3, sx: 0.95, sy: 0.12, sz: 1.5, ry: a });
+    b.sph(f2.px(0, -0.17), y + 0.002, f2.pz(0, -0.17), 0.085, col, { seg: 7, rings: 3, sy: 0.15, ry: a });
+  };
+  // a cat has walked half round the ring in pink chalk (nobody asked it to)
+  for (let i = 0; i < 36; i++) {
+    const t = 3.6 + i * 0.068, sd = i % 2 ? 1 : -1, r = 6.4 + sd * 0.13;
+    paw(CX + Math.cos(t) * r, CZ + Math.sin(t) * r, Math.atan2(-Math.sin(t), Math.cos(t)), 1.0, 0xee8fb0);
+  }
+  // a hopscotch in white chalk on the ring's inner half (1, 1, 2, 1, 2, 1, and
+  // a half-moon to turn round in), drawn as outlines: every square four strokes
+  {
+    const CH = 0xf3eee4, S2 = 0.56, st = 0.05, y = ringTop + 0.014;
+    const cell = (t, rr) => {
+      const x = CX + Math.cos(t) * rr, z = CZ + Math.sin(t) * rr, a = Math.atan2(-Math.sin(t), Math.cos(t)), f2 = frame(x, y, z, a);
+      for (const [lx, lz, w2, d2] of [[0, S2 / 2, S2, st], [0, -S2 / 2, S2, st], [S2 / 2, 0, st, S2], [-S2 / 2, 0, st, S2]]) b.hquad(f2.px(lx, lz), y, f2.pz(lx, lz), w2, d2, CH, { ry: a });
+    };
+    const R0 = 6.5, dT = (S2 + 0.02) / R0;
+    [1, 1, 2, 1, 2, 1].forEach((n, i) => {
+      const t = 0.42 + i * dT;
+      if (n === 1) cell(t, R0); else { cell(t, R0 - 0.29); cell(t, R0 + 0.29); }
+    });
+    const tc = 0.42 + 5.5 * dT, fc = frame(CX + Math.cos(tc) * R0, y, CZ + Math.sin(tc) * R0, Math.atan2(-Math.sin(tc), Math.cos(tc)));
+    for (let k = 0; k < 7; k++) {                                // the half-moon
+      const ph = (k + 0.5) / 7 * Math.PI, lx = 0.44 * Math.cos(ph), lz = 0.44 * Math.sin(ph);
+      const dx = fc.px(-Math.sin(ph), Math.cos(ph)) - fc.x, dz = fc.pz(-Math.sin(ph), Math.cos(ph)) - fc.z;
+      b.hquad(fc.px(lx, lz), y, fc.pz(lx, lz), 0.22, st, CH, { ry: Math.atan2(-dz, dx) });
+    }
+  }
+  // muddy paws from the green, down the south lane, to YOUR door
+  {
+    const way = [[CX + Math.cos(2.2) * 6.4, CZ + Math.sin(2.2) * 6.4], [179.0, 52.9], [172.6, 57.0], [171.95, 58.35]];
+    let carry = 0, k = 0;
+    for (let i = 0; i < way.length - 1; i++) {
+      const [ax, az] = way[i], [bx, bz] = way[i + 1], len = Math.hypot(bx - ax, bz - az), a = Math.atan2(bx - ax, bz - az);
+      let t = carry;
+      for (; t < len; t += 0.62, k++) {
+        const sd = k % 2 ? 1 : -1;
+        paw(ax + (bx - ax) * t / len + Math.cos(a) * sd * 0.14, az + (bz - az) * t / len - Math.sin(a) * sd * 0.14, a, 1.15, 0x5e4a36);
+      }
+      carry = t - len;
+    }
+  }
+  // and in the west lane, somebody's shoes, heading out toward Purrliament…
+  // which stop. Facing them, where the next step would have been: two paws,
+  // much bigger than a cat's.
+  {
+    const L = HEIGHTS_PLAN.lanes[0], [ax, az] = L.pts[0], [bx, bz] = L.pts[1], len = Math.hypot(bx - ax, bz - az);
+    const a = Math.atan2(bx - ax, bz - az), ux = (bx - ax) / len, uz = (bz - az) / len;
+    for (let i = 0; i < 9; i++) {
+      const t = 3.2 + i * 0.58, sd = i % 2 ? 1 : -1;
+      shoe(ax + ux * t + Math.cos(a) * sd * 0.17, az + uz * t - Math.sin(a) * sd * 0.17, a, 0x6b5a48);
+    }
+    const t = 3.2 + 9 * 0.58 + 0.75;
+    for (const sd of [-1, 1]) paw(ax + ux * t + Math.cos(a) * sd * 0.34, az + uz * t - Math.sin(a) * sd * 0.34, a + Math.PI, 2.3, 0x5e4a36);
+  }
+  // puddles, where the road dips (it has not rained: somebody hoses the lanes)
+  for (const [x, z, r] of [[CX + Math.cos(0.35) * 8.1, CZ + Math.sin(0.35) * 8.1, 0.45], [186.0, 64.2, 0.7], [200.2, 40.7, 0.75], [CX + Math.cos(1.2) * 6.35, CZ + Math.sin(1.2) * 6.35, 0.45]]) {
+    for (let i = 0; i < 3; i++) {
+      const px = x + Math.cos(i * 2.2) * r * 0.45, pz = z + Math.sin(i * 2.2) * r * 0.35, y = paveTop(px, pz);
+      if (y == null) continue;
+      b.cyl(px, y - 0.004, pz, r * (1 - i * 0.22), r * (1 - i * 0.22), 0.016 + i * 0.001, 0x7d95a4, { seg: 12, mat: 'metal', ao: 0 });
+    }
+  }
+
+  T.act('heights', 168.0, 42.4, 'Whisker Heights', [
     'the doors are four metres tall. the letterboxes are fish. the gardens are immaculate.',
     'every window has a sill wide enough to lie on, and every sill has a cushion with a dent in it.',
     'one house has a spare room made up. the towels are folded. your name is on the door in pencil.',
@@ -489,11 +1099,18 @@ export function buildGym(T) {
   b.box(sf.px(0, 1.9), sf.y + 3.2, sf.pz(0, 1.9), 4.4, 1.1, 0.24, 0xb8431e, { ry: sf.ry, ao: 0 });
   b.sign(shake, sf.px(0, 2.04), sf.y + 3.75, sf.pz(0, 2.04), 4.2, 1.0, { ry: sf.ry });
   T.colBox(sf.x, sf.z, 5.4, 3.8, sf.ry);
-  T.act('smoothie', sf.px(0, 4.0), sf.pz(0, 4.0), 'Smoothie stand', [
+  // Contract O — ONE prompt at the stand. The escape tunnel is dug in behind
+  // this stand (cat/containment/scenery.js finds it by this colBox), and the
+  // tunnel story (cat/containment.js) re-registers this very id, 'cat_smoothie',
+  // at world:ready: "Look behind the smoothie stand", the menu joke folded into
+  // its first line. Same id = it REPLACES this entry, so the chatter can never
+  // out-rank the story again (interaction.nearest picks by distance). Without
+  // containment, this is the stand's chatter, reachable from every side.
+  T.act('smoothie', sf.x, sf.z, 'Smoothie stand', [
     'GAINS SHAKE: 90% tuna, 10% belief. it is served in a bucket.',
     'the menu has one other item: "WATER (for guests, we worry about you)".',
     'you drink it. it is somehow excellent. you are annoyed about this.',
-  ], { r: 3.6, speaker: 'SMOOTHIE STAND' });
+  ], { r: 4.6, speaker: 'SMOOTHIE STAND' });
 
   // ── scoreboard + chalk ────────────────────────────────────────────────────
   const scores = A.panel(3.6, 2.6, (g, W, H) => {
@@ -909,6 +1526,157 @@ export function buildHarbor(T) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// THE WATCHTOWER'S HANDRAILS (Contract O — Ben: "all ramps on or in buildings
+// should have handrails to help keep players from falling off"). Measured with
+// the shared helper (kit.js catRail → candy/architecture/rails.js railRun):
+//   1 · THE SPIRAL STAIR inside the drum: its outer side drops to the flagstones
+//       (1.5 u at the third tread, 4.5 at the landing) through the 0.65 u gap to
+//       the wall. The iron balusters were there (interiors.js), a picture of a
+//       rail with no collider; they get a turned timber handrail that follows
+//       the helix, an iron mid rail and GATED colliders on the baluster line —
+//       solid only while the visitor's feet are within 1.0 under that tread
+//       (the helix only lifts him within 0.95 of it: under that he is walking
+//       UNDER the flight, through the doorway it spirals over) up to a double
+//       jump over it. The inner side is the newel: now solid (r 0.3), so the
+//       walkable's inner edge (0.46) can never be passed. The landing's end is
+//       the keeper's rope (unchanged).
+//   2 · THE FLIGHT's cheeks: the upper steps stand 1.2–2.25 over the grass
+//       beside them; an iron balustrade each side from the drum ledge down to
+//       the second step, a gold-balled newel at the top of each.
+//   3 · THE DRUM LEDGE: the lower drum's top ring (walkable at LY + 0.62) is
+//       1.2–1.5 over the grass on 70% of its round; a low iron fence on its rim,
+//       continuous through the short arcs that measured 1.08–1.19, from the
+//       west side of the flight (110–145°: the lighthouse path arrives there
+//       over a drop under 1.0 — left open) round the back to the east cheek's
+//       newel, cut only where the keeper's cottage wall already stands on the
+//       rim (48–60°) — the fence dies into its MASONRY (not its collider) from
+//       the west, and the short stretch from its gable to the east newel
+//       (60–74°) is a stone parapet with a coping. Every post wears a gold
+//       ball and the fence has a mid rail (the flight's treatment); it stands
+//       on the terrace the upper tier now leaves flat (r 4.6 → 5.4).
+//   The gallery round the lantern is NOT a walkable (the keeper's rope ends the
+//   climb at the half-landing): its iron railing stays a picture.
+//   KNOWN, not mine: the keeper's desk (interiors.js watchInterior, R.solid
+//   under treads 5–6) is solid at every height, so on those treads only the
+//   band by the newel (r 0.52–1.24) is passable; gate it to the ground floor.
+// Stair rails merge into the district kit (they stay when the shell fades as
+// you walk in); the flight and the fence into the tower's shell (they fade
+// with it). +0 draw calls.
+// ═════════════════════════════════════════════════════════════════════════════
+function watchRails(T, sb, W) {
+  const ctx = T.ctx, S = TOWER_STAIR, { LX, LZ, LY, FL } = W;
+  // 1 · the spiral: a point per baluster (tread centres), and the landing's end
+  //     at the rope's outer post (which stands in for the last baluster)
+  const RR = 2.35;
+  const yAt = (i) => FL + S.y0 + S.dy * Math.min(i, S.n - 1) + S.tread;
+  const pts = [];
+  for (let i = 0; i < S.n; i++) { const a = S.a0 + i * S.da; pts.push([LX + Math.cos(a) * RR, LZ + Math.sin(a) * RR, yAt(i)]); }
+  const aEnd = S.a0 + (S.n - 1) * S.da + S.land;
+  pts.push([LX + Math.cos(aEnd) * RR, LZ + Math.sin(aEnd) * RR, yAt(S.n - 1)]);
+  catRail(ctx, T.b, pts, {
+    site: 'cat_tower_stair', edge: 'spiral, outer side', out: 1, style: spiralStyle(), mid: true,
+    force: true, gate: true, gateLo: 1.0, below: () => FL + 0.1,
+    have: [[LX + Math.cos(aEnd) * 2.3, LZ + Math.sin(aEnd) * 2.3]],
+  });
+  // the newel: r 0.16 + the visitor's 0.36 keeps his centre outside the
+  // helix's inner edge (0.46) and no more — the band past the keeper's desk
+  // (interiors.js, under treads 5–6) is narrow enough already
+  ctx.colliders.push({ x: LX, z: LZ, r: 0.16 });
+
+  // 2 + 3 · the flight's cheeks and the drum-ledge fence meet at a newel on
+  // each cheek, on the second-highest step, on the ledge's rim (RB)
+  if (!(W.FN > 0) || typeof W.fTop !== 'function') return;
+  const { FN, FRUN, FZ1, FZ0, fTop } = W;
+  const XS = 1.42, dzJ = FZ1 + FRUN * 1.05, RB = Math.hypot(XS, dzJ);
+  const cz = (i) => FZ0 - (i + 0.5) * FRUN;                               // step i's centre (dz)
+  const k = (fTop(FN - 2) - fTop(1)) / (cz(FN - 2) - cz(1));              // the nosing line's slope
+  const yLine = (dz) => fTop(1) + (dz - cz(1)) * k;
+  const stepAt = (dz) => fTop(Math.min(FN - 1, Math.max(0, Math.floor((FZ0 - dz) / FRUN))));
+  const dzB = cz(1);
+  const newels = [[LX + XS, LZ + dzJ], [LX - XS, LZ + dzJ]];
+  const flightStyle = wroughtStyle({ tall: newels, foot: (x, z) => stepAt(z - LZ), gold: PAL.gold });
+  for (const s of [1, -1]) {
+    catRail(ctx, sb, [[LX + s * XS, LZ + dzJ, yLine(dzJ)], [LX + s * XS, LZ + dzB, yLine(dzB)]], {
+      site: 'cat_tower_flight', edge: s > 0 ? 'east cheek' : 'west cheek', out: s, style: flightStyle,
+      mid: true, force: true, claim: T,
+    });
+  }
+  // The fence: from the west side (145°, where the path arrives over a drop
+  // under 1.0) round the back to the east cheek's newel — except where a WALL
+  // already stands on the ledge's rim: the keeper's cottage's south-west corner
+  // reaches to r 5.0 at 35–70° (its collider, and the drum, were there first).
+  // The ring is cut into runs round every solid wall box within 0.3 of it, and
+  // each run is carried one step INTO the wall so it dies against it.
+  const yL = LY + 0.61, aW = (145 / 180) * Math.PI, aE = Math.atan2(dzJ, XS) + Math.PI * 2;
+  const walls = (ctx.colliders || []).filter((c) => c && c.box && c.solid !== false && !c.rail
+    && !(typeof c.h === 'number' && c.h <= 1.6) && Math.hypot(c.x - LX, c.z - LZ) < RB + 8);
+  // `face`: measure to the DRAWN wall, not its collider — a building's colBox
+  // stands 0.2 proud of the masonry all round, and a run stopped on the box
+  // ended in mid-air under the cottage's eave
+  const wallDist = (a, face = false) => {                                // ring point at angle a → nearest wall box
+    const x = LX + Math.cos(a) * RB, z = LZ + Math.sin(a) * RB;
+    let best = Infinity;
+    for (const c of walls) {
+      const dx = x - c.x, dz = z - c.z, cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0);
+      const lx = dx * cs + dz * sn, lz = -dx * sn + dz * cs;             // ground.js's box frame
+      const inset = face && ((c.w || 0) > 5 || (c.d || 0) > 5) ? 0.2 : 0;
+      const qx = Math.abs(lx) - (c.w || 0) / 2 + inset, qz = Math.abs(lz) - (c.d || 0) / 2 + inset;
+      const d = Math.hypot(Math.max(qx, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qz), 0);
+      if (d < best) best = d;
+    }
+    return best;
+  };
+  const STEP = 0.01, runs = [];
+  let cur = null;
+  for (let a = aW; a <= aE + 1e-9; a += STEP) {
+    const free = wallDist(a) >= 0.3;
+    if (free && !cur) {                                                  // back into the wall we left
+      let a0 = a; while (a0 - STEP > aW && wallDist(a0 - STEP, true) > -0.08) a0 -= STEP;
+      cur = [a0, a]; runs.push(cur);
+    } else if (free) cur[1] = a;
+    else if (cur) {                                                      // on into the wall ahead
+      let a1 = cur[1]; while (a1 + STEP < aE && wallDist(a1 + STEP, true) > -0.08) a1 += STEP;
+      cur[1] = a1; cur = null;
+    }
+  }
+  if (cur) cur[1] = aE;
+  const freeEnd = [LX + Math.cos(aW) * RB, LZ + Math.sin(aW) * RB];
+  for (const [a0, a1] of runs) {
+    if ((a1 - a0) * RB < 0.5) continue;
+    // A short stretch BETWEEN two walls (the cottage's gable and the east
+    // cheek's newel, 60°–74°) is masonry, not ironwork: a stone parapet the
+    // height of the rail, with a coping, butting into both. As an iron stub it
+    // ran in under the cottage's eave and read as a rail ending in mid-air.
+    if ((a1 - a0) * RB < 2.0) {
+      const pts = arcPts(LX, LZ, RB, a0, a1, yL, 0.6), cols = [];
+      let len = 0, dMax = -Infinity, dMin = Infinity;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [ax, az] = pts[i], [bx, bz] = pts[i + 1], l = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / l, uz = (bz - az) / l;
+        const mx = (ax + bx) / 2, mz = (az + bz) / 2, ry = Math.atan2(ux, uz);
+        sb.box(mx, yL - 0.06, mz, 0.3, 1.0, l + 0.05, 0xe3d7bf, { ry, ao: 0 });
+        sb.box(mx, yL + 0.94, mz, 0.42, 0.11, l + 0.1, 0xf4ecd8, { ry, ao: 0 });
+        const c = { x: mx, z: mz, w: 0.3, d: l + 0.06, rot: Math.atan2(-ux, uz), box: true, h: 1e4, rail: 'cat_tower_base', deckY: yL, railTop: yL + 3 };
+        ctx.colliders.push(c); cols.push(c);
+        T.claim(mx, mz, 0.7, l + 0.2, ry);
+        const dr = yL - T.ground(mx + (mx - LX) / RB * 0.5, mz + (mz - LZ) / RB * 0.5);
+        len += l; dMax = Math.max(dMax, dr); dMin = Math.min(dMin, dr);
+      }
+      RAILS.push({ site: 'cat_tower_base', edge: `drum ledge parapet ${Math.round(a0 * 180 / Math.PI) % 360}°–${Math.round(a1 * 180 / Math.PI) % 360}°`,
+        len: +len.toFixed(2), spans: cols.length, built: cols.length, dropMax: dMax, dropMin: dMin, cols, gated: false, note: 'stone parapet', drops: [] });
+      continue;
+    }
+    const pts = arcPts(LX, LZ, RB, a0, a1, yL);
+    // the flight's treatment carried round: a gold ball on every post and a mid rail
+    catRail(ctx, sb, pts, {
+      site: 'cat_tower_base', edge: `drum ledge rim ${Math.round(a0 * 180 / Math.PI) % 360}°–${Math.round(a1 * 180 / Math.PI) % 360}°`,
+      out: 1, force: true, claim: T, mid: true,
+      style: wroughtStyle({ tall: [freeEnd], gold: PAL.gold, goldAll: true }),
+      have: [newels[0]],
+    });
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // THE WATCHTOWER + NOT-AN-EXIT BEACH
 // ═════════════════════════════════════════════════════════════════════════════
 export function buildWatchtower(T) {
@@ -921,7 +1689,18 @@ export function buildWatchtower(T) {
   const FL = LY + 1.6;                      // the ground-floor floor level
   const bands = 7, bandH = TH / bands, RIN = 3.05;
   sb.cyl(LX, LY - 1.2, LZ, 5.4, 5.9, 1.8, 0xcdbd9e, { seg: 18, ao: 0 });
-  sb.cyl(LX, LY + 0.6, LZ, 4.6, 5.2, 1.0, 0xe3d7bf, { seg: 18, ao: 0 });
+  // The upper tier stands STRAIGHT up from the lower drum's top, so that top is
+  // a flat TERRACE (r 4.6 → 5.4) — the ledge the plinth walkable says it is
+  // (LY + 0.62 out to 5.35), with its railing standing on its rim. It was a
+  // cone (r 5.2 at its foot), which left a 0.2 lip: the visitor on the ledge
+  // waded in its slope and the rail read as planted on the drum's face.
+  sb.cyl(LX, LY + 0.6, LZ, 4.6, 4.62, 1.0, 0xe3d7bf, { seg: 18, ao: 0 });
+  // stone copings (a lip on each tier's top edge, same 18-gon phase as the
+  // drums) and two bed joints down the battered face: a plinth, not a pipe
+  sb.cyl(LX, LY + 0.52, LZ, 5.47, 5.47, 0.1, 0xf0e6d0, { seg: 18, ao: 0 });
+  sb.cyl(LX, FL - 0.08, LZ, 4.7, 4.7, 0.1, 0xf4ecd8, { seg: 18, ao: 0 });
+  for (const [yj, rj] of [[LY - 0.2, 5.622], [LY + 0.2, 5.511]]) sb.cyl(LX, yj, LZ, rj + 0.012, rj + 0.014, 0.05, 0xa89878, { seg: 18, open: true, ao: 0 });
+  sb.cyl(LX, LY + 1.1, LZ, 4.625, 4.625, 0.04, 0xc9bb9e, { seg: 18, open: true, ao: 0 });
   // the first two bands are a ring wall with a doorway in it
   const DOOR_A = Math.PI / 2;               // the door faces +Z, toward the sign
   let wallSegs = [];
@@ -941,15 +1720,34 @@ export function buildWatchtower(T) {
       sb.cyl(LX, y0, LZ, r1, r0, bandH + 0.02, i % 2 ? 0xf4f0e6 : 0xd8402e, { seg: 18, ao: 0 });
     }
   }
-  // the steps up onto the plinth and in through the door
-  for (let i = 0; i < 3; i++) sb.box(LX, LY + 0.05 + i * 0.5, LZ + 7.0 - i * 0.75, 3.0, 0.55 + i * 0.5, 0.9, 0xcdbd9e, { ao: 0 });
+  // THE FLIGHT up onto the plinth and in through the door: six even steps from
+  // the grass to the door's own threshold, each block standing on the ground
+  // and the walkable reading the same tops. (Three blocks used to climb to
+  // LY + 0.6 / 1.6 / 2.6 while the walkable said 0.6 / 1.1 / 1.6: the top one
+  // stood a metre proud of the threshold, a slab the visitor waded through on
+  // his way to the door, and between it and the door the drum's lower ledge cut
+  // a metre-deep trench across the approach.) The top step runs 0.1 into the
+  // drum, a centimetre under its top, so the two never fight for one plane.
+  // The flight's ground is CLAIMED (the tower's own claim stops at the drum, so
+  // nature planted an agave on the third step), and its foot stops short of the
+  // big sign's east post.
+  const FN = 6, FRUN = 0.58, FZ1 = 4.5, FZ0 = FZ1 + FN * FRUN;
+  T.claim(LX, LZ + (FZ1 + FZ0) / 2 + 0.3, 3.6, FZ0 - FZ1 + 0.6, 0);
+  const fFoot = Math.min(T.ground(LX - 1.5, LZ + FZ0), T.ground(LX + 1.5, LZ + FZ0), T.ground(LX, LZ + FZ0 + 0.3));
+  const fRise = (FL - fFoot) / FN;
+  const fTop = (i) => fFoot + (i + 1) * fRise - (i === FN - 1 ? 0.01 : 0);
+  for (let i = 0; i < FN; i++) {
+    const z1 = FZ0 - i * FRUN, z0 = z1 - FRUN, base = Math.min(fFoot, T.ground(LX, LZ + z1)) - 0.6;
+    sb.box(LX, base, LZ + (z0 + z1) / 2, 3.0, fTop(i) - base, FRUN, 0xcdbd9e, { ao: 0, shade: i % 2 ? 0.96 : 1 });
+  }
   T.ctx.walkables.push({
     id: 'cat_tower_plinth',
     test(x, z) {
       const dx = x - LX, dz = z - LZ, d = Math.hypot(dx, dz);
       if (d < 4.55) return FL + 0.02;
+      // the flight wins over the drum's ledge where they overlap
+      if (Math.abs(dx) < 1.5 && dz > FZ1 - 0.1 && dz < FZ0) return fTop(Math.min(FN - 1, Math.max(0, Math.floor((FZ0 - dz) / FRUN))));
       if (d < 5.35) return LY + 0.62;
-      if (Math.abs(dx) < 1.5 && dz > 4.4 && dz < 7.5) return LY + 0.05 + Math.min(2, Math.floor((7.45 - dz) / 0.75)) * 0.5 + 0.55;
       return null;
     },
   });
@@ -1092,11 +1890,19 @@ export function buildWatchtower(T) {
   // still CLAIMED so nobody else plants anything in it
   T.solidify(wallSegs, FL + bandH * 2);
   T.claimRing(LX, LZ, 8.5, 8.5, 0);
+  // the doorway's head: a stone lintel bedded into the curve of the ring wall
+  // (its back meets the flanking segments at x ±1.35) and a keystone. Its
+  // underside is at the head of the gap (FL + 2.55); the leaf, 2.4 tall,
+  // swings out beneath it. No jambs: the leaf hangs inside the wall's depth and
+  // its open edge passes where a jamb would stand.
+  sb.box(LX, FL + 2.56, LZ + 3.62, 2.7, 0.31, 0.5, 0xe8dcc4, { ao: 0 });
+  sb.box(LX, FL + 2.87, LZ + 3.64, 2.84, 0.07, 0.56, 0xf4ecd8, { ao: 0 });
+  sb.box(LX, FL + 2.56, LZ + 3.68, 0.42, 0.6, 0.58, 0xf4ecd8, { ao: 0 });
   // floorY sits on the flagstone disc watchInterior lays (FL + 0.08), not on the
   // bare plinth: the flattened landmark core reaches FL + 0.02 here
   const watchRoom = T.room({ id: 'watch', x: LX, z: LZ, w: RIN * 2, d: RIN * 2, rot: 0, y: FL, floorY: FL + 0.1, h: bandH * 2, label: 'The Watchtower' });
   T.door({
-    id: 'watch', room: watchRoom, y: FL, ry: 0, w: 1.9, h: 2.5, color: 0x2f4a5a,
+    id: 'watch', room: watchRoom, y: FL, ry: 0, w: 1.9, h: 2.5, color: 0x2f4a5a, field: 0x3b5c6e, trim: 0x24394a, flap: 0xf2e9d4, style: 'panel',
     x: LX + Math.cos(DOOR_A) * 3.3, z: LZ + Math.sin(DOOR_A) * 3.3, r: 3.4,
     say: 'the keeper is up the stairs. she has been up the stairs for eleven years.', speaker: 'THE WATCHTOWER',
   });
@@ -1112,6 +1918,20 @@ export function buildWatchtower(T) {
     'it does not point out to sea. it sweeps the island. "we are just looking out for you."',
     'at night the beam finds you, holds for a moment, and moves on. it feels almost affectionate.',
   ], { r: 4.6, speaker: 'THE WATCHTOWER' });
+
+  // ── HANDRAILS (Contract O): the spiral, the flight's cheeks, the drum ledge.
+  //    Built last, so the fence can stop where the keeper's cottage wall
+  //    already guards the ledge (see watchRails) ──────────────────────────────
+  watchRails(T, sb, {
+    LX, LZ, LY, FL,
+    FN: typeof FN !== 'undefined' ? FN : 0, FRUN: typeof FRUN !== 'undefined' ? FRUN : 0,
+    FZ1: typeof FZ1 !== 'undefined' ? FZ1 : 0, FZ0: typeof FZ0 !== 'undefined' ? FZ0 : 0,
+    fTop: typeof fTop !== 'undefined' ? fTop : null,
+  });
+  // ── THE GROUNDS: the ring the fence guards is the keeper's garden (lawn,
+  //    flagstone apron, crystal-grass, candy mushrooms, stones, the sea bench,
+  //    a telescope, a cat on the plinth) — see outskirts_yard.js ─────────────
+  buildWatchYard(T, { LX, LZ, LY, FL, cottage: { x: kf.x, z: kf.z, w: 8.0, d: 6.4, ry: kf.ry } });
 
   // ═══ NOT-AN-EXIT BEACH: the sign forest ════════════════════════════════════
   const BX = 230, BZ = -6;
