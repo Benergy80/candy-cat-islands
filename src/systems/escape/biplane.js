@@ -809,7 +809,8 @@ export function create(ctx, escape) {
     const cam = ctx.systems.camera, a = planes.aircraft?.biplane;
     if (!cam?.params || !cam.setParams || !a) { swing = null; return; }
     const h = a.heading, fx = Math.sin(h), fz = Math.cos(h), rx = Math.cos(h), rz = -Math.sin(h);
-    const side = ((pump.x - a.x) * rx + (pump.z - a.z) * rz) >= 0 ? 1 : -1;
+    // Ben (2026-09-26): film the flight from the OTHER side of the plane — mirror the side the pump is on
+    const side = ((pump.x - a.x) * rx + (pump.z - a.z) * rz) >= 0 ? -1 : 1;
     // ~70° off the tail toward the pump: side-on to the deckchair, the upper
     // wing ahead of it and the chair back edge-on, so nothing stands between
     const ox = -fx * 0.34 + rx * side * 0.94, oz = -fz * 0.34 + rz * side * 0.94;
