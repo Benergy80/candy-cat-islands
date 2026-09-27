@@ -968,6 +968,14 @@ export function create(ctx) {
   {
     const fence = (m, x, y, z, r) => { if (!m) return; m.boundingSphere = new THREE.Sphere(new THREE.Vector3(x, y, z), r); m.frustumCulled = true; };
     for (const m of birds.meshes) fence(m, 122, 14, 4, 125);
+    // WAVE 5 birds-flicker: a bird is never a blocker. As instanced clouds the
+    // gulls and pigeons were patched by the camera's see-through window
+    // (camera/cutout.js) — its near-lens clip discarded a gull 6–11 u from the
+    // lens outright, even mid-frame (Fish Harbor probe: 175 of 957 gull-frames),
+    // so a wheeling gull vanished and popped back — and they were tested by its
+    // occlusion sweep. Excluded here (flags read by camera.js instanceable() and
+    // cutout.js eligible()); birds.js keeps them off the lens instead.
+    for (const m of birds.meshes) { m.userData.noOcclude = true; m.userData.noInstOcclude = true; m.userData.noCut = true; m.userData.noFade = true; }
     if (koiMesh && props.meta.pond) fence(koiMesh, props.meta.pond.x, props.meta.pond.y, props.meta.pond.z, (props.meta.pond.r || 6) + 3);
   }
 
@@ -1086,7 +1094,7 @@ export function create(ctx) {
       const t = ctx.state.elapsed;
       uniforms.uTime.value = t;
       const pl = ctx.systems.player?.position;
-      birds.update(dt, t, pl);
+      birds.update(dt, t, pl, ctx.camera?.position);
       updateKoi(t);
       const night = 1 - (ctx.state.daylight ?? 1);
       if (eyeMesh) {

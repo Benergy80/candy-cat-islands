@@ -219,5 +219,384 @@
    "ui.clear": [],
    "powerups.grant": 13
   }
+ },
+ "powerups_look_crystal_day": {
+  "time": 11,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.setLook": "crystal",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_meadow",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_look_crystal_night": {
+  "time": 22.5,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.setLook": "crystal",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_meadow",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_look_crystal_close": {
+  "time": 11,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.5,
+  "dist": 13,
+  "call": {
+   "powerups.setLook": "crystal",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_meadow",
+    3.0,
+    -1.57
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_look_crystal_cat_night": {
+  "time": 21.5,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.setLook": "crystal",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "cat_plaza",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_look_comet_day": {
+  "time": 11,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.setLook": "comet",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_meadow",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_look_comet_night": {
+  "time": 22.5,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.setLook": "comet",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_meadow",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_look_comet_close": {
+  "time": 11,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.5,
+  "dist": 13,
+  "call": {
+   "powerups.setLook": "comet",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_meadow",
+    3.0,
+    -1.57
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_look_comet_cat_night": {
+  "time": 21.5,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.setLook": "comet",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "cat_plaza",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_look_konpeito_day": {
+  "time": 11,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.setLook": "konpeito",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_meadow",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_look_konpeito_night": {
+  "time": 22.5,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.setLook": "konpeito",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_meadow",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_look_konpeito_close": {
+  "time": 11,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.5,
+  "dist": 13,
+  "call": {
+   "powerups.setLook": "konpeito",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_meadow",
+    3.0,
+    -1.57
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_look_konpeito_cat_night": {
+  "time": 21.5,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.setLook": "konpeito",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "cat_plaza",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_look_crystal_close_night": {
+  "time": 22.5,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.5,
+  "dist": 13,
+  "call": {
+   "powerups.setLook": "crystal",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_meadow",
+    3.0,
+    -1.57
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_q_bridge": {
+  "time": 15,
+  "frames": 130,
+  "az": 0.785,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_bridge",
+    2.2
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_q_cupcake": {
+  "free": [
+   -85.6,
+   -8.9
+  ],
+  "y": 16.0,
+  "az": 0.5,
+  "el": 0.45,
+  "dist": 24,
+  "time": 13,
+  "frames": 130,
+  "call": {
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_cupcake",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_q_tower": {
+  "time": 17,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "cat_tower",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_q_effect_close": {
+  "time": 12,
+  "frames": 130,
+  "az": 0.6,
+  "el": 0.5,
+  "dist": 15,
+  "call": {
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "cat_plaza",
+    4.5,
+    -1.57
+   ],
+   "ui.clear": [],
+   "powerups.grant": 13
+  }
+ },
+ "powerups_q_effect_night": {
+  "time": 21.5,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "cat_plaza",
+    4.5
+   ],
+   "ui.clear": [],
+   "powerups.grant": 13
+  }
+ },
+ "powerups_look_crystal_cat_day": {
+  "time": 12,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.setLook": "crystal",
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "cat_plaza",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_p_delta": {
+  "time": 11,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_delta",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_p_palace_iso": {
+  "time": 13,
+  "frames": 130,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "call": {
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "powerups.stage": [
+    "candy_palace",
+    3.0
+   ],
+   "ui.clear": []
+  }
+ },
+ "powerups_p_palace_free": {
+  "free": [
+   -135.24,
+   -36.1
+  ],
+  "y": 13.0,
+  "az": 2.356,
+  "el": 0.64,
+  "dist": 31,
+  "time": 13,
+  "frames": 130,
+  "call": {
+   "powerups.end": [],
+   "powerups.respawnAll": [],
+   "ui.clear": []
+  }
  }
 }

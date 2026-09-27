@@ -27,7 +27,7 @@
 // flock climbs to 14 u clear over any footprint it crosses.
 import * as THREE from 'three';
 import { rng, hash } from '../../../core/util.js';
-import { Pool, part, mergeParts, shadeAxis, fanXZ, applyFlap, buildingRects, OBSTACLES, TAU, uiToast } from './common.js';
+import { Pool, ShadowField, part, mergeParts, shadeAxis, fanXZ, applyFlap, buildingRects, OBSTACLES, TAU, uiToast } from './common.js';
 
 // Critique fix (same one the butterflies got): near-white hues on flat
 // single-polygon wings made the flock read as white origami shards skimming the
@@ -52,13 +52,15 @@ function cup(g) {
 function wing(side) {
   const g = cup(fanXZ(WING.map(([x, z]) => [x * side, z])));
   const p = part(g, { tag: side });
-  shadeAxis(p, 'x', 0.1, 0.76, 0xfff6f0, 0x5b4470);   // dark tips read against bright sky
+  // WAVE 5 birds-flicker polish: the old 0x5b4470 tips turned every hue near-black at range, and over
+  // the strait (no bright sky behind) the V read as dark pins — the tint now survives to the tip
+  shadeAxis(p, 'x', 0.1, 0.76, 0xfff6f0, 0xa58cc0);
   return p;
 }
 
 function birdGeo() {
   const body = part(new THREE.SphereGeometry(1, 6, 4), { scale: [0.125, 0.115, 0.34] });
-  shadeAxis(body, 'y', -0.11, 0.11, 0x7d6b92, 0xffffff);   // saturated back, pale belly
+  shadeAxis(body, 'y', -0.11, 0.11, 0x9d8bb2, 0xffffff);   // saturated back, pale belly (lifted, polish)
   const head = part(new THREE.SphereGeometry(1, 5, 3), { pos: [0, 0.05, 0.31], scale: 0.125 });
   shadeAxis(head, 'y', -0.1, 0.12, 0xd8c8dc, 0xfffaf4);
   const parts = [
@@ -80,21 +82,40 @@ const _b = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _p = new THREE.Vector3();
 const _pt = new THREE.Vector3();
+const _o = new THREE.Object3D();          // (polish) per-bird matrix in YXZ: yaw, then a LOCAL pitch, then roll
 
 export function create(env) {
-  const { ctx, world, scene, shadowField } = env;
+  const { ctx, world, scene } = env;
   const r = rng(hash('candy-sugargliders'));
   const N = 7;                                   // the V is 5–7 birds; 7 slots is the cap
   const mat = applyFlap(new THREE.MeshStandardMaterial({
     vertexColors: true, roughness: 0.62, metalness: 0, side: THREE.DoubleSide,
   }), 0.62, { key: 'candy-glider-v3', dihedral: 0.42, backShade: 0.84 });
   const pool = new Pool(scene, birdGeo(), mat, N, { name: 'sugar-gliders', cast: true, attrs: { aPhase: 1, aRate: 1, aAmp: 1 } });
+  // WAVE 5 birds-flicker (Ben: "rainbow coloured birds that fly over the water
+  // were disappearing and reappearing"). The V is a SKY event, not ground
+  // wildlife, so it lives in its own root instead of the candy-creatures group:
+  // that group is switched off whole the moment the lens crosses x = 40 (the
+  // ferry's last third, the Arrivals Pier, Cat Island's west shore), which
+  // deleted a flock in mid-frame over the strait. creatures.js lets a crossing
+  // already under way fly on to its end (coast()). Same no-occlude flags as the
+  // group, so the camera never dollies for a glider and the cut never eats one.
+  const sky = new THREE.Group();
+  sky.name = 'candy-creatures-sky';
+  sky.userData.noOcclude = true; sky.userData.noInstOcclude = true; sky.userData.noFade = true;
+  ctx.scene.add(sky);
+  sky.add(pool.mesh);
   const aPhase = pool.attr('aPhase').array, aRate = pool.attr('aRate').array, aAmp = pool.attr('aAmp').array;
-  const shade = shadowField.claim(N);
+  // …and so do its shadows: a claim on the island's shared decal pool lived
+  // under the same gate and blinked off the frosting with it. Its own 7-slot
+  // pool in the sky root (+1 draw call) keeps the V and its shadows together.
+  const skyShade = new ShadowField(sky, N);
+  skyShade.pool.mesh.name = 'sugar-glider-shadows';
+  const shade = skyShade.claim(N);
   const birds = [];
   for (let i = 0; i < N; i++) {
     // slot in the V, recomputed per crossing (the flock size changes)
-    birds.push({ along: 0, lat: 0, ph: r() * TAU, scale: 0.92 + r() * 0.22, bob: r() * TAU });
+    birds.push({ along: 0, lat: 0, ph: r() * TAU, scale: 0.92 + r() * 0.22, bob: r() * TAU, tr: 0, tp: 0 });
     aPhase[i] = r() * TAU; aRate[i] = 8 + r() * 3; aAmp[i] = 0.8 + r() * 0.45;
     pool.tint(i, HUES[Math.floor(r() * HUES.length)]);
   }
@@ -105,6 +126,57 @@ export function create(env) {
   // authoring hook: force a crossing to be at progress t, two frames from now
   // (the lens has to settle after a teleport before the aim means anything)
   let cueT = null, cueWait = 0;
+  // the lens last frame: a re-aim is for a TELEPORT (one-frame jump), never for drift
+  let lastCX = NaN, lastCZ = NaN, lastT = 0;
+  let coasting = false;                         // creatures.js gate closed: finish the crossing, start nothing
+
+  // ── in-frame guard (WAVE 5 birds-flicker) ──────────────────────────────────
+  // A flock may only appear or vanish OFF-SCREEN. Round 4 re-aimed the V every
+  // time the lens had drifted 20 u from where the crossing was solved — on the
+  // Sugarfin that is every ~9 s of a steady crossing — and each re-aim lifted
+  // the whole V out of the sky and dropped it back mid-frame (route.t ≈ 0.4). A
+  // crossing now starts where no bird is in the frustum (slid back along its
+  // line) and only ends once every bird has left it.
+  const _fr = new THREE.Frustum(), _pm = new THREE.Matrix4(), _sph = new THREE.Sphere();
+  function frustumNow() {
+    const cam = ctx.camera;
+    cam.updateMatrixWorld();
+    _pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    return _fr.setFromProjectionMatrix(_pm);
+  }
+  /** Any bird of the current V inside the (padded) frustum at progress rt? */
+  function flockSeen(rt, t) {
+    const fr = frustumNow();
+    const LEN = route.len || 150;
+    const fx = Math.sin(route.dir), fz = Math.cos(route.dir);
+    const rx = Math.cos(route.dir), rz = -Math.sin(route.dir);
+    const hx = route.ax - fx * LEN * 0.5 + rx * route.side + fx * LEN * rt;
+    const hz = route.az - fz * LEN * 0.5 + rz * route.side + fz * LEN * rt;
+    const boost = flockBoost(hx, hz);
+    for (let i = 0; i < route.size; i++) {
+      const b = birds[i];
+      const w = (b.lat + Math.sin(t * 0.7 + b.ph) * 0.5) * boost;
+      const x = hx + fx * b.along * boost + rx * w, z = hz + fz * b.along * boost + rz * w;
+      // 3 u of pad: the lens may still move this frame (systems update before the camera)
+      _sph.center.set(x, Math.max(route.ground, world.height(x, z)) + route.alt + lift, z);
+      _sph.radius = 0.8 * b.scale * route.scale * boost + 3;
+      if (fr.intersectsSphere(_sph)) return true;
+    }
+    return false;
+  }
+  /** (polish) the formation's minimum-screen-size factor for a head at (hx, hz): a wingspan
+   *  (≈ 1.5 × scale) stays ≥ ~3.5 % of the frame height; capped at 2.4×. */
+  function flockBoost(hx, hz) {
+    const cp = ctx.camera.position;
+    const ty = Math.max(route.ground, world.height(hx, hz)) + route.alt + lift;
+    const dh = Math.hypot(hx - cp.x, ty - cp.y, hz - cp.z);
+    const tanH = Math.tan((ctx.camera.fov || 40) * Math.PI / 360);
+    return Math.min(2.4, Math.max(1, (0.046 * dh * tanH) / Math.max(0.3, route.scale * 0.95)));
+  }
+  function endRoute() {
+    route.active = false; route.gap = 5 + r() * 10;
+    pool.mesh.visible = false; shade.hideAll(); skyShade.flush(); wasVisible = false;
+  }
 
   /** ≥14 u of air over every building footprint this system can see. */
   function clearanceAt(x, z) {
@@ -192,7 +264,7 @@ export function create(env) {
     }
     return cost;
   }
-  function startRoute() {
+  function startRoute(offscreen = false) {
     const cam = ctx.camera;
     route.size = 5 + Math.floor(r() * 3);                       // 5, 6 or 7
     const alt = ALT_MIN + r() * (ALT_MAX - ALT_MIN);
@@ -233,7 +305,7 @@ export function create(env) {
     // The V's ARMS project onto screen-vertical, and this lens has only 15° of
     // that. Close overhead the formation must shrink or half of it hangs off
     // the top edge — which is what "a scatter, not a V" looked like.
-    route.spread = Math.max(0.55, Math.min(2.1, pick.dist * 0.05));
+    route.spread = route.scale;          // (polish) spacing keeps pace with the bird size, or big birds merge
     route.dir = bestDir + (r() - 0.5) * 0.10;
     route.dur = 17 + r() * 7;
     route.side = (r() - 0.5) * 1.2;
@@ -243,7 +315,7 @@ export function create(env) {
     // flypast, so the flock waits for the player to reach open ground.
     if (bestObstacle > 8) {
       route.active = false; route.gap = 6 + r() * 6;
-      pool.mesh.visible = false; shade.hideAll(); wasVisible = false;
+      pool.mesh.visible = false; shade.hideAll(); skyShade.flush(); wasVisible = false;
       return;
     }
     route.t = 0; route.active = true; toasted = false;
@@ -252,13 +324,23 @@ export function create(env) {
     let mean = 0;
     for (let i = 0; i < N; i++) {
       const k = i - (route.size - 1) / 2;                        // symmetric for THIS size
-      birds[i].along = (-Math.abs(k) * 1.30 - r() * 0.16) * route.spread;
-      birds[i].lat = k * 0.95 * route.spread;
+      // WAVE 5 birds-flicker polish (critic: "3–4 bodies merge into one dark blob"): neighbours used
+      // to sit 1.6 spreads apart with a 1.5-scale wingspan and spread ≈ scale — wingtip to wingtip.
+      // Now 2.1 along / 1.9 across (≈ 2.8 scale between neighbours: a clear 1.5 body lengths of sky).
+      birds[i].along = (-Math.abs(k) * 2.10 - r() * 0.16) * route.spread;
+      birds[i].lat = k * 1.90 * route.spread;
       if (i < route.size) mean += birds[i].along / route.size;
     }
     // the whole V trails BEHIND its leader, so slide it forward onto the aim
     // point or the formation sits half a screen off to one side
     for (let i = 0; i < N; i++) birds[i].along -= mean;
+    // a scheduled crossing enters from OFF-SCREEN: slide its start back along
+    // the line until no bird is in the frame (a short close pass can begin
+    // inside a wide lens at t = 0)
+    if (offscreen) {
+      const t = ctx.state.elapsed || 0;
+      while (route.t > -1.2 && flockSeen(route.t, t)) route.t -= 0.05;
+    }
   }
   startRoute();
   // A screenshot run steps ~2 s of game time before it shoots, so "already mid
@@ -269,40 +351,64 @@ export function create(env) {
     name: 'birds', route,
     /** Put a flypast on screen at progress t — for authored shots and views. */
     cue(t = 0.45) { cueT = Math.max(0.05, Math.min(0.9, t)); cueWait = 0.2; },
+    /** A crossing is in the air (creatures.js keeps it flying while its gate is shut). */
+    airborne: () => route.active,
+    /** creatures.js, gate shut (lens at x ≥ 40): fly the current crossing to its end, start nothing. */
+    coast(dt, ctx) {
+      if (!route.active) return;
+      coasting = true;
+      try { this.update(dt, ctx); } finally { coasting = false; }
+    },
     update(dt, ctx) {
       const t = ctx.state.elapsed;
       const p = ctx.systems.player?.position;
+      const cam = ctx.camera.position;
       toastCd -= dt;
+      // Bookkeeping first, on every call. A TELEPORT (the visitor jumps 40 u in
+      // one frame, or the lens snaps 20 u in one frame — a snap can land a
+      // frame behind the teleport) re-aims the crossing: the whole picture
+      // changed, so nothing pops. Drift is NOT a teleport: the Sugarfin carries
+      // the lens 60 u across the strait, and round 4's "20 u from where the
+      // crossing was solved" test re-aimed the V mid-frame every ~9 s of the
+      // ride (Ben: "disappearing and reappearing"). A lens that drifts away now
+      // simply lets the V fly out of the picture. Frames this system did not
+      // run (the creatures gate shut, paused) are a gap in the record, not a jump.
+      const fresh = t - lastT < 0.25;
+      lastT = t;
+      let jumped = false;
+      if (p) {
+        jumped = fresh && (Math.hypot(p.x - lastPX, p.z - lastPZ) > 40
+          || (lastCX === lastCX && Math.hypot(cam.x - lastCX, cam.z - lastCZ) > 20));
+        lastPX = p.x; lastPZ = p.z;
+        lastCX = cam.x; lastCZ = cam.z;
+      }
       // Gliders are a daylight skyline event. After dusk a dark flock against a
       // dark sky is invisible, and a toast about a flypast nobody can see is
-      // exactly the lie this pass is here to stop telling.
-      if ((ctx.state.daylight ?? 1) < 0.35) {
-        if (wasVisible) { pool.mesh.visible = false; shade.hideAll(); wasVisible = false; }
-        route.active = false; route.gap = Math.max(route.gap, 4);
+      // exactly the lie this pass is here to stop telling. No NEW crossing
+      // starts after dusk; one already in the air finishes (off-screen) rather
+      // than blinking out of a frame the visitor is watching.
+      const dusk = (ctx.state.daylight ?? 1) < 0.35;
+      if (dusk && !route.active) {
+        if (wasVisible) { pool.mesh.visible = false; shade.hideAll(); skyShade.flush(); wasVisible = false; }
+        route.gap = Math.max(route.gap, 4);
         return;
       }
-      if (p) {
-        // Teleport (or a camera snap one frame behind it) → re-aim the crossing.
-        // The aim is solved off the lens, so a stale lens aims at nothing.
-        const jumped = Math.hypot(p.x - lastPX, p.z - lastPZ) > 40
-          || Math.hypot(ctx.camera.position.x - (route.camX ?? 0), ctx.camera.position.z - (route.camZ ?? 0)) > 20;
-        if (jumped) { startRoute(); route.t = 0.5 - Math.min(0.3, 2.2 / route.dur); }
-        lastPX = p.x; lastPZ = p.z;
+      if (jumped) {
+        if (coasting || dusk) { endRoute(); return; }        // a new picture, and no flock in it
+        startRoute(); route.t = 0.5 - Math.min(0.3, 2.2 / route.dur);
       }
-      if (cueT !== null && (cueWait -= dt) <= 0) {
+      if (!coasting && cueT !== null && (cueWait -= dt) <= 0) {
         startRoute(); route.t = cueT; cueT = null;
       }
       if (!route.active) {
-        if ((route.gap -= dt) <= 0) startRoute();
-        if (wasVisible) { pool.mesh.visible = false; shade.hideAll(); wasVisible = false; }
-        return;
+        if ((route.gap -= dt) <= 0 && !coasting) startRoute(true);
+        if (wasVisible) { pool.mesh.visible = false; shade.hideAll(); skyShade.flush(); wasVisible = false; }
+        if (!route.active) return;
       }
       route.t += dt / route.dur;
-      if (route.t >= 1) {
-        route.active = false; route.gap = 5 + r() * 10;
-        pool.mesh.visible = false; shade.hideAll(); wasVisible = false;
-        return;
-      }
+      // …and it only ends once every bird has flown out of the frame (a lens
+      // that turned to follow the V can still hold it at t = 1)
+      if (route.t >= 1 && (route.t >= 1.8 || !flockSeen(route.t, t))) { endRoute(); return; }
       pool.mesh.visible = true; wasVisible = true;
       const LEN = route.len || 150;
       const fx = Math.sin(route.dir), fz = Math.cos(route.dir);
@@ -320,20 +426,43 @@ export function create(env) {
       lift += (Math.max(0, need - route.alt) - lift) * Math.min(1, dt * 1.6);
 
       const bank = Math.sin(t * 0.5) * 0.18;
+      // WAVE 5 birds-flicker polish — at range the V shrank to dark vertical pins (ferryC f213–f263).
+      // (1) A minimum screen size: the whole formation (bird size AND spacing, one factor, so it never
+      //     re-clumps) grows so a wingspan stays ≥ ~3.5 % of the frame height however far the V flies.
+      // (2) Each bird banks its wings toward the lens (≤ 0.65 rad), so a V crossing at lens height
+      //     shows its coloured wing faces instead of knife edges. Both are smooth in the lens position.
+      const cp = ctx.camera.position;
+      const boost = flockBoost(hx, hz);
       for (let i = 0; i < N; i++) {
         if (i >= route.size) { pool.hide(i); shade.hide(i); continue; }
         const b = birds[i];
-        const x = hx + fx * b.along + rx * (b.lat + Math.sin(t * 0.7 + b.ph) * 0.5);
-        const z = hz + fz * b.along + rz * (b.lat + Math.sin(t * 0.7 + b.ph) * 0.5);
+        const w = (b.lat + Math.sin(t * 0.7 + b.ph) * 0.5) * boost;
+        const x = hx + fx * b.along * boost + rx * w;
+        const z = hz + fz * b.along * boost + rz * w;
         const g = world.height(x, z);
         const y = Math.max(route.ground, g) + route.alt + lift + Math.sin(t * 1.1 + b.bob) * 0.45 + b.lat * 0.05;
-        const s = b.scale * route.scale;
-        pool.place(i, x, y, z, route.dir, s, s, s, Math.sin(t * 0.9 + b.ph) * 0.05, bank + Math.sin(t * 1.3 + b.ph) * 0.06);
+        const s = b.scale * route.scale * boost;
+        // tilt the wing plane toward the lens (a bank for a lens abeam, a dip or lift for one ahead or
+        // behind): the wing's lit face — its top for a lens above, its belly for one below — turns to
+        // the camera by up to 0.6 rad. The flip as the lens crosses the flock's plane is eased (~0.4 s),
+        // which reads as a glider rocking its wings, never as a pop.
+        const cx = cp.x - x, cy = cp.y - y, cz = cp.z - z;
+        const cr = cx * rx + cz * rz, cf = cx * fx + cz * fz, hz2 = Math.hypot(cr, cf) || 1;
+        const tilt = Math.max(-0.6, Math.min(0.6, Math.atan(hz2 / (Math.abs(cy) < 1e-3 ? 1e-3 : cy))));
+        const e = Math.min(1, dt * 5);
+        b.tr += (-tilt * cr / hz2 - b.tr) * e;
+        b.tp += (tilt * cf / hz2 - b.tp) * e;
+        _o.position.set(x, y, z);
+        _o.rotation.set(b.tp + Math.sin(t * 0.9 + b.ph) * 0.05, route.dir, bank + Math.sin(t * 1.3 + b.ph) * 0.06 + b.tr, 'YXZ');
+        _o.scale.set(s, s, s);
+        _o.updateMatrix();
+        pool.mesh.setMatrixAt(i, _o.matrix);
         // a shadow this far up is a wide grey smudge — but it is the thing that
-        // tells you something just went over your head
-        shade.set(i, x, g, z, s * 0.55, 1, route.dir);
+        // tells you something just went over your head. Over the strait it lies ON the water
+        // (polish: it used to sit on the seabed under the opaque sea, and nothing said "high")
+        shade.set(i, x, Math.max(g, 0), z, s * 0.55, 1, route.dir);
       }
-      pool.flush();
+      pool.flush(); skyShade.flush();
 
       // Only promise a flypast the player can actually SEE — but at 16–19.5 u
       // the thing you see is usually not the birds. This camera points 20–30°

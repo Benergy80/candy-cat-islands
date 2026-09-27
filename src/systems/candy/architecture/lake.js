@@ -55,7 +55,8 @@ export function buildLake(A) {
   B.waffleBox(5.6, 2.4, 0.28, { at: [sx, sy + 3.5, sz], rot: [0, srot, 0], color: C.waferPale });
   B.signQuad('lake', 5.3, 2.16, { at: [sx + Math.sin(srot) * 0.17, sy + 3.5, sz + Math.cos(srot) * 0.17], rot: [0, srot, 0] });
   B.signQuad('lake', 5.3, 2.16, { at: [sx - Math.sin(srot) * 0.17, sy + 3.5, sz - Math.cos(srot) * 0.17], rot: [0, srot + Math.PI, 0] });
-  icingDrip(B, sx, sy + 4.7, sz, srot + Math.PI / 2, 5.6, { color: C.caramel, r: 0.24, drop: 0.32 });
+  // along the board (rotY = the run's yaw, the board's own — not its normal)
+  icingDrip(B, sx, sy + 4.7, sz, srot, 5.6, { color: C.caramel, r: 0.24, drop: 0.32 });
   A.collide(sx, sz, 1.0);
   A.readSign('lake', sx, sz + 2.2, 3.8, 'Read: Chocolate Lake');
   A.claimApron(sx, sz, 1.4, 8.0, { r: 2.4 });

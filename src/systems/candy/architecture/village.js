@@ -2,7 +2,7 @@
 // Twelve gingerbread houses around an open plaza (kept clear for the Sour Patch
 // Kids), a sugar fountain that actually runs, a licorice bandstand, a market
 // row, signposts, fences, lampposts and wrapper bunting.
-import { C, SPRINKLE, lamppost, bench, signpost, fenceLine, door, doorway, windowPane, icingDrip, caneRun, plaque } from './kit.js';
+import { C, SPRINKLE, lamppost, bench, signpost, fenceLine, door, doorway, windowPane, icingDrip, caneRun, plaque, buntingString } from './kit.js';
 import { HOUSE_NAMES } from './signs.js';
 import * as IN from './interiors.js';
 
@@ -118,7 +118,8 @@ export function buildVillage(A) {
   B.waffleBox(3.6, 1.5, 0.2, { at: [-126, wbY + 2.55, 38.6], rot: [0, 0.05, 0], color: C.waferPale });
   B.signQuad('village', 3.3, 1.28, { at: [-126, wbY + 2.55, 38.72], rot: [0, 0.05, 0] });
   B.signQuad('village', 3.3, 1.28, { at: [-126, wbY + 2.55, 38.48], rot: [0, Math.PI + 0.05, 0] });
-  icingDrip(B, -126, wbY + 3.32, 38.6, Math.PI / 2 + 0.05, 3.6, { color: C.icingPink, r: 0.2, drop: 0.28 });
+  // along the board (rotY = the run's yaw, the board's own 0.05 — not its normal)
+  icingDrip(B, -126, wbY + 3.32, 38.6, 0.05, 3.6, { color: C.icingPink, r: 0.2, drop: 0.28 });
   A.readSign('village', -126, 38.6, 3.6, 'Read: Gumdrop Village');
 
   // ── plaza furniture (kept out of the middle) ──────────────────────────────
@@ -740,12 +741,15 @@ function stringBunting(A, a, b) {
   if (len > 16 || len < 3) return;
   const n = Math.max(5, Math.round(len / 1.15));
   const ry = Math.atan2(dx, dz) + Math.PI / 2;
+  // the flags hang FROM a licorice string, eave to eave (WAVE 5: from nothing)
+  const line = [[a.x, a.eaveY, a.z]];
   for (let i = 1; i < n; i++) {
     const t = i / n;
     const sag = Math.sin(t * Math.PI) * (len * 0.14);
-    A.inst.bunting.push({
-      x: a.x + dx * t, y: a.eaveY + (b.eaveY - a.eaveY) * t - sag, z: a.z + dz * t,
-      w: 0.5, h: 0.6, ry, ph: i * 0.9, color: SPRINKLE[i % SPRINKLE.length],
-    });
+    const fx = a.x + dx * t, fy = a.eaveY + (b.eaveY - a.eaveY) * t - sag, fz = a.z + dz * t;
+    line.push([fx, fy, fz]);
+    A.inst.bunting.push({ x: fx, y: fy, z: fz, w: 0.5, h: 0.62, ry, ph: i * 0.9, color: SPRINKLE[i % SPRINKLE.length] });
   }
+  line.push([b.x, b.eaveY, b.z]);
+  buntingString(A.B, line, 0.035);
 }

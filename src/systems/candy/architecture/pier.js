@@ -1,7 +1,7 @@
 // SUGAR PIER — landmark candy_dock (-42, 22). The player's first sight of
 // Candyland: a candy-cane pier out over the sea toward the ferry route, a
 // striped ticket booth, and a very cheerful welcome arch with a secret.
-import { C, SPRINKLE, lamppost, bench, icingDrip, door, doorway } from './kit.js';
+import { C, SPRINKLE, lamppost, bench, icingDrip, door, doorway, buntingString } from './kit.js';
 import * as IN from './interiors.js';
 import { railRun, caneStyle } from './rails.js';
 
@@ -134,7 +134,9 @@ export function buildPier(A) {
   B.waffleBox(4.0, 1.72, 0.22, { at: [SX, sy + 2.5, SZ], rot: [0, SROT, 0], color: C.waferPale });
   B.signQuad('pier', 3.7, 1.48, { at: [SX + nx * 0.14, sy + 2.5, SZ + nz * 0.14], rot: [0, SROT, 0] });
   B.signQuad('pier', 3.7, 1.48, { at: [SX - nx * 0.14, sy + 2.5, SZ - nz * 0.14], rot: [0, SROT + Math.PI, 0] });
-  icingDrip(B, SX, sy + 3.38, SZ, SROT + Math.PI / 2, 4.0, { color: C.icingPink, r: 0.2, drop: 0.3 });
+  // along the board (icingDrip's rotY = the run's yaw, the board's own): at
+  // SROT + π/2 it hung as a vertical-looking chain of beads through the sign
+  icingDrip(B, SX, sy + 3.38, SZ, SROT, 4.0, { color: C.icingPink, r: 0.2, drop: 0.3 });
   A.collide(SX, SZ, 0.9);
   A.readSign('pier', SX, SZ, 3.4, 'Read: Sugar Pier');
   // nothing grows in front of the first sign the player ever reads
@@ -211,7 +213,8 @@ function beachGrounds(A, deck) {
         ty += h;
       });
       B.cyl('matte', 0.05, 0.06, 1.5, 5, { at: [x, ty + 0.75, z], color: C.licorice });
-      A.inst.bunting.push({ x: x + 0.4, y: ty + 1.15, z, w: 0.8, h: 0.5, ry: 0.9, ph: 1.2, color: C.red });
+      // the flag's inner edge on its pole (its centre 0.4 along its own local X)
+      A.inst.bunting.push({ x: x + 0.4 * Math.cos(0.9), y: ty + 1.45, z: z - 0.4 * Math.sin(0.9), w: 0.8, h: 0.55, ry: 0.9, ph: 1.2, color: C.red });
       A.collide(x, z, 2.7);
       // bucket, spade, and a sign nobody asked for
       B.cyl('gloss', 0.3, 0.26, 0.5, 10, { at: [x + 3.0, y + 0.25, z + 1.2], rot: [0.2, 0, 0.25], color: C.blue });
@@ -362,8 +365,16 @@ function buildBooth(A, x, z, rotY) {
   // wafer roof + icing drip + candy-cane finial
   const [rx, rz] = fwd(0);
   R.waffleCone(w * 0.74, 1.0, 4, { at: [rx, floorY + h + 0.48, rz], rot: [0, rotY + Math.PI / 4, 0], color: C.wafer });
-  icingDrip(R, rx, floorY + h + 0.06, rz, rotY, w + 0.5, { color: C.icingPink, r: 0.2, drop: 0.3 });
-  icingDrip(R, rx, floorY + h + 0.06, rz, rotY + Math.PI / 2, d + 0.5, { color: C.icingPink, r: 0.2, drop: 0.3 });
+  // WAVE 5 (artifacts): along the roof's four EAVES. Two runs crossing through
+  // the roof's centre only showed their ends — four lone blobs stuck out of
+  // the middle of each eave. (The 4-sided cone, yawed 45°, has a square base
+  // of half-side w·0.74/√2 ≈ 0.523 w.)
+  const EH = w * 0.523;
+  for (const s of [-1, 1]) {
+    const [ax, az] = fwd(s * EH, 0), [bx, bz] = fwd(0, s * EH);
+    icingDrip(R, ax, floorY + h + 0.02, az, rotY, EH * 2, { color: C.icingPink, r: 0.2, drop: 0.3 });
+    icingDrip(R, bx, floorY + h + 0.02, bz, rotY + Math.PI / 2, EH * 2, { color: C.icingPink, r: 0.2, drop: 0.3 });
+  }
   R.sph('gloss', 0.3, 10, 8, { at: [rx, floorY + h + 1.1, rz], color: C.red });
 
   // awning over the counter
@@ -467,20 +478,27 @@ function buildWelcome(A) {
   B.signQuad('welcome', bw - 0.35, bh - 0.3, { at: [cx + Math.sin(rotY) * 0.2, by, cz + Math.cos(rotY) * 0.2], rot: [0, rotY, 0] });
   B.signQuad('welcome', bw - 0.35, bh - 0.3, { at: [cx - Math.sin(rotY) * 0.2, by, cz - Math.cos(rotY) * 0.2], rot: [0, rotY + Math.PI, 0] });
   // icing scallops + gumdrops along the top
-  icingDrip(B, cx, by + bh / 2 + 0.05, cz, rotY + Math.PI / 2, bw, { color: C.icing, r: 0.3, drop: 0.4, step: 0.75 });
+  // WAVE 5 (artifacts): along the board's top edge. icingDrip's rotY is the
+  // RUN's yaw (the board's own, like the bunting below); at rotY + π/2 the
+  // scallops ran straight through the board and 6 u out over the road — a
+  // string of beads floating across the first thing the visitor sees.
+  icingDrip(B, cx, by + bh / 2 + 0.05, cz, rotY, bw, { color: C.icing, r: 0.3, drop: 0.4, step: 0.75 });
   for (let i = 0; i <= 8; i++) {
     const t = -bw / 2 + (bw * i) / 8;
     B.sph('gloss', 0.3, 10, 8, { at: [cx + Math.cos(rotY) * t, by + bh / 2 + 0.42, cz - Math.sin(rotY) * t], color: SPRINKLE[i % SPRINKLE.length] });
   }
-  // bunting swagged under the board
+  // bunting swagged under the board — on a licorice string tied off at the
+  // posts (WAVE 5: the flags used to hang from nothing)
+  const yS = by - bh / 2 - 0.06, line = [[posts[1][0], yS, posts[1][1]]];
   for (let i = 0; i < 14; i++) {
     const t = -bw / 2 + (bw * (i + 0.5)) / 14;
     const sag = Math.sin((i + 0.5) / 14 * Math.PI) * 0.7;
-    A.inst.bunting.push({
-      x: cx + Math.cos(rotY) * t, y: by - bh / 2 - 0.25 - sag, z: cz - Math.sin(rotY) * t,
-      w: 0.52, h: 0.62, ry: rotY, ph: i * 0.8, color: SPRINKLE[i % SPRINKLE.length],
-    });
+    const fx = cx + Math.cos(rotY) * t, fy = yS - sag, fz = cz - Math.sin(rotY) * t;
+    line.push([fx, fy, fz]);
+    A.inst.bunting.push({ x: fx, y: fy, z: fz, w: 0.56, h: 0.7, ry: rotY, ph: i * 0.8, color: SPRINKLE[i % SPRINKLE.length] });
   }
+  line.push([posts[0][0], yS, posts[0][1]]);
+  buntingString(B, line, 0.045);
   A.mark('welcome_arch', cx, by, cz);
   A.readSign('welcome', cx, cz, 5.5, 'Read the welcome sign');
   // NOTHING GROWS IN FRONT OF THE FIRST SIGN IN THE GAME. Round 3: "the arrival

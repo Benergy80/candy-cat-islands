@@ -11,10 +11,22 @@
 //                    Toast "Camera: follow — turns with you".
 //   3 TOP            el 1.10, 31 × 1.40 = 43.4 u, fov 30: the lay of the land. Toast "Camera: top — lay of
 //                    the land". The mode toasts are MODE_TOAST; the chip (ui/hotbar.js) lights the mode.
+//   4 EYES           FIRST PERSON (BRIEF WAVE 5, Contract Q camera (a); camera/firstperson.js): the lens at
+//                    his eyes, riding his neck (1.55 u over his feet standing; the crouch, the lean and the
+//                    slide carry it; a look down tips it out over his chest so his collar never fills the
+//                    frame), fov 60 (the wheel / a pinch zooms 34..76); a drag with any button (or the touch
+//                    right thumb) looks at the orbit's rates, pitch +70° / −80°; Q/E turn 45°; tap V levels;
+//                    WASD walks relative to the look (controlAzimuth = the look's yaw) and he turns to face
+//                    it, so a click / X throws where you look. His head and hat are hidden (restored exactly
+//                    on leaving), the silhouette, the see-through window, the fades, density and the whole
+//                    occlusion ladder are off (nothing stands between an eye and itself). A shot
+//                    (cinematic()) blends the eye out to its framing and back. Toast "Camera: eyes —
+//                    first person, drag to look". 1/2/3 cut back out, framed behind the way he looked.
 //   Flying (ctx.state.flying) frames every mode at 44 / 0.38 / fov 40 behind the heading (Contract E).
 //   Anything that owns the framing (interiors, the palace and the cave, vehicles, the ferry, a lock) gets
-//   mode 1's framing in mode 2 from its first frame (its own setParams({azimuth}) + snap() is never
-//   overwritten, even when it snaps before declaring itself); the mode label is kept.
+//   mode 1's framing in modes 2 and 4 from its first frame (its own setParams({azimuth}) + snap() is never
+//   overwritten, even when it snaps before declaring itself); the mode label is kept. Mode 4 cuts out of
+//   his head to that framing (a snap that keeps a running shot) and back into it when the owner lets go.
 //   WASD         moves along controlAzimuth, which chases the lens at basisRate
 //                (0.87 rad/s, so the heading turns ≤ 0.9) while you hold a key
 //                (a Q/E or a drag mid-walk bends your heading instead of jerking
@@ -67,16 +79,18 @@
 //
 // THE NIGHT SKY MOMENT. The sky system hangs a big cartoon moon 36-52° above the
 // horizon all night, and the gameplay lens (elevation 0.64, fov 30) looks DOWN:
-// the moon is never, at any azimuth, inside the frame. So once a night — the
-// first time it is 21:00-23:30 with the visitor outdoors, on foot and in control
-// — the camera takes 5 s for itself: it turns to the moon's horizontal bearing,
+// the moon is never, at any azimuth, inside the frame. moonMoment() is the shot
+// that shows it: the camera takes 5 s for itself: it turns to the moon's horizontal bearing,
 // drops to elevation 0.12 at 26 units, PITCHES up (the cinematic's `pitch`, the
 // one thing a lookAt() follow camera cannot do), opens the lens from 44° only as
 // far as that night's moon altitude demands (52-58°, so the moon, the horizon
 // and the visitor all fit), holds 2.5 s with a toast, and eases back. Movement
 // stays live the whole time —
 // basis() reads controlAzimuth, which never takes a shot's yaw, so WASD never
-// flips under it.
+// flips under it. It NEVER FIRES BY ITSELF any more (WAVE 5, Contract Q camera (b); Ben: "Don't have
+// the view shift to the moon every night it interrupts the player"): it used to take the lens once a
+// night at 21:00-23:30; now only a caller runs it — the views (cam_moon_moment), the debug hook, and
+// the viewpoints system's "take in the view" spots. Mode 4 (first person) sees the moon on its own.
 //
 // KEEPING THE VISITOR VISIBLE — a CAPSULE SWEEP from the lens to the head.
 //
@@ -244,13 +258,21 @@
 //           release does
 //   recentre() — tap V · looking (0..1) · lookYaw · lookVehicle · lookState (QA) · playerScreen {x, y, on}
 //           (his feet in CSS px of the canvas after the final pitch; on = in front of the lens
-//           and inside the frame)
-//   mode · setMode(1|2|3) (toasts MODE_TOAST) · reveal(seconds?) · revealing
+//           and inside the frame; always off while the lens is in his head, mode 4)
+//   mode · setMode(1|2|3|4) (toasts MODE_TOAST) · reveal(seconds?) · revealing
+//   firstPerson({az, yaw, pitch, at: [x,y,z], fov}?) — mode 4 and its look set outright (views, debug; az in
+//           this file's azimuth convention, the lens looking along (−sin az, −cos az); yaw adds to it;
+//           at aims the eye at a point) · firstPersonActive (the lens is in his head this frame) ·
+//           fpState {on, az, pitch, fov, eyeY, lean, reach, tumble, headHidden} (QA, allocates; lean = u the eye
+//           sits ahead of FWD this frame — his neck's own offset + the look-down lean-out —, reach = a wall's cap
+//           on it, tumble = the roll / flip blend 0..1)
 //   shake(intensity, duration) · cinematic({target, azimuth, elevation, distance, fov, pitch, noTilt,
 //           duration, in, hold, out}) → Promise with .cancel() (target: [x,y,z] | Vector3 | {x,y,z} |
 //           () => any of those) · cinematicActive
-//   moonMoment() → Promise|null (forces the night sky moment) · moonMomentDone · lookingUp (0..1)
-//   events: 'camera:mode' n · 'camera:look' {on} · 'camera:hint' hint · 'camera:moon' {azimuth,
+//   moonMoment() → Promise|null (runs the night sky moment; never fires by itself) · moonMomentDone ·
+//           lookingUp (0..1)
+//   events: 'camera:mode' n · 'camera:fp' {on} (the lens went into / came out of his head) ·
+//           'camera:look' {on} · 'camera:hint' hint · 'camera:moon' {azimuth,
 //           elevation, fov} · 'camera:update' cam — LAST in update(), after the final rotateX and
 //           cam.updateMatrixWorld(true), so a listener reads this frame's pose, pitch included
 //           (citizens.js's scruff carry relies on it)
@@ -284,6 +306,7 @@ import { createCutout } from './camera/cutout.js';
 import { createDensity, LOCAL_EVERY } from './camera/density.js';
 import { createRayAccel } from './camera/bvh.js';
 import { hypot2, hypot3 } from './camera/hypot.js';
+import { createFirstPerson, FP } from './camera/firstperson.js';
 
 const STEP = Math.PI / 4;
 // The window reads the sweep's three AXIAL rays only (hat, chest, knees: bits 0-2). The two offset rays sit
@@ -313,7 +336,8 @@ const BUILD_MS = 0.6;
 // …and world:ready may spend this long building them all before the first frame (loading, not play)
 const PREBUILD_MS = 600;
 const ease = (t) => t * t * (3 - 2 * t);
-const MODE_TOAST = { 1: 'Camera: iso — you turn it (Q/E)', 2: 'Camera: follow — turns with you', 3: 'Camera: top — lay of the land' };
+const MODE_TOAST = { 1: 'Camera: iso — you turn it (Q/E)', 2: 'Camera: follow — turns with you', 3: 'Camera: top — lay of the land', 4: 'Camera: eyes — first person, drag to look' };
+const FP_ON = Object.freeze({ on: true }), FP_OFF = Object.freeze({ on: false });   // 'camera:fp' payloads (no allocation)
 const OVERHEAD_EL = 1.10;     // mode 3 pitch
 const OVERHEAD_K = 1.40;      // mode 3 distance multiplier
 // mode 2 FOLLOW (CAMERA_SPEC §2, §4.2, §4.8)
@@ -335,15 +359,14 @@ const MOON_R = 0.067;         // angular RADIUS of the sky's moon disc at 780 un
 const MOON_TOP = 0.045;       // …plus this much clear sky above it
 const MOON_SEA = 0.055;       // …and this much sea/skyline under the horizon line
 const MOON_BODY = 0.07;       // …and this much frame under the visitor, so he is IN the shot
-const MOON_WINDOW = [21, 23.5];   // once a night, inside this hour window
 // the V look (CAMERA_SPEC §3)
 const LOOK_EL_MIN = 0.26, LOOK_EL_MAX = 1.25;   // the look's final elevation stays inside this
 const LOOK_ON = Object.freeze({ on: true }), LOOK_OFF = Object.freeze({ on: false });   // 'camera:look' payloads (no allocation)
 // keys that end a look at once (0.25 s ease) and then act as usual; E only with something in reach
-const LOOK_END_KEYS = ['Space', 'KeyC', 'KeyR', 'KeyX', 'Enter', 'NumpadEnter', 'Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'];
+const LOOK_END_KEYS = ['Space', 'KeyC', 'KeyR', 'KeyX', 'Enter', 'NumpadEnter', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4'];
 // …on a vehicle / flying only the mode keys: the look locks nothing there, so the machine's own keys (the
 // flyer's Space flap and X boost, the canoe's Space stroke) already act as usual and must not end it
-const LOOK_END_KEYS_VEH = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'];
+const LOOK_END_KEYS_VEH = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4'];
 // a movement key going down while V is still pending means "pan": the look starts at once
 const LOOK_MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 // DENSITY / WHISKERS / TERRAIN (CAMERA_SPEC §4.4-4.8)
@@ -601,8 +624,7 @@ export function create(ctx) {
   // his feet on screen (playerScreen, §6.4): CSS px of the canvas, after the final pitch
   const pScr = { x: 0, y: 0, on: false };
   const scrV = new THREE.Vector3(), scrSize = new THREE.Vector2();
-  let moonDone = false;         // the night sky moment already ran this night
-  let moonTick = 0.6;           // seconds until the next cheap window check
+  let moonDone = false;         // moonMoment() has run (moonMomentDone); it never fires by itself
   let moonToastT = -1, moonToastText = '';
   const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), cineTgt = new THREE.Vector3();
   // ── THE COLLIDER SENSORS (§4.4-4.7; camera/density.js): the local list, top(c), the density fan ──
@@ -1354,15 +1376,19 @@ export function create(ctx) {
     basis() { const az = ctrlAz; return { fx: -Math.sin(az), fz: -Math.cos(az), rx: Math.cos(az), rz: -Math.sin(az) }; },
     /** The movement basis azimuth (radians; the lens bearing once it has caught up). */
     get controlAzimuth() { return ctrlAz; },
-    /** Current camera mode (1 iso / 2 follow / 3 top). */
+    /** Current camera mode (1 iso / 2 follow / 3 top / 4 eyes, first person). */
     get mode() { return mode; },
     /** Switch mode. Emits 'camera:mode' and toasts; survives snap()/setFree(null).
      *  1→2 hangs the tether at the lens's current bearing (nothing whips); 2→1/3
-     *  writes p.azimuth = the lens bearing once, so the view stays put. */
+     *  writes p.azimuth = the lens bearing once, so the view stays put. →4 puts the
+     *  lens in his head at once, looking the way the view looked; 4→1/2/3 cuts out
+     *  to that mode's framing, straight behind the way he was looking. */
     setMode(n) {
-      const m = n === 2 ? 2 : n === 3 ? 3 : 1;
+      const m = n === 2 ? 2 : n === 3 ? 3 : n === 4 ? 4 : 1;
       if (m === mode) return mode;
       status();
+      const wasFp = fpOn;
+      fpLeave(true);                               // out of his head: the look's bearing becomes p.azimuth
       if (follow()) handYawBack();                 // leaving the tether (not while owned / flying)
       occYaw = 0; whReset();
       mode = m;
@@ -1370,10 +1396,35 @@ export function create(ctx) {
       anchor.ok = false;                           // the next tether frame seeds A at cur.azimuth
       resetTether();
       ctrlAz = wrap(cur.azimuth + occYaw);
+      if (m === 4) {
+        status();
+        if (fpWant()) { fpEnter(wrap(cur.azimuth + occYaw)); fpPlace(0, ctx.systems.player, false); }
+      } else if (wasFp) fpCutBack();               // a cut: the new mode's framing, at once
       ctx.events.emit('camera:mode', m);
       ctx.systems.ui?.toast?.(MODE_TOAST[m]);
       return mode;
     },
+    /**
+     * Mode 4 with its look set outright (views, debug): { az, yaw, pitch, at: [x, y, z], fov }, all optional —
+     * az in this file's azimuth convention (the lens looks along (−sin az, −cos az)), yaw added to it, at aims
+     * the eye at a world point, pitch in radians (+ up, clamped +70° / −80°), fov 34..76. Returns true when the lens
+     * is in his head (false while something else owns the framing: it takes over when that lets go).
+     */
+    firstPerson(o = {}) {
+      if (mode !== 4) api.setMode(4);
+      status();
+      if (!fpWant()) return false;
+      if (!fpOn) fpEnter();
+      const pl = ctx.systems.player;
+      fp.set(o, pl);
+      if (!pl.rolling && !pl.sliding && !pl.onVehicle) pl.facing = fp.facing();   // a use right after throws this way
+      fpPlace(0, pl, false);
+      return true;
+    },
+    /** The lens is in his head (mode 4, on foot, unowned). */
+    get firstPersonActive() { return fpOn; },
+    /** QA: mode 4's state (allocates). */
+    get fpState() { const s = fp.state; return { on: fpOn, az: s.az, pitch: s.pitch, fov: s.fov, eyeY: s.eyeY, lean: s.lean, reach: s.reach, tumble: s.tumble, headHidden: fp.headHidden, near: cam.near }; },
     /** Ease the lens out to params.revealDist for `secs`, then back — used when
      *  you arrive at a landmark so the whole silhouette lands in frame. */
     reveal(secs = p.revealHold) { revealT = Math.max(revealT, secs); },
@@ -1381,6 +1432,20 @@ export function create(ctx) {
 
     snap() {
       status();
+      // MODE 4: a cut in his head is the eye settled where he stands (a teleport, a view, an owner's snap
+      // made before it declares itself — the next update() then cuts out to the owner's framing)
+      if (fpWant()) {
+        lookReset();
+        if (!fpOn) fpEnter();
+        wasOwned = ownNow; wasFlying = flyNow;
+        cine = null; shakeAmp = 0; shakeT = 0;
+        revealMute = 0.8; lastHere = ctx.systems.ui?.here ?? null;
+        fpPlace(0, ctx.systems.player, false);
+        snapFresh = true;
+        return;
+      }
+      // mode 4 and something owns the framing now: out of his head; an owner's own aim stands
+      if (fpOn) fpLeave(!(azExt || p.azimuth !== lastPAz));
       lookReset();                                 // §6.4: a cut ends the look (and the lock) at once
       // ownership began in mode 2 and this snap is its cut (sourpatch eaten.js locks, then
       // snaps): the owned framing reads p.azimuth, which mode 2 never writes — keep the lens's
@@ -1490,6 +1555,9 @@ export function create(ctx) {
       snapFresh = true;
     },
     setFree(v) {
+      // a free camera frames the world: out of his head (the head back, the near plane back); p.azimuth and
+      // the look's bearing (cur.azimuth) are kept, so setFree(null) in mode 4 goes back in looking the same way
+      if (v) fpLeave(false);
       free = v;
       lookReset();                                 // either way the look is over (§3, §6.4)
       clearFades(); clearCull();                  // a free camera frames the world, not the player
@@ -1521,6 +1589,8 @@ export function create(ctx) {
         wasOwned = ownNow; wasFlying = flyNow;
         candT = 0; sweepT = 0; sweepLift = 0; sweepDolly = Infinity; lastDolly = Infinity; shellDolly = Infinity; clearRun = 0; liftMaxRun = 0; giveUp = false; liftCap = p.occLiftMax; liftAnchor.set(NaN, 0, 0); giveUpAt.set(NaN, 0, 0);
         revealMute = 0.8; revealT = 0; lastHere = ctx.systems.ui?.here ?? null;
+        // mode 4: straight back into his head, at once
+        if (fpWant()) { if (!fpOn) fpEnter(); fpPlace(0, ctx.systems.player, false); }
       }
     },
     setParams(np) {
@@ -1848,6 +1918,7 @@ export function create(ctx) {
      */
     recentre() {
       status();
+      if (fpOn) { fp.state.level = true; return true; }   // mode 4: tap V levels the look
       const f = ctx.systems.player?.facing;
       if (free || flyNow || !Number.isFinite(f)) return false;
       fwdT = 0; alignK = 0; manualT = 0;
@@ -1855,14 +1926,14 @@ export function create(ctx) {
       snapTo(Math.round((f + Math.PI) / STEP) * STEP);
       return true;
     },
-    /** Has this night's sky moment already been spent? */
+    /** Has the sky moment run (since the last daytime)? It never runs by itself. */
     get moonMomentDone() { return moonDone; },
 
     /**
      * THE NIGHT SKY MOMENT — the shot that exists because the moon cannot
-     * otherwise be seen (see the header). Fires itself once a night, 21:00 to
-     * 23:30, outdoors and on foot; call it directly to force it (the debug
-     * hook, and the cam_moon_moment view). Returns the cinematic's Promise, or
+     * otherwise be seen (see the header). It NEVER fires by itself (WAVE 5,
+     * Contract Q camera (b)): the viewpoints system, the debug hook and the
+     * cam_moon_moment view call it. Returns the cinematic's Promise, or
      * null when there is no moon above the horizon to look at.
      */
     moonMoment() {
@@ -1911,10 +1982,24 @@ export function create(ctx) {
       if (inp.pressed.has('Digit1') || inp.pressed.has('Numpad1')) api.setMode(1);
       if (inp.pressed.has('Digit2') || inp.pressed.has('Numpad2')) api.setMode(2);
       if (inp.pressed.has('Digit3') || inp.pressed.has('Numpad3')) api.setMode(3);
+      // …and 4 the first person (WAVE 5, Contract Q camera (a))
+      if (inp.pressed.has('Digit4') || inp.pressed.has('Numpad4')) api.setMode(4);
 
       // ── who owns the framing this frame (§2) ────────────────────────────
       status();
       const pl = ctx.systems.player;
+      // ── MODE 4: on foot and unowned, the lens is in his head and nothing below runs ──
+      if (fpWant()) {
+        if (!fpOn) fpEnter();                      // back from an owner / a landing: looking the way the view looked
+        azExt = false; snapFresh = false; wasOwned = ownNow; wasFlying = flyNow;
+        fpFrame(dt, inp, pl, !!ctx.systems.interaction?.nearest?.());
+        lastPAz = p.azimuth;
+        ctx.events.emit('camera:update', cam);
+        return;
+      }
+      // mode 4 and something owns the framing now (a vehicle, the flight, an interior, the ferry, a lock): out of
+      // his head to mode 1's framing — the owner's own aim kept — with a cut that keeps a running shot
+      if (fpOn) { fpLeave(!(azExt || p.azimuth !== lastPAz)); fpCutBack(); }
       const tOn = tetherOn() && !!pl?.position;
       if (!tOn) anchor.ok = false;                 // the tether re-seeds from cur.azimuth when it resumes
       // Ownership began in mode 2 (§2: owned mode 2 renders exactly as mode 1).
@@ -2067,9 +2152,9 @@ export function create(ctx) {
       const brDist = Math.sin(t * 0.29 + 1.3) * 0.42 * br;
 
       // ── the night sky moment ────────────────────────────────────────────
-      // Cheap: a clock test six times a second, and only then the system pokes.
-      moonTick -= dt;
-      if (moonTick <= 0) { moonTick = 0.45; tryMoonMoment(); }
+      // Never on its own any more (WAVE 5, Contract Q camera (b)): only moonMoment()'s toast is carried here
+      // (and moonMomentDone re-arms by day).
+      if (moonDone && !ctx.state.isNight) moonDone = false;
       if (moonToastT > 0 && (moonToastT -= dt) <= 0) { ctx.systems.ui?.toast?.(moonToastText, 4.4); moonToastT = -1; }
 
       // ── look up (hold L) ────────────────────────────────────────────────
@@ -3389,22 +3474,119 @@ export function create(ctx) {
     }
     return false;
   }
-  /** A 5 s shot is a gift when you are wandering and an insult when you are not. */
-  function moonBusy() {
-    const pl = ctx.systems.player;
-    return !!(cine || free || ctx.state.paused || ctx.state.ferry
-      || pl?.locked || pl?.onFerry || pl?.onVehicle || indoors());
+  // (the night sky moment used to fire itself here once a night — tryMoonMoment(); WAVE 5 Contract Q
+  // camera (b) removed it: moonMoment() runs only when somebody calls it)
+
+  // ── MODE 4: FIRST PERSON (camera/firstperson.js; BRIEF WAVE 5 Contract Q camera (a)) ──────────────
+  // fpOn: the lens is in his head (entered, not yet left). fpWant(): mode 4 can have it this frame — on
+  // foot, unowned, not flying, not free (call status() first). Everything the third-person pipeline keeps
+  // (the ladder, the window, the fades, density, the whiskers, the look) is shut on the way in; the way out
+  // hands the look's bearing to params.azimuth and CUTS (snap) to the framing that follows.
+  const fp = createFirstPerson(ctx);
+  let fpOn = false, fpNear = NaN;
+  const fpShot = new THREE.PerspectiveCamera();   // a shot's pose, for the eye ↔ shot blend (never rendered)
+  const fpAim = new THREE.Vector3();
+  const fpWant = () => mode === 4 && !ownNow && !flyNow && !free && !!ctx.systems.player?.position;
+  /** Into his head: shut the third-person machinery, hide his head, the near plane in. */
+  function fpEnter(az = wrap(cur.azimuth + occYaw), pitch = FP.PITCH0) {
+    if (!fpOn) {
+      fpOn = true;
+      fp.begin(az, pitch);
+      fpNear = cam.near;
+      ctx.events.emit('camera:fp', FP_ON);
+    }
+    lookReset(); recOn = false; lookK = 0;
+    clearFades(); clearCull(); cut.off();
+    cutKraw = 0; cutEff = 0; cutHoldT = 0; cutGrowK = 1; colRun = 0; colSweeps = 0;
+    occYaw = 0; whReset(); occBlocked = 0; occLift = 0; dK = 0; dKheld = 0; densEl = 0; densDist = 0;
+    terrainLift = 0; terrainGoal = 0; hintBlkT = 0; revealT = 0; revealK = 0; lead.x = 0; lead.z = 0;
   }
-  function tryMoonMoment() {
-    const h = ctx.state.time;
-    // re-arm for the next night once the window is well behind (or ahead of) us
-    if (h < MOON_WINDOW[0] - 1 || h > MOON_WINDOW[1] + 0.1) moonDone = false;
-    // renders are single frames of a fixed world: a 5 s shot would hijack every
-    // night view in the game. Only an explicit api.moonMoment() runs under ?shot.
-    if (moonDone || ctx.shot) return;
-    if (h < MOON_WINDOW[0] || h > MOON_WINDOW[1]) return;
-    if (moonBusy()) return;
-    api.moonMoment();
+  /** Out of his head: the head back exactly, the near plane back, and (writeAz) the look's bearing becomes
+   *  params.azimuth so the framing that follows stands straight behind the way he looked. */
+  function fpLeave(writeAz = true) {
+    if (!fpOn) return;
+    fpOn = false;
+    fp.hideHead(false);
+    if (fpNear === fpNear && cam.near !== fpNear) { cam.near = fpNear; cam.updateProjectionMatrix(); }
+    fpNear = NaN;
+    if (writeAz) {
+      p.azimuth = fp.state.az; cur.azimuth = p.azimuth; azFrom = azTo = p.azimuth; azT = 1; lastPAz = p.azimuth;
+      ctrlAz = p.azimuth;
+    }
+    ctx.events.emit('camera:fp', FP_OFF);
+  }
+  /** A cut to whatever framing the mode / owner now wants, keeping a running shot (snap() drops one). */
+  function fpCutBack() {
+    const c = cine;
+    api.snap();
+    if (c && !cine) cine = c;
+  }
+  /** How far a shot is in (0..1), advancing it; resolves and clears it at the end (as update() does). */
+  function cineStep(dt) {
+    if (!cine) return 0;
+    cine.t += dt;
+    let w;
+    if (cine.t < cine.tIn) w = ease(cine.t / Math.max(1e-3, cine.tIn));
+    else if (cine.t < cine.tIn + cine.tHold) w = 1;
+    else if (cine.t < cine.tIn + cine.tHold + cine.tOut) w = ease(1 - (cine.t - cine.tIn - cine.tHold) / Math.max(1e-3, cine.tOut));
+    else { w = 0; cine.done?.(); cine = null; }
+    return w;
+  }
+  /**
+   * Put the lens at his eyes (dt ≤ 0: a cut, the eye height settled), blend a running shot in, then the
+   * per-frame duties the pipeline would have done: fov, near plane, head, silhouette, the window off,
+   * matrixWorld, playerScreen.
+   */
+  function fpPlace(dt, pl, advanceShot = true) {
+    const e = fp.pose(dt, pl);
+    let fov = fp.state.fov;
+    cam.position.copy(e); cam.quaternion.copy(fp.quat);
+    target.copy(e);
+    cineW = 0;
+    const w = cineStep(advanceShot && dt > 0 ? dt : 0);   // (a cut reads the shot where it stands)
+    if (cine && w > 0) {
+      // the shot's own framing, exactly as the third-person path builds it (fields left out keep the mode-1
+      // framing's values: params elevation / distance, the look's bearing, his chest)
+      const o = cine.o;
+      fpAim.set(pl.position.x, pl.position.y + 1.15, pl.position.z);
+      toVec(o.target ?? fpAim, cineTgt);
+      lensAt(o.azimuth ?? fp.state.az, o.elevation ?? p.elevation, o.distance ?? p.distance, cineTgt, fpShot.position);
+      fpShot.lookAt(cineTgt);
+      if (o.pitch) fpShot.rotateX(o.pitch);
+      cam.position.lerp(fpShot.position, w);
+      cam.quaternion.slerp(fpShot.quaternion, w);
+      if (o.fov) fov = lerp(fov, o.fov, w);
+      cineW = w;
+    }
+    if (shakeT > 0 && dt > 0) {
+      // a stomp's thump: a small positional judder (an eye does not swing like a boom)
+      shakeT -= dt;
+      const t = ctx.state.elapsed, k = shakeAmp * Math.max(0, shakeT / shakeDur) ** 1.4 * 0.35;
+      cam.position.x += Math.sin(t * 47.3) * k; cam.position.y += Math.sin(t * 61.7 + 1.7) * k * 0.8; cam.position.z += Math.sin(t * 53.1 + 3.1) * k;
+      if (shakeT <= 0) shakeAmp = 0;
+    }
+    // in his head (a shot can carry the lens out of it: then he is a person in the frame again)
+    const inHead = cam.position.distanceToSquared(e) < FP.HEAD_GAP * FP.HEAD_GAP;
+    fp.hideHead(inHead);
+    if (inHead) pl.setSilhouette?.(false);      // player.js turns it back on every frame; the render is ours
+    const nr = inHead ? FP.NEAR : fpNear === fpNear ? fpNear : cam.near;
+    if (cam.near !== nr || Math.abs(cam.fov - fov) > 1e-3) { cam.near = nr; cam.fov = fov; cam.updateProjectionMatrix(); }
+    modeFov = fov; pitchBase = 0;
+    cut.off(); cutEff = 0; cutKraw = 0;
+    cam.updateMatrixWorld(true);
+    projectPlayer();
+    if (inHead) pScr.on = false;                 // he is not IN the frame: the lens is in him
+  }
+  /** One first-person frame (update() hands over here while fpWant()). */
+  function fpFrame(dt, inp, pl, busyE) {
+    fp.input(dt, inp, busyE);
+    vWas = inp.keys.has('KeyV'); downWas = !!inp.pointer.down; vPend = false;
+    // WASD walks along the look, no basis chase; the pipeline's consumers read the view's bearing
+    ctrlAz = fp.state.az; cur.azimuth = fp.state.az; cur.distance = 1;
+    // he faces the look, so a click / X throws where you are looking (the body mostly out of sight anyway)
+    if (!pl.rolling && !pl.sliding && !pl.onVehicle) pl.facing = fp.facing();
+    fpPlace(dt, pl);
+    if (moonToastT > 0 && (moonToastT -= dt) <= 0) { ctx.systems.ui?.toast?.(moonToastText, 4.4); moonToastT = -1; }
   }
 
   // If the UI ever emits its location banner as an event, take it straight —

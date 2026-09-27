@@ -38,7 +38,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import * as THREE from 'three';
 import { rng, hash, damp, clamp } from '../../core/util.js';
-import { createMaterials, createBuilder, makeSignAtlas, C, SPRINKLE, softGlow, halveCanvasTexture, setKitTier } from './architecture/kit.js';
+import { createMaterials, createBuilder, makeSignAtlas, C, SPRINKLE, softGlow, halveCanvasTexture, setKitTier, pennantGeometry } from './architecture/kit.js';
 import { createInstanceCuller, triangleTiles } from '../terrain/instcull.js';
 import { getLampPool } from '../terrain/lamppool.js';
 
@@ -463,7 +463,8 @@ export function create(ctx) {
     (it, i, t) => setTRS(t, it, [it.ry || 0, it.ry || 0, 0], [it.s, it.s, it.s]));
   makeInstanced('spinners', spinnerGeo(), spinMat, inst.spinners,
     (it, i, t) => setTRS(t, it, [0, it.ry || 0, 0], [it.s, it.s, it.s]));
-  const bunting = makeInstanced('bunting', new THREE.PlaneGeometry(1, 1), buntMat, inst.bunting,
+  // pennants hanging FROM their point (top edge = the string; kit.pennantGeometry)
+  const bunting = makeInstanced('bunting', pennantGeometry(), buntMat, inst.bunting,
     (it, i, t) => setTRS(t, it, [0, it.ry || 0, 0], [it.w, it.h, 1]));
 
   // ── every door leaf in Candyland, in ONE instanced mesh ────────────────────
@@ -937,7 +938,7 @@ export function create(ctx) {
         for (let i = 0; i < list.length; i++) {
           const it = list[i];
           const ph = it.ph + t * 2.3;
-          e.set(Math.sin(ph) * 0.45, it.ry, Math.sin(ph * 0.7 + 1.1) * 0.3, 'YXZ');
+          e.set(Math.sin(ph) * 0.45, it.ry, Math.sin(ph * 0.7 + 1.1) * 0.06, 'YXZ');   // swings about its string, barely twists off it
           q.setFromEuler(e);
           mx.compose(p.set(it.x, it.y + Math.sin(ph * 1.3) * 0.04, it.z), q, s.set(it.w, it.h, 1));
           bunting.setMatrixAt(i, mx);

@@ -44,6 +44,7 @@ export function create(ctx, escape) {
   const group = new THREE.Group(); group.name = 'candyPalace'; ctx.scene.add(group);
   ctx.colliders = ctx.colliders || [];
   ctx.walkables = ctx.walkables || [];
+  const colBase = ctx.colliders.length;             // everything the palace pushes lives in [colBase, colEnd)
 
   // ── ground level: the landmark core is flattened but only 85%, so take the
   // highest sample under the footprint and bed the plinth into the rest.
@@ -194,7 +195,21 @@ export function create(ctx, escape) {
         // icing running off the cornice, the length of the face.
         // NB: icingDrip/lamppost/bench take WORLD coordinates — at() is only for
         // the builder calls.
-        icingDrip(B, PX + nX * (HALF + 0.7), y1 + 0.6, PZ + nZ * (HALF + 0.7), ry + Math.PI / 2, HALF * 2 - 1.5, { r: 0.28, drop: 0.5, color: C.icing });
+        // WAVE 5 (artifacts): icingDrip's rotY is the yaw of the RUN (the same
+        // local-X convention as every box on this face, `ry`), not the face
+        // normal. At `ry + π/2` each face's drip ran straight OUT of the
+        // plinth: four 25-unit strings of icing beads, half buried in the
+        // brick and half hanging 12 units out in mid-air at cornice height —
+        // one of them straight down the middle of the grand stair. The east
+        // run also leaves the stair's landing clear, like the pilasters do.
+        const run = (u0, u1) => {
+          const uc = (u0 + u1) / 2;
+          // y1 + 0.2: the beads' tops tuck under the cornice's top edge and
+          // they run down its face (at y1 + 0.6 they stood ON it, like teeth)
+          icingDrip(B, PX + nX * (HALF + 0.7) + tX * uc, y1 + 0.2, PZ + nZ * (HALF + 0.7) + tZ * uc, ry, u1 - u0, { r: 0.28, drop: 0.5, color: C.icing });
+        };
+        const U1 = HALF - 0.75;
+        if (east) { run(-U1, -5.4); run(5.4, U1); } else run(-U1, U1);
       }
     }
 
@@ -243,10 +258,70 @@ export function create(ctx, escape) {
   // ═════════════════════════════════════════════════════ GRAND STAIR ═════════
   // Royal icing, east face, landing straight onto the candy_palace path.
   const STEPS = 12, SX0 = HALF, SX1 = HALF + 11.5, SHW = 3.6;
-  const SY = world.height(PX + SX1, PZ) + 0.1;    // where the stair meets the ground
-  const PLZ = world.height(PX + SX1 + 3.4, PZ) + 0.22;
+  const clearRects = [];                           // palace-local {x0, x1, hz}: the stair + forecourt footprints (see apron())
+  // WAVE 5 (artifacts): the FORECOURT (approach plaza) is flat and sits over
+  // the terrain everywhere. It used to take its height from ONE sample at its
+  // centre (5.31) while the ground under its south-west quarter rises to 5.9,
+  // so the lawn came up through the licorice. Now: the highest ground under
+  // it + 0.25, two icing steps down round its three open sides (the ground
+  // falls ~1.3 u to the north-east corner), and the grand stair starts FROM it
+  // (SY = PLZ) instead of from a lone ground sample at its foot.
+  const FC = { x0: SX1 - 0.3, x1: SX1 + 7.1, hz: 4.9, stepW: 1.0, stepH: 0.5, steps: 2 };
+  let fcMax = -99, fcMin = 99;
+  for (let x = FC.x0; x <= FC.x1 + FC.stepW * FC.steps; x += 0.35) {
+    for (let z = -FC.hz - FC.stepW * FC.steps; z <= FC.hz + FC.stepW * FC.steps; z += 0.35) {
+      const h = world.height(PX + x, PZ + z);
+      if (x <= FC.x1 + 0.4 && Math.abs(z) <= FC.hz + 0.4) fcMax = Math.max(fcMax, h);
+      fcMin = Math.min(fcMin, h);
+    }
+  }
+  const PLZ = fcMax + 0.25;
+  const SY = PLZ;                                  // the stair climbs out of the forecourt
+  /** Walkable top of the forecourt + its steps at palace-local (lx, lz), or null. */
+  const forecourtTop = (lx, lz) => {
+    if (lx < SX1) return null;
+    const d = Math.max(lx - FC.x1, Math.abs(lz) - FC.hz, 0);
+    if (d <= 0) return PLZ;
+    const k = Math.ceil(d / FC.stepW - 1e-6);
+    return k <= FC.steps ? PLZ - FC.stepH * k : null;
+  };
+  const ZO = SHW + 1.65;                           // the stair mass's half-width (under the newels too)
   {
     const run = SX1 - SX0;
+    // THE STAIR'S MASONRY (WAVE 5). Each tread was a slab only 0.5 u deeper
+    // than its rise, so the upper stair stood on nothing: 1–3.6 u of air under
+    // it (you could see the licorice path and the lawn through the flight from
+    // any side view), and the balustrade newels, which sit outside the
+    // treads, floated beside it. Now one watertight stepped prism — the
+    // flight's side profile extruded across it — runs from below the ground
+    // to 2 cm under every tread and 3 cm behind every riser (never coplanar
+    // with the icing), wide enough to carry the newels on its cheeks.
+    {
+      let gLow = fcMin;
+      for (let x = SX0; x <= SX1; x += 0.5) for (let z = -ZO; z <= ZO; z += 0.5) gLow = Math.min(gLow, world.height(PX + x, PZ + z));
+      const yb = gLow - 0.6;
+      const sh = new THREE.Shape();
+      sh.moveTo(SX1 - 0.03, yb);
+      for (let i = 0; i < STEPS; i++) {
+        const yt = SY + (TER - SY) * (i + 1) / STEPS - 0.02;
+        sh.lineTo(SX1 - run * i / STEPS - 0.03, yt);
+        sh.lineTo(SX1 - run * (i + 1) / STEPS - 0.03, yt);
+      }
+      sh.lineTo(SX0 - 0.8, TER - 0.02);
+      sh.lineTo(SX0 - 0.8, yb);
+      sh.closePath();
+      const g = new THREE.ExtrudeGeometry(sh, { depth: ZO * 2, bevelEnabled: false, curveSegments: 1, steps: 1 });
+      g.translate(0, 0, -ZO);
+      const uv = g.attributes.uv;
+      for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) / BRICK_UNIT, uv.getY(k) / BRICK_UNIT);
+      B.add('brick', g, { at: [PX, 0, PZ], color: C.chocMilk });
+      // an icing coping along each cheek, stepping with the flight
+      for (const s of [-1, 1]) for (let i = 0; i < STEPS; i++) {
+        const w = run / STEPS, x = SX1 - run * (i + 1) / STEPS;
+        const yt = SY + (TER - SY) * (i + 1) / STEPS;
+        B.box('icing', w + 0.06, 0.16, ZO - (SHW + 0.8) - 0.1, { at: at(x + w / 2, yt + 0.02, s * ((SHW + 0.8 + ZO) / 2 + 0.05)), color: C.cream });
+      }
+    }
     for (let i = 0; i < STEPS; i++) {
       const t = i / STEPS, t1 = (i + 1) / STEPS;
       const x = SX1 - run * t1, w = run / STEPS;
@@ -264,11 +339,46 @@ export function create(ctx, escape) {
         B.sph('gloss', 0.42, 9, 7, { at: at(x, y + 2.3, zz + s * (1 - t) * 0.5), color: SPRINKLE[i % SPRINKLE.length] });
       }
       const L = Math.hypot(run, TER - SY);
-      B.box('icing', L, 0.26, 0.4, { at: at((SX0 + SX1) / 2, (SY + TER) / 2 + 1.8, zz + s * 0.25), rot: [0, 0, Math.atan2(TER - SY, run)], color: C.cream });
-      wall(cols.always, (SX0 + SX1) / 2, zz + s * 0.3, run, 0.7, 0, TER + 1.6);
+      // WAVE 5 (artifacts): the stair climbs toward −x (SX1 → SX0), so the
+      // rail's roll is NEGATIVE. With +atan2 it rose the other way: buried in
+      // the top steps and floating ~9 u over the stair foot — the white plank
+      // hanging in the sky in front of the palace.
+      B.box('icing', L, 0.26, 0.4, { at: at((SX0 + SX1) / 2, (SY + TER) / 2 + 1.8, zz + s * 0.25), rot: [0, 0, -Math.atan2(TER - SY, run)], color: C.cream });
+      // the cheek (masonry + newels) is solid from the tread edge out to ZO
+      wall(cols.always, (SX0 + SX1) / 2, s * (SHW + 0.5 + ZO) / 2, run, ZO - SHW - 0.5, 0, TER + 1.6);
     }
-    // approach plaza + two candy-cane obelisks at the foot
-    B.box('matte', 7.4, 2.2, 9.8, { at: at(SX1 + 3.4, PLZ - 1.1, 0), color: C.licoriceSoft });
+    // approach plaza (the FORECOURT, see FC above) + two candy-cane obelisks at the foot
+    {
+      const yb = fcMin - 0.6;
+      B.box('matte', FC.x1 - FC.x0, PLZ - yb, FC.hz * 2, { at: at((FC.x0 + FC.x1) / 2, (PLZ + yb) / 2, 0), color: C.licoriceSoft });
+      // the steps down: each a slab under the one above, 1 u wider on the three
+      // open sides; their west ends stagger 2 cm so no two faces share a plane
+      for (let k = 1; k <= FC.steps; k++) {
+        const top = PLZ - FC.stepH * k, x0 = FC.x0 + 0.02 * k, x1 = FC.x1 + FC.stepW * k, hz = FC.hz + FC.stepW * k;
+        if (top < yb + 0.1) break;
+        B.box('icing', x1 - x0, top - yb, hz * 2, { at: at((x0 + x1) / 2, (top + yb) / 2, 0), color: k % 2 ? C.cream : C.icing });
+      }
+      // nothing grows on the forecourt or up through the flight: aprons for the
+      // vegetation's world:ready clearance pass (h 0.01 = no height for the
+      // ground core or the camera's sight-line test; solid:false = never a wall).
+      // The GRID PITCH is what matters: vegetation blanks a big plant (lolli,
+      // pine, gummy trees: CLEAR_PAD −0.8) only within r − 0.8 = 0.9 u of an
+      // apron centre, so every point of the rect must lie within 0.9 of a node:
+      // pitch ≤ 1.2 → half-diagonal ≤ 0.85. (At 2.2 the worst gap was 1.56 and
+      // two giant lollipops still grew up through the treads and the forecourt.)
+      const APRON_R = 1.7, APRON_PITCH = 1.2;
+      const apron = (x0, x1, hz) => {
+        const nx = Math.max(1, Math.ceil((x1 - x0) / APRON_PITCH - 1e-6));
+        const nz = Math.max(1, Math.ceil((2 * hz) / APRON_PITCH - 1e-6));
+        const px = (x1 - x0) / nx, pz = (2 * hz) / nz;
+        for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+          ctx.colliders.push({ x: PX + x0 + (i + 0.5) * px, z: PZ - hz + (j + 0.5) * pz, r: APRON_R, h: 0.01, solid: false, apron: true });
+        }
+        clearRects.push({ x0, x1, hz });
+      };
+      apron(SX0, SX1, ZO);
+      apron(FC.x0, FC.x1 + FC.stepW * FC.steps, FC.hz + FC.stepW * FC.steps);
+    }
     // lamps: the palace has no PointLights outdoors (island budget), so the
     // night read comes from emissive gumdrop lanterns + their additive pools
     for (const s of [-1, 1]) {
@@ -331,7 +441,10 @@ export function create(ctx, escape) {
     B.sph('gloss', 0.5, 9, 7, { at: at(x, TER + H + 5.0, z), color: C.red });
     // pennant
     B.cyl('licorice', 0.07, 0.07, 2.4, 5, { at: at(x, TER + H + 6.2, z), color: C.licorice });
-    B.plane('matte', 1.5, 0.9, { at: at(x + 0.75, TER + H + 6.9, z), rot: [0, Math.PI / 2, 0], color: SPRINKLE[i] });
+    // WAVE 5 (artifacts): a thin box flying off the pole (+x), not a one-sided
+    // plane yawed 90° — that hung 0.75 u beside its pole, broadside, and
+    // vanished from half the compass (back-face culled): a floating square.
+    B.box('matte', 1.5, 0.9, 0.07, { at: at(x + 0.8, TER + H + 6.9, z), color: SPRINKLE[i] });
     turretTops.push({ x, z, y: TER + H + 5.4 });
     post(cols.terrace, x, z, R + 0.3);
     // one warm PointLight per pair of turrets is plenty; emissive does the rest
@@ -346,14 +459,25 @@ export function create(ctx, escape) {
     // arch shoulders + lintel
     for (const s of [-1, 1]) brickBox(B, 2.2, gateH + 1.4, 1.2, { at: at(x, gateY + (gateH + 1.4) / 2, s * (GATE_HW + 1.1)), color: C.gingerbreadDark });
     brickBox(B, 2.2, 1.6, GATE_HW * 2 + 2.2, { at: at(x, gateY + gateH + 0.8, 0), color: C.gingerbreadDark });
-    for (let i = -3; i <= 3; i++) B.sph('gloss', 0.34, 8, 6, { at: at(x + 1.15, gateY + gateH + 0.8, i * 0.8), color: SPRINKLE[(i + 3) % SPRINKLE.length] });
     // candy-cane gateposts
     for (const s of [-1, 1]) {
       B.stripeCyl(0.42, 0.5, gateH + 2.6, { at: at(x + 0.55, gateY + (gateH + 2.6) / 2, s * (GATE_HW + 1.5)), variant: 0, seg: 10 });
       B.sph('gloss', 0.62, 10, 8, { at: at(x + 0.55, gateY + gateH + 3.0, s * (GATE_HW + 1.5)), color: C.yellow });
       post(cols.terrace, x + 0.55, s * (GATE_HW + 1.5), 0.62);
     }
-    B.signQuad('palace_main', 7.6, 2.85, { at: at(x + 1.12, gateY + gateH + 0.85, 0), rot: [0, Math.PI / 2, 0] });
+    // THE SIGN BOARD (WAVE 5, artifacts). A row of seven gumdrops sat on the
+    // lintel's face (x+1.15, r 0.34) right across the sign's middle line —
+    // "home of the Gummy Regent" read through a string of sweets — and the
+    // sign itself was a bare plane whose top 0.7 u stood over the lintel on
+    // nothing. Now: a gingerbread board proud of the lintel (its back face in
+    // the lintel's front plane, hidden), the sign on it, an icing cap on top,
+    // and the sweets riding the cap (short of the gateposts' yellow balls).
+    const SGN = { y: gateY + gateH + 0.85, h: 2.85, w: 7.6 };
+    const by0 = SGN.y - SGN.h / 2 - 0.1, by1 = SGN.y + SGN.h / 2 + 0.1;
+    B.box('matte', 0.1, by1 - by0, SGN.w + 0.2, { at: at(x + 1.15, (by0 + by1) / 2, 0), color: C.gingerbreadDark });
+    B.box('icing', 0.4, 0.16, 7.3, { at: at(x + 1.1, by1 + 0.08, 0), color: C.icing });
+    for (let i = -3; i <= 3; i++) B.sph('gloss', 0.3, 8, 6, { at: at(x + 1.1, by1 + 0.16 + 0.25, i * 0.95), color: SPRINKLE[(i + 3) % SPRINKLE.length] });
+    B.signQuad('palace_main', SGN.w, SGN.h, { at: at(x + 1.23, SGN.y, 0), rot: [0, Math.PI / 2, 0] });
   }
 
   // ═══════════════════════════════════════════════════════ THE KEEP ═════════
@@ -774,21 +898,36 @@ export function create(ctx, escape) {
   group.add(caveLeaf);
 
   // ═══════════════════════════════════════════════════════ bunting ══════════
+  // WAVE 5 (artifacts): the flags were squares yawed atan2(dx, dz) — i.e.
+  // NORMAL to the line they hang on — with no line at all: from the game camera
+  // they read as confetti frozen in the air round the keep. Now a licorice
+  // string runs finial to finial (merged into the palace's licorice mesh) and
+  // each flag is a pennant whose top edge lies ALONG it (local X = the run, the
+  // same yaw convention as the builder: atan2(−dz, dx)) and swings about it.
   const buntList = [];
   for (let i = 0; i < 4; i++) {
     const a = turretTops[i], b = turretTops[(i + 1) % 4];
-    const n = 11;
+    const n = 11, ry = Math.atan2(-(b.z - a.z), b.x - a.x);
+    const line = [new THREE.Vector3(PX + a.x, a.y, PZ + a.z)];
     for (let k = 1; k < n; k++) {
       const t = k / n;
       const x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
-      const y = a.y + (b.y - a.y) * t - 2.6 * Math.sin(Math.PI * t) - 0.7;
-      buntList.push({ x: PX + x, y, z: PZ + z, w: 0.8, h: 1.0, ry: Math.atan2(b.x - a.x, b.z - a.z), ph: (i * 7 + k) * 0.7, color: SPRINKLE[(i + k) % SPRINKLE.length] });
+      const y = a.y + (b.y - a.y) * t - 2.6 * Math.sin(Math.PI * t) - 0.5;
+      line.push(new THREE.Vector3(PX + x, y, PZ + z));
+      buntList.push({ x: PX + x, y, z: PZ + z, w: 0.95, h: 1.1, ry, ph: (i * 7 + k) * 0.7, color: SPRINKLE[(i + k) % SPRINKLE.length] });
     }
+    line.push(new THREE.Vector3(PX + b.x, b.y, PZ + b.z));
+    B.add('licorice', new THREE.TubeGeometry(new THREE.CatmullRomCurve3(line), 44, 0.05, 4, false), { color: C.licorice });
   }
   let bunting = null;
   if (buntList.length) {
     const bm = new THREE.MeshStandardMaterial({ roughness: 0.55, side: THREE.DoubleSide });
-    bunting = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), bm, buntList.length);
+    // a pennant: top edge on the string (local y = 0), tip 1 u below
+    const pg = new THREE.BufferGeometry();
+    pg.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0, 0, 0.5, 0, 0, 0, -1, 0], 3));
+    pg.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
+    pg.setAttribute('uv', new THREE.Float32BufferAttribute([0, 1, 1, 1, 0.5, 0], 2));
+    bunting = new THREE.InstancedMesh(pg, bm, buntList.length);
     bunting.name = 'palace_bunting'; bunting.castShadow = false; bunting.receiveShadow = true;
     bunting.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     // the matrices are only written by the flutter (update), so the bounds come
@@ -826,13 +965,13 @@ export function create(ctx, escape) {
     id: 'candyPalace',
     test(x, z) {
       const lx = x - PX, lz = z - PZ;
-      if (lx < -HALF - 2 || lx > HALF + 20 || lz < -HALF - 2 || lz > HALF + 2) return null;
+      if (lx < -HALF - 2 || lx > FC.x1 + FC.stepW * FC.steps + 0.5 || lz < -HALF - 2 || lz > HALF + 2) return null;
       const py = ctx.systems.player?.position?.y;
       // grand stair (outside the plinth, east)
       if (lx >= SX0 && lx <= SX1 + 0.6 && Math.abs(lz) <= SHW + 0.5) {
         return SY + (TER - SY) * clamp((SX1 - lx) / (SX1 - SX0), 0, 1);
       }
-      if (lx > SX1 && lx < SX1 + 7.1 && Math.abs(lz) <= 4.9) return PLZ;   // approach plaza
+      { const f = forecourtTop(lx, lz); if (f !== null) return f; }      // the forecourt + its steps
       if (!inSquare(lx, lz)) return null;
       // cellar stair
       if (inHole(lx, lz)) return CF + (TER - CF) * clamp((lz - STAIR.z0) / (STAIR.z1 - STAIR.z0), 0, 1);
@@ -1099,7 +1238,7 @@ export function create(ctx, escape) {
         for (let i = 0; i < buntList.length; i++) {
           const it = buntList[i];
           const ph = it.ph + t * 2.1;
-          _e.set(Math.sin(ph) * 0.42, it.ry, Math.sin(ph * 0.7 + 1.1) * 0.28, 'YXZ');
+          _e.set(Math.sin(ph) * 0.42, it.ry, Math.sin(ph * 0.7 + 1.1) * 0.06, 'YXZ');   // swings about the string; barely twists off it
           _q.setFromEuler(_e);
           _m.compose(_p.set(it.x, it.y + Math.sin(ph * 1.3) * 0.05, it.z), _q, _s.set(it.w, it.h, 1));
           bunting.setMatrixAt(i, _m);
@@ -1123,6 +1262,35 @@ export function create(ctx, escape) {
       GY: +GY.toFixed(2), TER: +TER.toFixed(2), CF: +CF.toFixed(2), top: +PEAK.toFixed(1),
     }));
   }
+
+  // ── the stair + forecourt stay clear (WAVE 5, artifacts) ─────────────────
+  // The aprons blank the PLANTS standing on the flight and the forecourt, but
+  // a blanked plant's collider survives it: two lollipop sticks and a gumdrop
+  // stayed behind as invisible posts on the treads (a walker on the z −34.8
+  // lane was shoved round one). Once everyone has registered, disarm every
+  // foreign circle whose centre is inside those footprints — the same rule
+  // biplane.js / blimp.js apply to trunks under their pads. The aprons' pitch
+  // guarantees any plant based inside a rect was blanked, so nothing visible
+  // loses its collider. Ours (lamps, obelisks, cheeks), claims, other aprons,
+  // walls (box) and live solidity rules owned by someone else are left alone.
+  const colEnd = ctx.colliders.length;
+  ctx.events.on('world:ready', () => {
+    const list = ctx.colliders;
+    let n = 0;
+    for (let i = 0; i < list.length; i++) {
+      if (i >= colBase && i < colEnd) continue;
+      const c = list[i];
+      if (!c || c.box || c.claim || c.apron || c.solid === false || !(c.r > 0) || c.r > 3) continue;
+      const lx = c.x - PX, lz = c.z - PZ;
+      let inside = false;
+      for (const q of clearRects) if (lx >= q.x0 && lx <= q.x1 && Math.abs(lz) <= q.hz) { inside = true; break; }
+      if (!inside) continue;
+      const d = Object.getOwnPropertyDescriptor(c, 'solid');
+      if (d && (d.get || d.set)) continue;
+      c.solid = false; n++;
+    }
+    if (n) console.warn('[escape/palace] grand stair + forecourt: disarmed ' + n + ' foreign colliders (plants blanked by the aprons)');
+  });
 
   escape.palace = api;
   escape.interiors = (escape.interiors || []).concat(interiors);

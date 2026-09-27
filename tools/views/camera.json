@@ -43,5 +43,17 @@
   "cam_flying": {"pos": [206.4, 6], "time": 12, "call": {"escape.routes.flyer.debugFly": [206.4, 6, 60, -1.5708, true]}, "frames": 60},
   "cam_flying_night": {"pos": [206.4, 6], "time": 22, "call": {"escape.routes.flyer.debugFly": [206.4, 6, 60, -1.5708, true]}, "frames": 60},
   "cam_look_flying": {"pos": [206.4, 6], "time": 12, "call": {"escape.routes.flyer.debugFly": [206.4, 6, 60, -1.5708, true], "camera.look": {"on": true, "yaw": 0.9, "pitch": 0.08}}, "frames": 30},
-  "cam_look_flying_night": {"pos": [206.4, 6], "time": 22, "call": {"escape.routes.flyer.debugFly": [206.4, 6, 60, -1.5708, true], "camera.look": {"on": true, "yaw": 0.9, "pitch": 0.08}}, "frames": 30}
+  "cam_look_flying_night": {"pos": [206.4, 6], "time": 22, "call": {"escape.routes.flyer.debugFly": [206.4, 6, 60, -1.5708, true], "camera.look": {"on": true, "yaw": 0.9, "pitch": 0.08}}, "frames": 30},
+  "cam_fp_village": {"pos": [-116, 40], "time": 11, "call": {"camera.firstPerson": {"at": [-150, 40], "pitch": -0.08}}, "frames": 30},
+  "cam_fp_village_night": {"pos": [-116, 40], "time": 22, "call": {"camera.firstPerson": {"at": [-150, 40], "pitch": -0.08}}, "frames": 30},
+  "cam_fp_mainstreet": {"pos": [102, 6], "time": 12, "call": {"camera.firstPerson": {"at": [150, 5], "pitch": -0.08}}, "frames": 30},
+  "cam_fp_mainstreet_night": {"pos": [102, 6], "time": 22, "call": {"camera.firstPerson": {"at": [150, 5], "pitch": -0.08}}, "frames": 30},
+  "cam_fp_weapon": {"pos": [102, 6], "time": 12, "call": {"inventory.give": "jawbreaker_cannon", "camera.firstPerson": {"at": [150, 5], "pitch": -0.03}, "weapons.use": []}, "frames": 22},
+  "cam_fp_look_down": {"pos": [102, 6], "time": 12, "call": {"inventory.give": "jawbreaker_cannon", "camera.firstPerson": {"at": [150, 5], "pitch": -1.05}}, "frames": 30},
+  "cam_fp_walk": {"pos": [102, 6], "time": 12, "call": {"camera.firstPerson": {"at": [150, 5], "pitch": -0.08}}, "walk": {"x": 0, "y": 1, "n": 45}, "frames": 0},
+  "cam_fp_weapon_held": {"pos": [102, 6], "time": 12, "call": {"inventory.give": "jawbreaker_cannon", "camera.firstPerson": {"at": [150, 5], "pitch": -0.08}}, "frames": 30},
+  "cam_fp_look_down_m0p8": {"pos": [-110, -45], "time": 12, "call": {"camera.firstPerson": {"az": 0.7, "pitch": -0.8}}, "frames": 30},
+  "cam_fp_look_down_m1p22": {"pos": [-110, -45], "time": 12, "call": {"camera.firstPerson": {"az": 0.7, "pitch": -1.22}}, "frames": 30},
+  "cam_fp_look_down_max": {"pos": [-110, -45], "time": 12, "call": {"camera.firstPerson": {"az": 0.7, "pitch": -1.4}}, "frames": 30},
+  "cam_fp_walk_look_down": {"pos": [-110, -45], "time": 12, "call": {"camera.firstPerson": {"az": 0.7, "pitch": -1.05}}, "walk": {"x": 0, "y": 1, "n": 30}, "frames": 0}
 }

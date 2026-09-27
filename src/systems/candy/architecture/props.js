@@ -69,6 +69,13 @@ export function buildProps(A) {
       const a = r.range(0, 6.283), rad = r.range(4.5, 9);
       const x = q.x + Math.cos(a) * rad, z = q.z + Math.sin(a) * rad;
       if (!world.isFreeGround(x, z, { pathMargin: 2.0, avoidLandmarks: true })) continue;
+      // WAVE 5 (artifacts): nor on the Candy Palace's grand stair / forecourt
+      // (escape/palace.js: east of the plinth, x −136.5…−115.9, z −42.9…−29.1),
+      // which reaches past the landmark's radius — two pinwheels stood with
+      // their sticks buried in the forecourt slab.
+      // (the four draws a placed spinner makes are burned, so every other
+      // spinner on the island keeps its exact place, spin and size)
+      if (x > -138 && x < -114.5 && z > -44.5 && z < -27.5) { r.range(0, 1); r.range(0, 1); r.range(0, 1); r.range(0, 1); continue; }
       const y = world.height(x, z);
       // 0.11 not 0.07: a 0.07 stick is a single aliasing pixel at the game
       // camera, and the head then reads as a flower floating in the grass.

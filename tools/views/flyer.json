@@ -289,5 +289,151 @@
     1
    ]
   }
+ },
+ "flyer_card_board": {
+  "pos": [
+   214.2,
+   6.3
+  ],
+  "az": 0.62,
+  "el": 0.5,
+  "dist": 34,
+  "time": 11,
+  "frames": 60,
+  "call": {
+   "escape.routes.flyer.debugQuiet": [
+    10
+   ],
+   "escape.routes.flyer.debugCard": [
+    "board"
+   ]
+  }
+ },
+ "flyer_card_air": {
+  "pos": [
+   150,
+   30
+  ],
+  "time": 12,
+  "frames": 60,
+  "call": {
+   "escape.routes.flyer.debugCard": [
+    "air",
+    150,
+    30,
+    120,
+    -1.5708
+   ]
+  }
+ },
+ "flyer_row_air": {
+  "pos": [
+   60,
+   -30
+  ],
+  "time": 12,
+  "frames": 60,
+  "call": {
+   "escape.routes.flyer.debugCard": [
+    "row",
+    60,
+    -30,
+    110,
+    -1.5708
+   ]
+  }
+ },
+ "flyer_row_landing": {
+  "pos": [
+   -80,
+   0
+  ],
+  "time": 16,
+  "frames": 60,
+  "call": {
+   "escape.routes.flyer.debugCard": [
+    "landing",
+    -80,
+    0,
+    60,
+    -1.9
+   ]
+  }
+ },
+ "flyer_card_night": {
+  "pos": [
+   150,
+   40
+  ],
+  "time": 22,
+  "frames": 70,
+  "call": {
+   "escape.routes.flyer.debugCard": [
+    "air",
+    150,
+    50,
+    110,
+    3.3
+   ]
+  }
+ },
+ "flyer_landing_town": {
+  "pos": [
+   128,
+   -24
+  ],
+  "time": 11,
+  "frames": 150,
+  "call": {
+   "escape.routes.flyer.debugQuiet": [
+    14
+   ],
+   "escape.routes.flyer.debugFly": [
+    128,
+    -24,
+    55,
+    0,
+    false
+   ],
+   "escape.routes.flyer.land": []
+  }
+ },
+ "flyer_landing_final": {
+  "pos": [
+   -110,
+   -45
+  ],
+  "time": 16,
+  "frames": 110,
+  "call": {
+   "escape.routes.flyer.debugQuiet": [
+    14
+   ],
+   "escape.routes.flyer.debugFly": [
+    -110,
+    -45,
+    34,
+    0,
+    false
+   ],
+   "escape.routes.flyer.land": []
+  }
+ },
+ "flyer_prompt_hidden": {
+  "pos": [
+   -100,
+   40
+  ],
+  "time": 12,
+  "frames": 40,
+  "call": {
+   "escape.routes.flyer.debugFly": [
+    -100,
+    40,
+    70,
+    -1.5708,
+    true
+   ]
+  }
  }
 }

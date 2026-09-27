@@ -477,17 +477,37 @@ export function create(ctx) {
   //    cinematic() is a one-shot ease-in/hold/ease-out and cannot track a whale.
   // Both share `shotSpec` so the hand-overs between them are frame-continuous.
   const _spec = { target: [0, 0, 0], azimuth: 0, elevation: 0.27, distance: 42, fov: 34 };
+  const STRAIT_X = 29;   // WAVE 5 birds-flicker: the shores are at x = ±36, the piers reach ±28 at deck height
   function shotSpec(framing) {
     const wp = W.group.position;
     const hx = Math.sin(yaw), hz = Math.cos(yaw);
-    // broadside: perpendicular to her heading, kept on the +Z side of the route
-    let dx = -hz, dz = hx;
-    if (dz < 0) { dx = hz; dz = -hx; }
+    // broadside: perpendicular to her heading, on the +Z side of the route. WAVE 5 birds-flicker polish:
+    // the side is fixed per TRIP (the lens probe caught a 58 u cut one second out of the Arrivals Pier):
+    // "flip whenever dz < 0" sat exactly on its own boundary at a berth — she lies bow-north, dz = 0 — so
+    // the first degree of her turn threw the lens from one flank to the other in a single frame. Her S
+    // never turns her heading back on itself (hx keeps one sign the whole way), so the trip's direction
+    // alone keeps the lens on the +Z side mid-strait, and the berth ends are held over water by STRAIT_X.
+    const sg = (S.to || S.side) === 'candy' ? -1 : 1;
+    const dx = -hz * sg, dz = hx * sg;
     const wobble = Math.sin(ctx.state.elapsed * 0.13) * 0.16;
     _spec.target[0] = wp.x + hx * framing.ahead;
     _spec.target[1] = WATER_Y + framing.height;
     _spec.target[2] = wp.z + hz * framing.ahead;
-    _spec.azimuth = Math.atan2(dx, dz) + wobble;
+    let az = Math.atan2(dx, dz) + wobble;
+    // WAVE 5 birds-flicker (critic: "a flat dark-green wedge covers the lower-left of the departure
+    // frame"): at a berth she lies bow-north, so "broadside" points straight along the strait, and the
+    // 42–61 u lens landed INSIDE the far island — 60 u east of Sugar Pier it sat in Cat Island's Arrivals
+    // hall (x ≈ 40), and at the Arrivals Pier it swung 60 u across the town to x ≈ 80 in under a second.
+    // The lens now stays over open water: if it would stand beyond |x| = STRAIT_X, the bearing swings
+    // toward +Z (the open sea south of the route) just far enough — the largest s in [0, 1] with
+    // |target.x + sin(az·s)·horizontal distance| ≤ STRAIT_X. Continuous in every input (no cut).
+    const hd = framing.dist * Math.cos(framing.el), tx = _spec.target[0];
+    if (Math.abs(tx + Math.sin(az) * hd) > STRAIT_X) {
+      let lo = 0, hi = 1;
+      for (let k = 0; k < 14; k++) { const m = (lo + hi) * 0.5; if (Math.abs(tx + Math.sin(az * m) * hd) <= STRAIT_X) lo = m; else hi = m; }
+      az *= lo;
+    }
+    _spec.azimuth = az;
     _spec.elevation = framing.el;
     _spec.distance = framing.dist;
     return _spec;
@@ -603,14 +623,14 @@ export function create(ctx) {
     if (p === null || p === undefined) {
       posed = null;
       placeAtDock(S.side); rampOpen = 1; rampAngle = 1; tieUp();
-      dolphins.visible = false; gullLeave();
+      dolphins.visible = false; dolphins.userData.reset?.(false); gullLeave();
       return true;
     }
     const to = S.side === 'candy' ? 'cat' : 'candy';
     posed = { t: clamp(p, 0, 1), route: makeRoute(S.side, to) };
     rampOpen = 0; rampAngle = 0;
     W.ropes.userData.set([]);
-    dolphins.visible = true;
+    dolphins.visible = true; dolphins.userData.reset?.(true);
     gullArrive(); gullState.mode = 'perch'; gullState.t = 0;
     applyPose();
     return true;
@@ -627,7 +647,7 @@ export function create(ctx) {
     placeAtDock(id);
     rampOpen = 1; rampAngle = 1;
     W.rampPivot.rotation.z = -rampDown;
-    dolphins.visible = false;
+    dolphins.visible = false; dolphins.userData.reset?.(false);
     gullState.mode = 'off'; gull.group.visible = false;
     tieUp();
     refreshGate();
@@ -1042,7 +1062,9 @@ export function create(ctx) {
       }
       // scheduled company
       const d = trip.done;
-      if (!d.dolphins && p > trip.dolphinsAt) { d.dolphins = true; dolphins.visible = true; ui('toast', 'A pod of gummy dolphins joins the crossing!'); ctx.events.emit('ferry:sight', { what: 'dolphins' }); }
+      // WAVE 5 birds-flicker: the pod joins and leaves one dolphin at a time, each at the bottom of a
+      // dive (ferry/wildlife.js join/leave) — the whole mesh used to blink on here and off at 86 %
+      if (!d.dolphins && p > trip.dolphinsAt) { d.dolphins = true; dolphins.visible = true; dolphins.userData.join?.(); ui('toast', 'A pod of gummy dolphins joins the crossing!'); ctx.events.emit('ferry:sight', { what: 'dolphins' }); }
       if (!d.stow && p > 0.34) {
         d.stow = true; stow = 1;
         ui('toast', 'A cat climbs out of the aft crate and stares at you.');
@@ -1058,7 +1080,7 @@ export function create(ctx) {
       if (!d.gull && p > trip.gullAt) { d.gull = true; gullArrive(); ctx.events.emit('ferry:sight', { what: 'gull' }); }
       if (!d.line && p > trip.lineAt) { d.line = true; say(trip.line, 3.2); }
       if (!d.near && p > 0.9) { d.near = true; say(S.to === 'cat' ? LINES.arriveCat[0] : LINES.arriveCandy[0], 3.4); }
-      if (dolphins.visible && p > 0.86) dolphins.visible = false;
+      if (!d.podLeft && p > 0.86) { d.podLeft = true; if (dolphins.userData.leave) dolphins.userData.leave(); else dolphins.visible = false; }
       if (pl) { deckSlot(v3); stickPlayer(v3, yaw, dt); }
       // the free camera takes over from the departure shot: ease the framing out
       // from where that shot left it so the hand-over has no cut in it
@@ -1147,6 +1169,7 @@ export function create(ctx) {
     if (dolphins.visible) {
       const hx = Math.sin(yaw), hz = Math.cos(yaw);
       dolphins.userData.place(W.group.position.x, W.group.position.z, hx, hz, ctx.state.elapsed, splash);
+      if (dolphins.userData.busy && !dolphins.userData.busy()) dolphins.visible = false;   // the last one has dived
     }
     W.group.updateMatrixWorld(true);
   }
@@ -1187,7 +1210,7 @@ export function create(ctx) {
       placeAtDock(isl);
       rampAngle = 1; rampOpen = 1;
       W.rampPivot.rotation.z = -rampDown;
-      dolphins.visible = false; gullLeave();
+      dolphins.visible = false; dolphins.userData.reset?.(false); gullLeave();
       tieUp();
       refreshGate();
     });
@@ -1204,7 +1227,7 @@ export function create(ctx) {
       rampOpen = 0; rampAngle = 0;
       ctx.events.emit('ferry:board', { to: S.to });
       pt = target * T.cross;
-      if (target > 0.2) { dolphins.visible = true; trip.done.dolphins = true; }
+      if (target > 0.2) { dolphins.visible = true; dolphins.userData.reset?.(true); trip.done.dolphins = true; }
       if (target > 0.45) { gullArrive(); gullState.mode = 'perch'; trip.done.gull = true; }
     }
    } catch (err) { console.error('[ferry] world:ready', err); }

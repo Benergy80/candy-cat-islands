@@ -28,6 +28,7 @@ const POD = [
  *  squashed flat on the water as that dolphin's blob shadow. Same InstancedMesh,
  *  so the whole pod plus its shadows is still ONE draw call — and a leaping
  *  dolphin with nothing under it reads as a sticker hovering over the sea. */
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 export function buildDolphins(count = 6) {
   const m = new Merger();
   m.add(ellipsoid(0.42, 0.46, 1.35, 12), 0xffffff, {});
@@ -53,6 +54,9 @@ export function buildDolphins(count = 6) {
     pod.push({
       side, lateral, along, phase,
       rate: 0.46 + (i % 3) * 0.015, scale: r.range(0.72, 0.95),
+      // WAVE 5 birds-flicker: each dolphin joins and leaves the pod only at the
+      // BOTTOM of a dive (u wraps 1 → 0, 1.3 u under the sea), never mid-leap
+      want: false, live: false, pres: 0, u: -1, leaving: false, grow: false,
     });
     col.setHex(r.pick([CANDY.gummyRed, CANDY.gummyGreen, CANDY.gummyBlue, CANDY.gummyYellow, CANDY.gummyPurple, CANDY.gummyOrange]));
     mesh.setColorAt(i, col);
@@ -63,14 +67,47 @@ export function buildDolphins(count = 6) {
   const shade = new THREE.Color();
   const SHADOW_NEAR = new THREE.Color(0x14384f), SHADOW_FAR = new THREE.Color(0x4b86a4);
   mesh.userData.pod = pod;
+  // WAVE 5 birds-flicker (Ben: rainbow-coloured things over the water
+  // "disappearing and reappearing"). ferry.js used to switch the whole pod's
+  // mesh on at 16–26 % of the crossing and off at 86 %, so every dolphin that
+  // happened to be mid-leap — and every blob shadow on the water — blinked in
+  // or out of the frame at once. Now: join() / leave() only set a wish; each
+  // dolphin acts on it when its own dive passes its deepest point (under the
+  // opaque strait), and its blob shadow grows / shrinks over ~0.25 s around
+  // it. busy() is false once every dolphin has gone: then hide the mesh.
+  // reset(on) is for poses and berths: everyone on (or off) at once.
+  let lastE = null;
+  mesh.userData.join = () => { for (const d of pod) d.want = true; };
+  mesh.userData.leave = () => { for (const d of pod) d.want = false; };
+  mesh.userData.busy = () => pod.some((d) => d.want || d.live || d.pres > 0);
+  mesh.userData.reset = (on) => { for (const d of pod) { d.want = d.live = !!on; d.pres = on ? 1 : 0; d.u = -1; d.leaving = d.grow = false; } lastE = null; };
   /** Mid-strait beat: the lead dolphin throws a barrel roll. */
   mesh.userData.flip = (elapsed) => { pod[0].flipAt = elapsed; };
   mesh.userData.place = (px, pz, hx, hz, elapsed, splash) => {
     const rx = -hz, rz = hx;           // right-hand side vector
     const yaw = Math.atan2(hx, hz);
+    const dt = lastE === null ? 0 : clamp(elapsed - lastE, 0, 0.1);
+    lastE = elapsed;
     for (let i = 0; i < pod.length; i++) {
       const d = pod[i];
       const u = ((elapsed * d.rate + d.phase) % 1 + 1) % 1;
+      // join / leave at the bottom of the dive only
+      // (polish: a leaver commits on the way DOWN — u ≥ 0.86, already under the sea — and shrinks to
+      // nothing by the bottom; a joiner grows from nothing on the way up, still under it. The probe saw
+      // the old hard switch as a full-size body vanishing in frame at y −1.2, and the strait is not
+      // perfectly opaque from the high ferry lens.)
+      if (d.u >= 0 && u < d.u) {
+        if (d.leaving) { d.live = false; d.leaving = false; }
+        else if (!d.live && d.want) { d.live = true; d.grow = true; }
+      }
+      if (d.live && !d.want && !d.leaving && u >= 0.86 && u < 0.93) d.leaving = true;
+      if (d.grow && u >= 0.14) d.grow = false;
+      d.u = u;
+      d.pres = clamp(d.pres + (d.live && !d.leaving ? dt : -dt) * 4, 0, 1);
+      if (!d.live && d.pres <= 0) {
+        mesh.setMatrixAt(i, ZERO); mesh.setMatrixAt(pod.length + i, ZERO);
+        continue;
+      }
       const arc = Math.sin(Math.PI * u);
       const y = -1.3 + 3.5 * arc;
       // they weave in and out a little as they run with her
@@ -86,20 +123,24 @@ export function buildDolphins(count = 6) {
         if (ft >= 0 && ft < 1) dummy.rotation.z += Math.PI * 2 * (ft * ft * (3 - 2 * ft));
         else if (ft >= 1) d.flipAt = undefined;
       }
-      dummy.scale.setScalar(d.scale);
+      let gk = 1;
+      if (d.leaving) gk = clamp((1 - u) / 0.14, 0, 1);
+      else if (d.grow) gk = clamp(u / 0.14, 0, 1);
+      dummy.scale.setScalar(d.live ? d.scale * gk * gk * (3 - 2 * gk) : 0);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
       // ── his shadow, flat on the sea: bigger and paler the higher he is ──
       const lift = Math.max(0, arc);
       dummy.position.set(wx, 0.07, wz);
       dummy.rotation.set(0, yaw, 0, 'YXZ');
-      dummy.scale.set(d.scale * (0.92 + lift * 0.5), 0.01, d.scale * (0.92 + lift * 0.5));
+      const blob = d.scale * (0.92 + lift * 0.5) * (d.pres * d.pres * (3 - 2 * d.pres));
+      dummy.scale.set(blob, 0.01, blob);
       dummy.updateMatrix();
       mesh.setMatrixAt(pod.length + i, dummy.matrix);
       shade.copy(SHADOW_NEAR).lerp(SHADOW_FAR, Math.min(1, lift * 1.15));
       mesh.setColorAt(pod.length + i, shade);
       // splash out of the water and back into it
-      if (splash) {
+      if (splash && d.live) {
         const step = (1 / 30) * d.rate;
         if ((u > 0.10 && u - step <= 0.10) || (u > 0.90 && u - step <= 0.90)) splash(wx, wz, u > 0.5 ? 1.5 : 1);
       }

@@ -12,7 +12,8 @@
 // patched nearer the lens than NEAR_CORE of the band depth outright, with a thin
 // dithered lip out to the band depth (it replaces the old "ghost the district
 // within 6 u of the lens" rule; a band dithered all the way was screen-door soup
-// over whatever roof stood at the lens). Discarded fragments write no depth, so where
+// over whatever roof stood at the lens). WAVE 5: both edges are now HARD — the dither
+// only dissolves the window while its strength eases in/out; see FRAG_BODY. Discarded fragments write no depth, so where
 // the window is open the real body shows and the amber GreaterDepth silhouette
 // (player/visitor.js) draws nothing there.
 //
@@ -61,8 +62,12 @@ const TERRAIN = /^terrain/i;
 const KEY = '|cut1';
 /** The ordered dither's thresholds are (v + 0.5) / 16: a value above the top one discards every pixel. */
 export const BAYER_MAX = 15.5 / 16;
-/** The near-lens clip: fully discarded nearer than NEAR_CORE × the band depth (uCutP.w), a dithered lip beyond. */
+/** The near-lens clip: fully discarded nearer than NEAR_CORE × the band depth (uCutP.w) — classify()'s
+ *  conservative reading; the shader clips hard at NEAR_EDGE (WAVE 5: no dithered lip). */
 export const NEAR_CORE = 0.88;
+export const NEAR_EDGE = 0.94;
+/** The window's hard edge sits this share of the feather band (uCutR.w) inside the ellipse's rim. */
+export const CUT_EDGE = 0.5;
 /** The window's feather band as a share of its radius (uCutR.w) is kept inside these. */
 export const FEATHER_MIN = 0.05, FEATHER_MAX = 0.3;
 
@@ -85,19 +90,30 @@ const FRAG_HEAD = [
   'float cutBayer4( vec2 p ) { vec2 a = mod( floor( p ), 4.0 ); return cutB2( floor( a * 0.5 ) ) * 0.25 + cutB2( a ) + 0.03125; }',
   '',
 ].join('\n');
+// WAVE 5 (artifacts): NO DITHERED EDGES. The feather band and the near-lens lip
+// used to thin out through the 4×4 Bayer pattern, which at rest left a ring of
+// single-pixel dots round the visitor (and a dotted seam across anything near
+// the lens) in every frame the window was open — "junk", from any distance.
+// Both edges are now HARD (the window's at the middle of the old feather band,
+// CUT_EDGE; the lens clip at NEAR_EDGE of its band) and the window's frame is
+// drawn as a soft rim DARKENING just outside the hole instead. The dither is
+// kept for the only thing it is good at: the window's strength k (uCutR.z) and
+// the lens clip's (uCutP.z) while they ease in or out (a ~0.1 s dissolve); at
+// k = 1 every Bayer cell discards, so a settled window has no dots at all.
 const FRAG_BODY = [
   '',
   '\tfloat cutRim = 0.0;',
   '\t{',
   '\t\tvec2 cutQ = ( gl_FragCoord.xy - uCutC.xy ) / uCutR.xy;',
-  '\t\tfloat cutE = dot( cutQ, cutQ );',
+  '\t\tfloat cutR = sqrt( dot( cutQ, cutQ ) );',
   '\t\tfloat cutIn = step( vCutV, uCutP.x ) * step( uCutP.y, vCutY );',
-  // the feather: only the outer uCutR.w of the radius (a thin lip, not a ring of dots)
-  '\t\tfloat cutF = smoothstep( 1.0 - uCutR.w, 1.0, sqrt( cutE ) );',
-  '\t\tfloat cutM = uCutR.z * cutIn * ( 1.0 - cutF );',
-  '\t\tcutRim = uCutR.z * cutIn * cutF * ( 1.0 - step( 1.0, cutE ) );',
-  // the near-lens clip: gone outright nearer than NEAR_CORE of the band, a dithered lip out to its edge
-  '\t\tfloat cutNr = uCutP.z * ( 1.0 - smoothstep( ' + NEAR_CORE.toFixed(2) + ' * uCutP.w, uCutP.w, vCutV ) );',
+  // the hole: a hard edge in the middle of the uCutR.w feather band
+  '\t\tfloat cutEdge = 1.0 - ' + CUT_EDGE.toFixed(2) + ' * uCutR.w;',
+  '\t\tfloat cutM = uCutR.z * cutIn * step( cutR, cutEdge );',
+  // its frame: darkest right at the edge, gone by the band's outer radius
+  '\t\tcutRim = uCutR.z * cutIn * step( cutEdge, cutR ) * ( 1.0 - smoothstep( cutEdge, 1.0, cutR ) );',
+  // the near-lens clip: gone outright nearer than NEAR_EDGE of the band (a hard clip plane, like the lens near plane)
+  '\t\tfloat cutNr = uCutP.z * step( vCutV, ' + NEAR_EDGE.toFixed(2) + ' * uCutP.w );',
   '\t\tif ( max( cutM, cutNr ) > cutBayer4( gl_FragCoord.xy ) ) discard;',
   '\t}',
 ].join('\n');

@@ -668,7 +668,11 @@ function buildSign(text) {
   // her name painted on both flanks — the quads are projected onto the hull so
   // nothing floats off the curve. Big enough to read at the game camera.
   const tex = signTex(text);
-  const nz = 12, ny = 2, zc = 4.6, hz = 3.1, yc = 1.55, hy = 0.82;
+  // WAVE 5 birds-flicker polish (critic: the plate read 'SUGA|RFI' in every ferry frame): centred at
+  // z 4.6 it ran under the fore rope strap (z 5.0 — a cream band straight through the name) and out
+  // past it. It now fits the clear panel of her flank between the stowed gangplank (which hangs down
+  // her side at z −1.5…0.5) and the strap (z 4.8), a little lower, clear of the cradle braces above.
+  const nz = 12, ny = 2, zc = 2.8, hz = 1.7, yc = 1.42, hy = 0.52;
   const pos = [], nrm = [], uv = [], idx = [];
   let vi = 0;
   for (const s of [1, -1]) {

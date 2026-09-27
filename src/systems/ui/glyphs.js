@@ -142,6 +142,10 @@ export function portrait(family, h = 330) {
 const P = {
   spark: 'M12 2.5 l2.7 6.6 l6.8 2.9 l-6.8 2.9 L12 21.5 l-2.7 -6.6 L2.5 12 l6.8 -2.9 Z',
   star: 'M12 2.8 l2.9 6.1 l6.7 .9 l-4.9 4.7 l1.2 6.7 L12 18 l-6 3.1 l1.2 -6.7 L2.4 9.8 l6.7 -.9 Z',
+  // the SUGAR STAR (invincibility pickup, wave 5): a rock-candy crystal — one
+  // tall faceted shard with a smaller shard either side (no five-point star)
+  sugarstar: 'M12 2.2 L15.4 6.6 V14.6 L12 20 L8.6 14.6 V6.6 Z M8.6 6.6 L12 8.8 L15.4 6.6 M12 8.8 V20'
+    + ' M8.6 12 L2.8 8.6 L3.6 14.6 L9.4 16 M15.4 12 L21.2 8.6 L20.4 14.6 L14.6 16',
   moon: 'M16.4 3.2 a9.2 9.2 0 1 0 4.6 8 a7 7 0 1 1 -4.6 -8 Z',
   ferry: 'M3 14 h18 l-2.4 5.6 a2 2 0 0 1 -1.8 1.2 H7.2 a2 2 0 0 1 -1.8 -1.2 Z M12 14 V6 M12 6 h6 l-2 4 h-4 M6.5 14 V10 h5.5',
   paw: 'M12 13.2 c3 0 5 1.7 5 3.7 c0 2 -2 3.1 -5 3.1 c-3 0 -5 -1.1 -5 -3.1 c0 -2 2 -3.7 5 -3.7 Z',
@@ -162,6 +166,8 @@ const P = {
   bug: 'M12 5.4 c3.2 0 5.4 2.8 5.4 7 s-2.2 6.2 -5.4 6.2 s-5.4 -2 -5.4 -6.2 s2.2 -7 5.4 -7 Z M12 5.4 V3 M4 9 l3 1.6 M20 9 l-3 1.6 M4.4 16 l3 -1.4 M19.6 16 l-3 -1.4',
   // a folded paper map (the MAP chip shown while the minimap is off)
   map: 'M3.2 6.4 L8.8 4 l6.4 2.4 L20.8 4 v13.6 l-5.6 2.4 l-6.4 -2.4 L3.2 20 Z M8.8 4 v13.6 M15.2 6.4 V20',
+  // VIEW (WAVE 5 viewpoints — "Take in the view"): a pair of tourist binoculars
+  view: 'M3.2 15.6 a3.6 3.6 0 1 0 7.2 0 a3.6 3.6 0 1 0 -7.2 0 Z M13.6 15.6 a3.6 3.6 0 1 0 7.2 0 a3.6 3.6 0 1 0 -7.2 0 Z M3.7 13.6 L6.1 5.8 h3.3 l1 7.2 M20.3 13.6 L17.9 5.8 h-3.3 l-1 7.2 M10.4 11 h3.2',
 };
 
 /**
@@ -338,7 +344,11 @@ export function item(name, o = {}) {
 export const POI_PATHS = {
   home: 'M3.6 11.2 L12 3.8 l8.4 7.4 M6 9.6 V20.4 h12 V9.6',
   cup: P.cup, peak: P.peak, drop: P.drop, gym: P.gym, tower: P.tower,
-  exit: P.exit, ferry: 'M12 14 V6 M4 14 h16 l-2 6 H6 Z', star: P.star,
+  exit: P.exit, ferry: 'M12 14 V6 M4 14 h16 l-2 6 H6 Z',
+  // map glyph 'star' = the Sugar Star crystal (bare outline: facet lines would
+  // clog a 20 px disc)
+  star: 'M12 2.4 L15.4 6.8 V14.6 L12 19.8 L8.6 14.6 V6.8 Z M8.6 12 L3 8.8 L3.8 14.6 L9.4 15.8 M15.4 12 L21 8.8 L20.2 14.6 L14.6 15.8',
+  sugarstar: P.sugarstar,
   paw: 'M12 13 c2.9 0 4.9 1.7 4.9 3.6 c0 2 -2 3.1 -4.9 3.1 c-2.9 0 -4.9 -1.1 -4.9 -3.1 c0 -1.9 2 -3.6 4.9 -3.6 Z'
      + ' M6.6 8 a2 2.5 0 1 0 0 5 a2 2.5 0 1 0 0 -5 Z M17.4 8 a2 2.5 0 1 0 0 5 a2 2.5 0 1 0 0 -5 Z'
      + ' M9.9 3.9 a1.9 2.4 0 1 0 0 4.8 a1.9 2.4 0 1 0 0 -4.8 Z M14.1 3.9 a1.9 2.4 0 1 0 0 4.8 a1.9 2.4 0 1 0 0 -4.8 Z',
@@ -359,4 +369,6 @@ export const POI_PATHS = {
   thermal: 'M6.4 20.4 q-2.4 -4.2 0 -8.2 q2.2 -3.8 0 -8 M12 20.4 q-2.4 -4.2 0 -8.2 q2.2 -3.8 0 -8 M17.6 20.4 q-2.4 -4.2 0 -8.2 q2.2 -3.8 0 -8',
   // plane: a paper plane
   plane: 'M2.8 11.6 L21.2 4 L15.4 20.2 L11.4 14 Z M11.4 14 L21.2 4 M11.4 14 v5.2 l2.4 -2.4',
+  // view: "Take in the view" spots (WAVE 5 viewpoints) — the binoculars from the icon set
+  view: P.view,
 };

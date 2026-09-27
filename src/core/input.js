@@ -2,9 +2,10 @@
 // Input contract v3 (docs/CAMERA_SPEC.md §6.2):
 //   keys · down(code) · pressed · wheel     keyboard and wheel, unchanged
 //   pointer.down        the LEFT button (0) is held: "use the item" (weapons.js)
-//   pointer.orbit       the middle (1) or right (2) button is held: camera orbit only, never the item
+//   pointer.orbit       the middle (1) or right (2) button is held: camera orbit / look only, never the item
 //   pointer.button      the last e.button seen on a press or release
-//   pointer.dragDX/DY   px dragged this frame with ANY button held (camera orbit)
+//   pointer.dragDX/DY   px dragged this frame with ANY button held (camera orbit; in camera mode 4, the
+//                       first-person look — a left drag past 12 px is a look, never a click, weapons.js)
 //   pointer.mdx/mdy     px the mouse moved this frame with NO button held (the camera's V look)
 //   axis() · virtual    movement; both read zero while moveLock > 0
 //   axisRaw() · virtualRaw   the same, ignoring moveLock (the camera's look pan reads these);

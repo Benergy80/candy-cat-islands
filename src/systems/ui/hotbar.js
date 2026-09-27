@@ -6,7 +6,7 @@
 //
 //   createHotbar(ctx, panel)  bottom-centre rack of held weapons/tools
 //   createCandy(ctx, panel)   candy-currency pill that sits beside the objective
-//   createCamChip(ctx, panel) '1 iso · 2 follow · 3 top · V look' chip by the help chip
+//   createCamChip(ctx, panel) '1 iso · 2 follow · 3 top · 4 eyes · V look' chip by the help chip
 //                             (+ the V look's caption, "you" marker and teach toast)
 //
 // Every one of them reads ctx.systems.inventory / .camera DEFENSIVELY: those
@@ -206,9 +206,15 @@ export function createCandy(ctx, panel) {
 // camera has lost him behind something for 2 s and a 45° step would see him
 // clear, camera.hint names the key ('Q' or 'E', with its seq and seconds left):
 // the chip shows a keycap row that pulses for those 2 s (at most once a minute).
-const CAM_MODES = [[1, 'iso'], [2, 'follow'], [3, 'top']];
+//
+// MODE 4, EYES (BRIEF WAVE 5, Contract Q camera (a)): the first person gets the chip's 4th mode segment,
+// and while the lens is in his head (camera.firstPersonActive) and the chip is up, a caption row says how
+// it works (drag to look · WASD walk · wheel zoom · 1 2 3 step out). Entering it shows the chip longer
+// (CAM_REVEAL_FP) so the caption can be read once.
+const CAM_MODES = [[1, 'iso'], [2, 'follow'], [3, 'top'], [4, 'eyes']];
 const CAM_REVEAL = 4;
-const CAM_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3', 'KeyV'];
+const CAM_REVEAL_FP = 6;
+const CAM_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'KeyV'];
 const LOOK_ON = 0.05;                 // camera.looking above this = looking (segment lit, caption, marker)
 const YOU_EDGE = 40;                  // px: the off-screen chevron sits this far inside the frame edge…
 const YOU_EDGE_B = 66;                // …and this far above the bottom one (its tag hangs under the disc)
@@ -288,10 +294,14 @@ export function createCamChip(ctx, panel) {
     + '<span class="cci-cam-seg cci-cam-v" data-m="v"><span class="cci-key">V</span><em>look</em></span>'
     + '<div class="cci-cam-cap cci-plate"><b>Looking</b><i>·</i><span class="cci-cam-pan"><span class="cci-key">WASD</span><em>pan</em><i>·</i></span>'
     + '<em>mouse orbit</em><i>·</i><em>wheel zoom</em><i>·</i><em>release</em><span class="cci-key gold">V</span></div>'
-    + '<div class="cci-cam-hint cci-plate"><span class="cci-key">Q</span><em>turn the view</em></div>';
+    + '<div class="cci-cam-hint cci-plate"><span class="cci-key">Q</span><em>turn the view</em></div>'
+    + '<div class="cci-cam-cap cci-cam-fpcap cci-plate"><b>Eyes</b><i>·</i><em>drag to look</em><i>·</i><span class="cci-key">WASD</span><em>walk</em>'
+    + '<i>·</i><em>wheel zoom</em><i>·</i><span class="cci-key">1</span><span class="cci-key">2</span><span class="cci-key">3</span><em>step out</em></div>';
   const segs = [...el.querySelectorAll('.cci-cam-seg:not(.cci-cam-v)')];
   const vSeg = el.querySelector('.cci-cam-v');
-  const cap = el.querySelector('.cci-cam-cap');
+  const cap = el.querySelector('.cci-cam-cap:not(.cci-cam-fpcap)');
+  const fpCap = el.querySelector('.cci-cam-fpcap');   // mode 4's caption (shown with the chip while in his head)
+  fpCap.style.display = 'none';
   const capPan = el.querySelector('.cci-cam-pan');   // "WASD pan": not on a vehicle / flying (that look only orbits, §3)
   cap.style.display = 'none';
   const hintEl = el.querySelector('.cci-cam-hint'), hintKeyEl = hintEl.querySelector('.cci-key');
@@ -300,6 +310,7 @@ export function createCamChip(ctx, panel) {
   const anim = panel(el, { rise: 0.2, fall: 0.16, y: 10, s: 0.9 });
   let mode = 0, pop = 0, reveal = 0;
   let vLit = false, vPop = 0, capK = 0, capShown = false, capVeh = false;
+  let fpK = 0, fpShown = false;
 
   // the "you" marker / edge chevron: one overlay in the HUD root, positioned by transform only
   const you = document.createElement('div');
@@ -331,8 +342,8 @@ export function createCamChip(ctx, panel) {
 
   function set(m) {
     const v = Number(m?.mode ?? m?.value ?? m) || 0;
-    if (v < 1 || v > 3 || v === mode) return;
-    mode = v; pop = 1; reveal = CAM_REVEAL;
+    if (v < 1 || v > 4 || v === mode) return;
+    mode = v; pop = 1; reveal = v === 4 ? CAM_REVEAL_FP : CAM_REVEAL;
     for (const s of segs) s.classList.toggle('on', Number(s.dataset.m) === v);
   }
   set(ctx.systems?.camera?.mode ?? 1);
@@ -403,7 +414,7 @@ export function createCamChip(ctx, panel) {
       if (typeof live === 'number') set(live);
       // Pressing the key you are already on still deserves an answer (and any V press reveals it).
       const pressed = ctx.input?.pressed;
-      if (pressed?.size) for (const k of CAM_KEYS) if (pressed.has(k)) { reveal = CAM_REVEAL; break; }
+      if (pressed?.size) for (const k of CAM_KEYS) if (pressed.has(k)) { reveal = Math.max(reveal, CAM_REVEAL); break; }
       const lk = Number(cam?.looking) || 0;
       const looking = lk > LOOK_ON;
       if (looking !== vLit) { vLit = looking; vSeg.classList.toggle('on', looking); if (looking) vPop = 1; }
@@ -442,6 +453,7 @@ export function createCamChip(ctx, panel) {
           const rc = el.getBoundingClientRect();
           let l = rc.left, r = rc.right, t = rc.top - chipDY, b = rc.bottom - chipDY;   // where it stands without the lift
           if (capShown) { const rq = cap.getBoundingClientRect(); l = Math.min(l, rq.left); r = Math.max(r, rq.right); t = Math.min(t, rq.top - chipDY); }
+          if (fpShown) { const rq = fpCap.getBoundingClientRect(); l = Math.min(l, rq.left); r = Math.max(r, rq.right); t = Math.min(t, rq.top - chipDY); }
           if (hintShown) { const rq = hintEl.getBoundingClientRect(); l = Math.min(l, rq.left); r = Math.max(r, rq.right); t = Math.min(t, rq.top - chipDY); }
           for (let i = 0; i < avoidR.length; i++) { const a = avoidR[i]; if (a.on && r > a.l && l < a.r && b > a.t && t < a.b) chipGoal = Math.min(chipGoal, a.t - b); }
         }
@@ -456,7 +468,16 @@ export function createCamChip(ctx, panel) {
         if (h.key === 'Q' || h.key === 'E') { hintKeyEl.textContent = h.key; hintLeft = Number(h.t) > 0 ? Number(h.t) : 2; hintPh = 0; reveal = Math.max(reveal, hintLeft + 0.4); }
       }
       if (hintLeft > 0) hintLeft = Math.max(0, hintLeft - dt);
-      const hintOn = hintLeft > 0 && !looking && capK <= 0;
+      // mode 4's caption: with the chip, while the lens is in his head (dt-driven, DOM on change only)
+      const fpWant = cam?.firstPersonActive && reveal > 0 ? 1 : 0;
+      if (fpK !== fpWant) {
+        fpK = fpWant > fpK ? Math.min(1, fpK + dt / 0.18) : Math.max(0, fpK - dt / 0.14);
+        if (fpK > 0 && !fpShown) { fpCap.style.display = ''; fpShown = true; }
+        if (fpK <= 0 && fpShown) { fpCap.style.display = 'none'; fpShown = false; }
+        fpCap.style.opacity = Math.min(1, fpK * 1.6).toFixed(3);
+        fpCap.style.transform = `translateY(${((1 - fpK) * 6).toFixed(2)}px)`;
+      }
+      const hintOn = hintLeft > 0 && !looking && capK <= 0 && fpK <= 0;
       if (hintOn !== hintShown) { hintShown = hintOn; hintEl.style.display = hintOn ? '' : 'none'; if (!hintOn) hintKeyEl.style.transform = ''; }
       if (hintOn) { hintPh += dt; hintKeyEl.style.transform = `scale(${(1 + 0.22 * Math.abs(Math.sin(hintPh * Math.PI * 1.5))).toFixed(3)})`; }
       placeYou(cam, lk);

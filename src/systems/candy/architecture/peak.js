@@ -17,6 +17,21 @@ function bridgeDist(x, z, ext = 2.0) {
   return Math.hypot(dx - BRIDGE.ux * t, dz - BRIDGE.uz * t);
 }
 
+/**
+ * A pennant FLYING OFF a pole (WAVE 5, artifacts). The bunting instance hangs
+ * from its top edge along its local X = (cos ry, −sin ry), so it is placed with
+ * that edge running from the pole's surface (radius rp at height y) outward,
+ * and a thin licorice arm is drawn along it to hang from — the same rule the
+ * sandcastle flag on the pier follows. The flutter swings it about the arm.
+ */
+function poleFlag(A, x, y, z, rp, ry, w, h, ph, color) {
+  const cs = Math.cos(ry), sn = Math.sin(ry);
+  const c = rp + w / 2;
+  A.inst.bunting.push({ x: x + cs * c, y, z: z - sn * c, w, h, ry, ph, color });
+  const L = w + 0.14, a = rp - 0.06 + L / 2;
+  A.B.box('licorice', L, 0.07, 0.07, { at: [x + cs * a, y + 0.035, z - sn * a], rot: [0, ry, 0], color: C.licorice });
+}
+
 export function buildPeak(A) {
   const { B, world } = A;
   const movers = [];
@@ -99,9 +114,27 @@ function buildMonument(A) {
     B.cyl('matte', 0.5, 0.66, 0.4, 10, { at: [px, gy + 0.2, pz], color: C.plum });
     B.stripeCyl(0.24, 0.3, 9.0, { at: [px, gy + 4.9, pz], variant: 0, seg: 9 });
     B.sph('gloss', 0.46, 9, 7, { at: [px, gy + 9.5, pz], color: SPRINKLE[i % SPRINKLE.length] });
-    // a pennant, so the poles read as a monument and not as scaffolding
+    // pennants, so the poles read as a monument and not as scaffolding.
+    // WAVE 5 (artifacts): the bunting instance is now a PENNANT hung from its
+    // top edge (kit.pennantGeometry), so a flag centred ON the pole was a
+    // triangle skewered through its middle. Each one now flies off the pole on
+    // a licorice arm (its top edge on the arm, its inner corner at the pole),
+    // the three winding round it 120° apart like the stripe on the cane —
+    // never two in one plane, and at least two broadside from any side. The
+    // pole beside the wafer tower turns its spiral 60° so no flag (1.75 u of
+    // arm, ±0.4 u of flutter) reaches toward the drum (≈ 4.4 u at that height).
+    const towerGap = (phi) => {
+      let m = 1e9;
+      for (let k = 0; k < 3; k++) {
+        const ry = -a + phi + k * (Math.PI * 2 / 3);
+        m = Math.min(m, Math.hypot(px + Math.cos(ry) * 1.75 - -181.5, pz - Math.sin(ry) * 1.75 - -57.5));
+      }
+      return m;
+    };
+    const phi = towerGap(0) < 6.5 && towerGap(Math.PI / 3) > towerGap(0) ? Math.PI / 3 : 0;
     for (let k = 0; k < 3; k++) {
-      A.inst.bunting.push({ x: px, y: gy + 8.4 - k * 0.75, z: pz, w: 1.5, h: 0.9, ry: a + Math.PI / 2, ph: i * 1.3 + k, color: SPRINKLE[(i + k) % SPRINKLE.length] });
+      const ry = -a + phi + k * (Math.PI * 2 / 3), fy = gy + 8.4 - k * 0.75;
+      poleFlag(A, px, fy, pz, 0.25, ry, 1.5, 0.9, i * 1.3 + k, SPRINKLE[(i + k) % SPRINKLE.length]);
     }
     A.collide(px, pz, 0.55);
   }
@@ -679,7 +712,16 @@ function buildReveal(A) {
     B.stripeCyl(0.2, 0.26, 5.2, { at: [qx, y + 3.1, qz], variant: 0, seg: 9 });
     B.sph('gloss', 0.42, 9, 7, { at: [qx, y + 5.85, qz], color: s > 0 ? C.teal : C.yellow });
     A.collide(qx, qz, 0.45);
-    for (let k = 0; k < 3; k++) A.inst.bunting.push({ x: qx, y: y + 4.9 - k * 0.7, z: qz, w: 1.2, h: 0.8, ry: dir, ph: s + k, color: SPRINKLE[(k + (s > 0 ? 0 : 3)) % SPRINKLE.length] });
+    // three pennants flying OUTWARD, away from the sightline between the posts
+    // (the flag's local X is (cos ry, −sin ry); outward is s·(fx, fz)), swept
+    // 34° back toward the road: straight out, the +s post's flags ran into
+    // the "FROSTING PEAK" sign post 4.2 u along that line (its plaque's long
+    // axis runs toward the summit, so the road side is the clear side), and
+    // at 34° they still face the visitor almost broadside. Spaced more than a
+    // flag's height apart so no tip reaches the next arm (WAVE 5, artifacts).
+    const sw = 0.6, ox = fx * s * Math.cos(sw) - Math.cos(dir) * Math.sin(sw), oz = fz * s * Math.cos(sw) - Math.sin(dir) * Math.sin(sw);
+    const ry = Math.atan2(-oz, ox);
+    for (let k = 0; k < 3; k++) poleFlag(A, qx, y + 5.25 - k * 0.8, qz, 0.21, ry, 1.2, 0.74, s + k, SPRINKLE[(k + (s > 0 ? 0 : 3)) % SPRINKLE.length]);
   }
   bench(B, x, y + 0.5, z, Math.atan2(Math.sin(dir), Math.cos(dir)) + Math.PI, { w: 2.4, A });
   // the sign, facing back down the road you walked up

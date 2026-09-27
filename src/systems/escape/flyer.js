@@ -7,7 +7,8 @@
 // cat-sized.
 //
 // WAVE 3 — Contract E. She is now a proper (silly) glider:
-//   Space        flap (costs ENERGY; tired legs flap weakly)
+//   Space        flap (costs ENERGY; tired legs flap weakly); HOLD to keep flapping
+//   E            land (wave 5: she picks a clear spot below and circles down onto it)
 //   W / S        pitch: W floats (slow, minimum sink), S dives (fast, drops);
 //                ×1.5 response, and the nose AUTO-LEVELS when you let go
 //   A / D        banked turns (the machine rolls into the turn)
@@ -29,10 +30,15 @@
 //   phase ('run'|'air'|'roll'|'sink'|null) · state (the flight state) ·
 //   thermals · spot · home {x, z, y, yaw, deck} · contacts {bonk, hard} ·
 //   parked {t, away, dist} · corridor(opts) · debugCorridorShow(on) ·
-//   debugFly(x, z, y, yaw, hold) · debugRelease() · debugPark(x, z, yaw).
+//   debugFly(x, z, y, yaw, hold) · debugRelease() · debugPark(x, z, yaw) ·
+//   (wave 5) landing · land() · landSpot · landProfile() · card · showCard()
+//   · hideCard() · helpEls · debugCard(mode, x, z, y, yaw).
 //   Exported: FLIGHT (tuning), RUNWAY, stepFlight(), climbProfile(), bite(),
-//   THERMAL_SITES. Events: 'flyer:contact' {kind:'bonk'|'hard', x, y, z}.
-//   Map markers: 'flyer' (glyph plane) always, 'thermal_<id>' while airborne.
+//   THERMAL_SITES, and (wave 5) LAND + makeLander() (the E-to-land autopilot,
+//   pure) and bonkTest() / colSolid() / colTopAt() (how she sees colliders).
+//   Events: 'flyer:contact' {kind:'bonk'|'hard', x, y, z}.
+//   Map markers: 'flyer' (glyph plane) always, 'thermal_<id>' while airborne,
+//   'flyer_land' (glyph pin) while an E-landing is under way.
 //
 //   ctx.state.flying = { alt, y, speed, vy, energy, heading, thermal, boost }
 //   while airborne, null otherwise (the camera frames flight from it, the map
@@ -94,6 +100,25 @@
 // runway and looks at you with amber eyes, and sinks away when you take off
 // or walk toward it. Gliding, the wings now hold out nearly flat.
 //
+// WAVE 5 — Contract Q, FLIGHT CONTROLS (Ben: "needs control instructions and
+// should be able to gain altitude quickly"). A CONTROL CARD the first time you
+// board in a session (sessionStorage cci.flyerCard.v1; keys AND the phone's
+// buttons; the take-off roll waits on the planks until any input; H / ? / the
+// ? chip reopen it while you ride) and a compact KEY ROW over the hotbar while
+// you fly (own DOM, the HUD's .cci-plate family). E in the air (the LAND chip
+// on a phone) LANDS: she first PICKS a clear, flat, dry spot within 45 u (ahead
+// of her first; gold motes + a map pin mark it), then circles it down under a
+// safe-height profile of the roofs around it and flares, so it is always the
+// gentle roll-out and never a roof (see startLanding); refused when nothing
+// down there is clear; Space / W / boost (or A/D held) call it off. While riding, E / Enter and H / ? belong to the machine (taken
+// out of input.pressed before interaction and ui read them). THE CLIMB: one
+// flap buys ≈ 2× the height (FLAP_V 8.5 → 13, the kick decays slower), W held
+// makes each flap 1.5× stronger, HOLDING Space keeps flapping every 0.42 s, and
+// near the ground an empty tank still flaps at 60 % for half the cost. From the
+// runway, 100 u takes ≈ 7.5 s holding Space + W and ≈ 9 s tapping once a
+// second (it was 15-17 s, and holding Space used to give ONE flap). Thin air
+// above 330 pulls harder (0.16 → 1.0 per u) so the ceiling still holds.
+//
 // Draw calls: frame · crank · wing×2 · prop · airflow (ribbons + streaks, in
 //   flight only) · field · sock · helmet · cat · signpost · sign · runway
 //   paint (lettering, arrow, centreline, lamps) · sway (crew arms + flags,
@@ -115,21 +140,34 @@ export const FLIGHT = {
   DIVE: 22.0,          // S held
   BOOST_ADD: 15.0,     // extra u/s while boosting
   BOOST_T: 1.5, BOOST_CD: 12.0,
-  FLAP_V: 8.5,         // vy impulse per flap at full bite + full energy
+  // WAVE 5 (Contract Q): she CLIMBS. One flap now buys ≈ 2× the height it
+  // did (a bigger kick that also lasts longer: FLAP_V 8.5 → 13, RELAX_UP
+  // 1.0 → 0.7), W held makes every flap 1.5× stronger (nose up: the wings
+  // push you up instead of along), and HOLDING Space keeps pedalling a flap
+  // every FLAP_HOLD s — tapping is still allowed down to FLAP_CD.
+  FLAP_V: 13.0,        // vy impulse per flap at full bite + full energy
+  FLAP_W: 1.5,         // × on a flap while the nose is fully up (W)
   FLAP_CD: 0.30,
+  FLAP_HOLD: 0.42,     // Space HELD: a flap every this many seconds
   VY_MAX: 18, VY_MIN: -18,
   SINK: -2.7,          // level glide sink
-  SINK_SLOW: -2.0,     // W held
+  SINK_SLOW: -1.6,     // W held (was -2.0: nose up now floats a little better)
   SINK_DIVE: -10.0,    // S held
-  RELAX_UP: 1.0,       // how fast a flap's climb decays back to the glide
+  RELAX_UP: 0.7,       // how fast a flap's climb decays back to the glide (was 1.0)
   RELAX_DN: 1.0,       // how fast a fall recovers to the glide
+  // tired legs: a flap on an empty tank has EFF_MIN of its strength up high
+  // (≈ the old empty-tank climb, since each flap is bigger now), but near the
+  // ground (under GND_LO u, fading out by GND_HI) it keeps EFF_GND and costs
+  // half: an empty tank never pins you to the grass.
+  EFF_MIN: 0.12, EFF_GND: 0.6, GND_LO: 25, GND_HI: 70,
   CEIL: 330,           // soft ceiling (absolute y)
+  THIN: 1.0,           // thin-air pull per u above CEIL (was 0.16: stronger flaps punched through)
   BITE_LO: 190, BITE_HI: 380,
   PITCH_MAX: 0.45,     // 0.30 × 1.5
   PITCH_RATE: 5.25,    // 3.5 × 1.5
   LEVEL_RATE: 2.4,     // auto-level when W/S released
   TURN: 1.15, BANK: 0.62,
-  E_FLAP: 0.0135,      // ≈ 74 flaps from a full tank
+  E_FLAP: 0.016,       // ≈ 62 flaps from a full tank (was 0.0135; each flap now lifts ≈ 2×)
   E_GLIDE: 0.05,       // per second, after 0.8 s without flapping
   E_THERMAL: 0.30,     // per second at the heart of a thermal
   E_PARKED: 0.25,
@@ -170,14 +208,19 @@ export function stepFlight(s, inX, inY, flap, boost, th, dt) {
   sinkT += th * F_.THERMAL_LIFT * (1 - smoothstep(F_.THERMAL_TOP - 45, F_.THERMAL_TOP + 12, s.y));
   if (boosting) sinkT += 1.5;
   sinkT -= Math.abs(s.bank) * 0.8;                          // a steep bank costs a little lift
-  if (s.y > F_.CEIL) sinkT -= (s.y - F_.CEIL) * 0.16;       // thin air
+  if (s.y > F_.CEIL) sinkT -= (s.y - F_.CEIL) * F_.THIN;     // thin air
   // flap
   s.flapCd -= dt; s.sinceFlap += dt;
   if (flap && s.flapCd <= 0) {
     s.flapCd = F_.FLAP_CD; s.sinceFlap = 0;
-    const eff = 0.3 + 0.7 * smoothstep(0, 0.3, s.energy);
-    s.vy = Math.min(F_.VY_MAX, Math.max(s.vy, -1) + F_.FLAP_V * bite(s.y) * eff);
-    s.energy = Math.max(0, s.energy - F_.E_FLAP);
+    // s.agl (feet above the ground under her) is optional: without it she is
+    // treated as high up (no ground effect)
+    const low = 1 - smoothstep(F_.GND_LO, F_.GND_HI, Number.isFinite(s.agl) ? s.agl : 1e3);
+    const floor = F_.EFF_MIN + (F_.EFF_GND - F_.EFF_MIN) * low;
+    const eff = floor + (1 - floor) * smoothstep(0, 0.3, s.energy);
+    const nose = 1 + (F_.FLAP_W - 1) * up;                   // W-climb
+    s.vy = Math.min(F_.VY_MAX, Math.max(s.vy, -1) + F_.FLAP_V * bite(s.y) * eff * nose);
+    s.energy = Math.max(0, s.energy - F_.E_FLAP * (1 - 0.5 * low));
     s.flapped = true;
   }
   const k = s.vy > sinkT ? F_.RELAX_UP : F_.RELAX_DN;
@@ -245,6 +288,349 @@ export function profileAt(prof, a) {
   if (!(a > 0)) return 0;
   for (let i = 0; i < prof.length; i += 2) if (prof[i] >= a) return prof[i + 1];
   return prof[prof.length - 1];
+}
+
+// ── colliders as a flying machine sees them (pure; bonk() and the lander) ────
+/** Solid for a flying machine? (claims, low props, open doors are not) */
+export function colSolid(c, skip = null) {
+  if (!c || c === skip || c.solid === false) return false;
+  if (typeof c.h === 'number' && (c.h <= 1.6 || c.h < -50)) return false;
+  return true;
+}
+/** Top of a solid collider in world Y (absolute h, or a size guess over the ground). */
+export function colTopAt(c, guess, world) {
+  if (typeof c.h === 'number' && c.h > 1.6 && c.h < 1e4) return c.h;
+  return world.height(c.x, c.z) + guess;
+}
+/**
+ * The bonk test: is a machine at (x, z) with its feet at `feet` inside a
+ * solid's footprint (grown by 1 u; circles only from r 1.1) and below its
+ * top? The first such collider → out {nx, nz} (push-out normal), out.top.
+ */
+export function bonkTest(cols, skip, x, z, feet, world, out) {
+  for (let i = 0; i < cols.length; i++) {
+    const c = cols[i];
+    if (!colSolid(c, skip)) continue;
+    let nx = 0, nz = 0, hit = false, top = 0;
+    const dx = x - c.x, dz = z - c.z;
+    if (c.box) {
+      if (!(c.w > 0 && c.d > 0)) continue;
+      const reach = (c.w + c.d) * 0.5 + 1.6;
+      if (dx * dx + dz * dz > reach * reach) continue;
+      const cr = Math.cos(c.rot || 0), sr = Math.sin(c.rot || 0);
+      const lx = dx * cr + dz * sr, lz = -dx * sr + dz * cr;
+      const hw = c.w / 2 + 1.0, hd = c.d / 2 + 1.0;
+      if (Math.abs(lx) < hw && Math.abs(lz) < hd) {
+        hit = true; top = colTopAt(c, clamp(Math.max(c.w, c.d) * 0.9, 4, 24), world);
+        let ln = 0, lm2 = 0;
+        if (hw - Math.abs(lx) < hd - Math.abs(lz)) ln = Math.sign(lx || 1); else lm2 = Math.sign(lz || 1);
+        nx = ln * cr - lm2 * sr; nz = ln * sr + lm2 * cr;
+      }
+    } else if (c.r >= 1.1) {
+      const rr = c.r + 1.0;
+      if (dx * dx + dz * dz < rr * rr) {
+        hit = true; top = colTopAt(c, clamp(c.r * 2.4, 4, 30), world);
+        const d = Math.hypot(dx, dz) || 1e-3; nx = dx / d; nz = dz / d;
+      }
+    }
+    if (!hit || feet > top) continue;                          // missed, or cleared the roof
+    out.nx = nx; out.nz = nz; out.top = top;
+    return true;
+  }
+  return false;
+}
+
+// ── WAVE 5 fix: E-TO-LAND, a spot is CHOSEN first, then flown to ──────────────
+// (verifier, wave 5: the old autopilot spiralled down wherever she happened
+//  to be, so over a town she bonked roofs 5-34 times on the way down, and on
+//  a coast she drifted out to sea and gave up.) Now:
+//   1. PICK: candidates in rings 0-45 u around the press point, scored toward
+//      a point ahead of her. A spot must be dry land (> 0.5 u, no lake /
+//      river, no deck), gently sloped, land for 8 u all round, and at least
+//      LAND.CLEAR u from every collider bonk() would hit (the same colSolid /
+//      colTopAt / +1 u footprint test), with posts and low props kept clear of
+//      the roll-out too. More room and lower roofs score better. Nothing
+//      qualifies → refused (the caller toasts).
+//   2. PROFILE: the safe height over the spot by 1-u rings out to 64 u: every
+//      roof top + LAND.MARGIN on the rings its footprint spans, open ground +
+//      LAND.TERR, nothing inside the touchdown zone. As a running max from the
+//      centre out (hinF) it is the height she needs at radius r to reach the
+//      spot WITHOUT climbing.
+//   3. FLY: a vector-field orbit around the spot whose radius shrinks with her
+//      height (a glide cone, never wider than the chimney of clear air she is
+//      in), so she spirals in and ends on a short, curving straight-in; she
+//      sinks briskly while high, never below the profile, and flares over the
+//      last 4 u (always the gentle roll-out).
+//   If she still touches a wall, bumped() slides her off it and moves the spot
+//   away from it (no hop up, no "BONK" scolding: it was not the visitor).
+export const LAND = {
+  SEARCH: 45, STEP: 4.5, SPACING: 5,   // candidate rings (u) and spacing along a ring
+  CLEAR: 9,          // min distance from the spot to a bonk-class footprint (already +1 u)
+  POST: 2.5,         // … to a post or other small solid (r < 1.1; the roll-out stops on them)
+  LOW: 1.5,          // … to a low prop (bench, kerb, planter): she would sit in it
+  SLOPE: 0.09,       // world.slope (1 - n.y) at the spot
+  // nothing that good within 45 u (a dense wood, a mountainside)? settle for
+  // less before refusing: [clear, slope, search radius]
+  TIERS: [[9, 0.09, 45], [7, 0.12, 55], [5.5, 0.15, 65]],
+  NR: 64,            // safe-height profile bins, 1 u each
+  ZONE: 6,           // touchdown zone: no floor inside it
+  OUT: 1.2,          // the profile is read this far outward (she drifts wide of the circle)
+  MARGIN: 2.5,       // over a roof
+  TERR: 1.2,         // over open ground outside the zone
+  GS: 0.5,           // glide cone: circle radius ≈ height / GS
+  INSET: 2.0,        // the circle stays this far inside the edge of the air she can sink into (she tracks it to ≈ 1 u) …
+  DROP: 1.5, DROPK: 0.25,   // … which is air whose floor is ≥ max(DROP, DROPK × height) below her
+  R_MIN: 3.5, R_MAX: 20,
+  T_REPLAN: 28, T_QUIT: 45,
+  // polish: her wings reach 5.6 u either side of her line, and a footprint is
+  // only grown 1 u, so a roof's height also holds WING u nearer the spot than
+  // its footprint (a wingtip never sweeps into a landmark on the way down)
+  WING: 4.6,
+  // how much a roomier spot is worth against distance from where you pressed
+  // E (u of distance per u of clearance, and the cap on the clearance counted)
+  ROOMY: 0.5, ROOMY_CAP: 16,
+};
+
+/** TALL: filled below */
+export const TALL = [];
+
+/**
+ * The E-to-land autopilot. Pure (no DOM, no scene): a node script can fly it
+ * against a dump of the world.
+ *   env { world, groundAt(x, z), waterAt(x, z) → level | null, cols() → the
+ *         colliders, skip (her own collider), seat (feet below S.y) }
+ * → { LT (the spot: ok, x, z, gy, clear, roof, sigma, t, replans, cands),
+ *     reset(), plan(S) → bool, step(S, dt, th) → 0 | 1 (spot moved) | -1 (give up),
+ *     bumped(S, nx, nz) → spot moved?, profile() }
+ * Allocates only on plan() / bumped() (a key press, a wall), never per frame.
+ */
+const NONE = [];
+export function makeLander(env) {
+  const { world, groundAt, seat } = env;
+  const L = LAND;
+  const LT = { ok: false, x: 0, z: 0, gy: 0, clear: 0, roof: 0, sigma: 1, t: 0, replans: 0, markT: 0, cands: 0, tier: 0 };
+  const ringF = new Float32Array(L.NR);     // floor per ring (above the spot's ground; -1e9 = none)
+  const hinF = new Float32Array(L.NR);      // running max of ringF from the centre out
+  const near = [];                          // solids near the search (refilled per plan)
+  let ext = new Float32Array(256);          // their footprint reach, for a quick reject
+  let tops = new Float32Array(256);         // their tops (colTopAt, cached per plan: NaN = not read yet)
+  const SPOT = { clear: 0, roof: 0, gy: 0 };
+  const isLow = (c) => typeof c.h === 'number' && c.h > 0 && c.h <= 1.6 && c.solid !== false;
+  const bonkable = (c) => c.box || c.r >= 1.1;
+  const guess = (c) => c.box ? clamp(Math.max(c.w, c.d) * 0.9, 4, 24) : clamp(c.r * 2.4, 4, 30);
+  const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  /** Distance from (px, pz) to a collider's footprint grown by 1 u (as bonkTest grows it); < 0 inside. */
+  function footDist(c, px, pz) {
+    const dx = px - c.x, dz = pz - c.z;
+    if (c.box) {
+      const cr = Math.cos(c.rot || 0), sr = Math.sin(c.rot || 0);
+      const lx = Math.abs(dx * cr + dz * sr) - (c.w / 2 + 1), lz = Math.abs(-dx * sr + dz * cr) - (c.d / 2 + 1);
+      if (lx <= 0 && lz <= 0) return Math.max(lx, lz);
+      return Math.hypot(Math.max(lx, 0), Math.max(lz, 0));
+    }
+    return Math.hypot(dx, dz) - (c.r + 1);
+  }
+  /** Every solid (and low prop) within `rad` of (cx, cz) → near / ext. */
+  function gather(cx, cz, rad) {
+    near.length = 0;
+    tops.fill(NaN);
+    const cols = env.cols() || [], extra = env.extra || NONE, nc = cols.length;
+    for (let i = 0, n = nc + extra.length; i < n; i++) {
+      const c = i < nc ? cols[i] : extra[i - nc];
+      if (!c || c === env.skip || c.solid === false) continue;
+      if (!colSolid(c, env.skip) && !isLow(c)) continue;
+      let e;
+      if (c.box) { if (!(c.w > 0 && c.d > 0)) continue; e = Math.hypot(c.w / 2 + 1, c.d / 2 + 1); } else if (c.r > 0) e = c.r + 1; else continue;
+      if (Math.abs(c.x - cx) > rad + e || Math.abs(c.z - cz) > rad + e) continue;
+      if (near.length >= ext.length) {
+        const n = new Float32Array(ext.length * 2); n.set(ext); ext = n;
+        tops = new Float32Array(ext.length).fill(NaN);      // (nothing read yet: gather() runs before any topOf)
+      }
+      ext[near.length] = e;
+      near.push(c);
+    }
+  }
+  function topOf(i) {
+    let t = tops[i];
+    if (t !== t) { const c = near[i]; t = tops[i] = colTopAt(c, guess(c), world); }
+    return t;
+  }
+  let tClear = L.CLEAR, tSlope = L.SLOPE;       // the current search tier
+  /**
+   * Score a touchdown candidate (lower is better; Infinity = rejected); SPOT
+   * gets its clearance / roofs. The score is known once the colliders are
+   * read, so a candidate that cannot beat `bound` skips the terrain tests.
+   */
+  function score(x, z, ax, az, bound = Infinity) {
+    let clear = 60, roof = 0;
+    for (let i = 0; i < near.length; i++) {
+      const c = near[i], e = ext[i] + 24;
+      if (Math.abs(c.x - x) > e || Math.abs(c.z - z) > e) continue;
+      const fd = footDist(c, x, z);
+      if (isLow(c)) { if (fd < L.LOW) return Infinity; continue; }
+      if (!bonkable(c)) { if (fd < L.POST) return Infinity; continue; }
+      if (fd < tClear) return Infinity;
+      if (fd < clear) clear = fd;
+      if (fd < 20) { const tp = topOf(i); if (tp > roof) roof = tp; }
+    }
+    const h = world.height(x, z);
+    const sc = Math.hypot(x - ax, z - az) - Math.min(clear, L.ROOMY_CAP) * L.ROOMY + Math.max(0, roof - h) * 0.35;
+    if (sc >= bound) return Infinity;
+    if (!(h > 0.5)) return Infinity;                                   // the sea, or a beach at the tideline
+    const wl = env.waterAt?.(x, z);
+    if (typeof wl === 'number' && wl > h - 0.05) return Infinity;      // lake / river
+    const g = groundAt(x, z);
+    if (g > h + 0.3) return Infinity;                                  // a deck, a bridge, a porch
+    if (world.slope(x, z) > tSlope) return Infinity;
+    for (let i = 0; i < 8; i++) {
+      const cs = Math.cos(i * 0.7854), sn = Math.sin(i * 0.7854);
+      if (Math.abs(groundAt(x + cs * 4, z + sn * 4) - g) > 1.3) return Infinity;   // a step, a bank, a deck edge
+      if (world.height(x + cs * 8, z + sn * 8) < 0.35) return Infinity;           // the sea within the roll-out
+    }
+    SPOT.clear = clear; SPOT.roof = Math.max(0, roof - g); SPOT.gy = g;
+    return sc;
+  }
+  /** Search rings around (cx, cz) (0..maxR u), biased toward (ax, az) → true with LT set + the profile built. */
+  function pick(cx, cz, ax, az, maxR) {
+    gather(cx, cz, maxR + L.NR + 2);
+    let best = Infinity, bx = 0, bz = 0, bc = 0, br = 0, bg = 0, n = 0;
+    for (let r = 0; r <= maxR + 0.01; r += L.STEP) {
+      const k = r < 0.5 ? 1 : Math.max(6, Math.round(Math.PI * 2 * r / L.SPACING));
+      const a0 = (r * 0.37) % 1;                  // stagger the rings
+      for (let j = 0; j < k; j++) {
+        const a = (j + a0) / k * Math.PI * 2;
+        const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+        const s = score(x, z, ax, az, best); n++;
+        if (s < best) { best = s; bx = x; bz = z; bc = SPOT.clear; br = SPOT.roof; bg = SPOT.gy; }
+      }
+    }
+    LT.cands = n;
+    if (!(best < Infinity)) return false;
+    LT.ok = true; LT.x = bx; LT.z = bz; LT.gy = bg; LT.clear = bc; LT.roof = br;
+    build();
+    return true;
+  }
+  /** The safe height (above the spot's ground) by 1-u ring, then the running max from the centre out. */
+  function build() {
+    const N = L.NR, gy = LT.gy;
+    for (let k = 0; k < N; k++) {
+      if (k < L.ZONE) { ringF[k] = -1e9; continue; }
+      const r = k + 0.5, m = Math.max(8, Math.min(24, Math.round(Math.PI * 2 * r / (r < 24 ? 5 : 8))));
+      let top = 0.3 - gy + 1.0;                                          // never lower than just over the sea
+      for (let j = 0; j < m; j++) {
+        const a = (j + 0.5) / m * Math.PI * 2;
+        const t = groundAt(LT.x + Math.cos(a) * r, LT.z + Math.sin(a) * r) - gy + L.TERR;
+        if (t > top) top = t;
+      }
+      ringF[k] = top;
+    }
+    for (let i = 0; i < near.length; i++) {
+      const c = near[i];
+      if (isLow(c) || !bonkable(c)) continue;
+      const fd = footDist(c, LT.x, LT.z);
+      const lo = Math.max(0, Math.min(fd, Math.max(L.ZONE, fd - L.WING)));
+      const hi = Math.hypot(c.x - LT.x, c.z - LT.z) + ext[i];
+      if (lo >= N) continue;
+      const top = topOf(i) - gy + L.MARGIN;
+      for (let k = Math.floor(lo), e = Math.min(N - 1, Math.ceil(hi)); k <= e; k++) if (top > ringF[k]) ringF[k] = top;
+    }
+    let m = -1e9;
+    for (let k = 0; k < N; k++) { if (ringF[k] > m) m = ringF[k]; hinF[k] = m; }
+  }
+  /** Height she needs at radius r to reach the spot without climbing. */
+  const safeAt = (r) => hinF[Math.min(L.NR - 1, Math.max(0, Math.floor(r + L.OUT)))];
+  /** The widest circle she can fly at height h and still come straight down inside it. */
+  function reachAt(h) {
+    for (let k = 0; k < L.NR; k++) if (hinF[k] > h) return Math.max(0, k - L.OUT);
+    return L.NR;
+  }
+  /** Circle the way she is already turning (the tangent nearer her heading). */
+  function chooseSense(S) {
+    const dx = S.x - LT.x, dz = S.z - LT.z, d = Math.hypot(dx, dz), out = Math.atan2(dx, dz);
+    const bend = Math.PI / 2 + Math.atan((d - L.R_MAX) / 5);
+    LT.sigma = Math.abs(wrap(out + bend - S.yaw)) <= Math.abs(wrap(out - bend - S.yaw)) ? 1 : -1;
+  }
+  return {
+    LT,
+    reset() { LT.ok = false; LT.t = 0; LT.replans = 0; LT.markT = 0; },
+    /** Pick the spot from where she is now (aim ahead: the higher, the further). */
+    plan(S) {
+      const fx = Math.sin(S.yaw), fz = Math.cos(S.yaw);
+      const hi = S.y - seat - Math.max(groundAt(S.x, S.z), 0);
+      const ah = clamp(8 + hi * 0.12, 8, 22);
+      let ok = false;
+      for (let i = 0; i < L.TIERS.length && !ok; i++) {
+        tClear = L.TIERS[i][0]; tSlope = L.TIERS[i][1]; LT.tier = i;
+        ok = pick(S.x, S.z, S.x + fx * ah, S.z + fz * ah, L.TIERS[i][2]);
+      }
+      tClear = L.CLEAR; tSlope = L.SLOPE;
+      if (!ok) return false;
+      chooseSense(S);
+      return true;
+    },
+    /** One landing step (replaces stepFlight while landing). Same state, same bank / energy bookkeeping. */
+    step(S, dt, th) {
+      LT.t += dt;
+      const feet = S.y - seat, hT = feet - LT.gy;
+      const dx = S.x - LT.x, dz = S.z - LT.z, d = Math.hypot(dx, dz);
+      const gHere = Math.max(groundAt(S.x, S.z), 0), agl = feet - gHere;
+      // inside the touchdown zone there is nothing to clear (the spot is ≥ CLEAR from every wall)
+      const hmin = d < L.ZONE ? -1e9 : Math.max(safeAt(d), gHere - LT.gy + 1.0);
+      // the circle: as wide as the glide cone at this height, inside the clear air;
+      // once the cone has shrunk to nothing, the short straight-in: head AT the spot
+      // (sized where the floor is well BELOW her, so every lap has room to sink:
+      //  sized at her own height she would sit on the chimney's rim)
+      const Rc = Math.min(reachAt(hT - Math.max(L.DROP, hT * L.DROPK)) - L.INSET, hT / L.GS);
+      const Rd = clamp(Rc, L.R_MIN, L.R_MAX);
+      const out = Math.atan2(dx, dz);
+      const err = Rc <= L.R_MIN ? wrap(out + Math.PI - S.yaw)
+        : wrap(out + LT.sigma * (Math.PI / 2 + Math.atan((d - Rd) / 5)) - S.yaw);
+      // slower on a tight circle (a narrow gap between roofs): at 4.5 u/s she turns inside 3.3 u
+      S.speed = damp(S.speed, clamp(2.8 + Rd * 0.32, 4.5, 9), 1.6, dt);
+      S.turn = damp(S.turn, clamp(err * 2.2, -1.35, 1.35), 4.2, dt);
+      S.yaw += S.turn * dt;
+      S.bank = damp(S.bank, clamp(-S.turn / FLIGHT.TURN, -1.2, 1.2) * FLIGHT.BANK, 3.6, dt);
+      S.pitch = damp(S.pitch, agl < 3 ? 0.12 : 0, 3, dt);              // a little flare at the end
+      // sink briskly while high, never below the safe height, flare over the last 4 u
+      const cap = agl > 4 ? clamp(agl * 0.42, 2.4, 15) : 2.2;
+      const vyT = hT < hmin ? Math.min(4, (hmin - hT) * 1.5 + 0.6) : -Math.min(cap, (hT - hmin) * 0.9);
+      S.vy += (vyT - S.vy) * (1 - Math.exp(-2.5 * dt));
+      S.vy = clamp(S.vy, FLIGHT.VY_MIN, FLIGHT.VY_MAX);
+      // the glide's bookkeeping (as stepFlight: no flap, no boost)
+      S.flapped = false; S.boosted = false;
+      S.flapCd -= dt; S.sinceFlap += dt;
+      if (S.boostCd > 0) S.boostCd = Math.max(0, S.boostCd - dt);
+      if (S.boostT > 0) S.boostT = Math.max(0, S.boostT - dt);
+      if (S.sinceFlap > 0.8) S.energy += FLIGHT.E_GLIDE * dt;
+      S.energy = Math.min(1, S.energy + th * FLIGHT.E_THERMAL * dt);
+      S.x += Math.sin(S.yaw) * S.speed * dt;
+      S.z += Math.cos(S.yaw) * S.speed * dt;
+      S.y += S.vy * dt;
+      // a watchdog: re-plan once from where she is, then give up
+      if (LT.t > L.T_REPLAN && LT.replans < 1) {
+        LT.replans++;
+        if (this.plan(S)) return 1;
+        LT.t = L.T_QUIT + 1;
+      }
+      return LT.t > L.T_QUIT ? -1 : 0;
+    },
+    /** She touched a wall anyway: slide off (no hop), move the spot away from it. */
+    bumped(S, nx, nz) {
+      S.x += nx * 0.8; S.z += nz * 0.8;
+      const fx = Math.sin(S.yaw), fz = Math.cos(S.yaw), dn = fx * nx + fz * nz;
+      if (dn < 0) { const tx = fx - dn * nx, tz = fz - dn * nz; if (tx * tx + tz * tz > 0.04) S.yaw = Math.atan2(tx, tz); }
+      S.speed *= 0.85; S.vy = Math.min(S.vy, 0.5);
+      const ox = LT.x, oz = LT.z, px = LT.x + nx * 6, pz = LT.z + nz * 6;
+      tClear = L.TIERS[1][0]; tSlope = L.TIERS[1][1];
+      const ok = pick(px, pz, px, pz, 14);
+      tClear = L.CLEAR; tSlope = L.SLOPE;
+      if (ok) { chooseSense(S); return true; }
+      LT.x = ox; LT.z = oz; LT.ok = true;          // pick() failed and left LT alone; keep the old spot
+      return false;
+    },
+    /** The safe-height profile over the spot (tests read it). */
+    profile() { return { ring: Array.from(ringF, (v) => v < -1e8 ? null : +v.toFixed(1)), need: Array.from(hinF, (v) => v < -1e8 ? null : +v.toFixed(1)) }; },
+  };
 }
 
 const SEAT = 0.55;          // rider's feet above the machine origin
@@ -1593,7 +1979,7 @@ export function create(ctx, api) {
     x: PAD.x, y: PAD.y, z: PAD.z, yaw: HOME_YAW, vy: 0, speed: 0, pitch: 0, turn: 0, bank: 0,
     energy: 1, boostT: 0, boostCd: 0, flapCd: 0, sinceFlap: 9, flapped: false, boosted: false,
   };
-  const FLY = { alt: 0, y: 0, speed: 0, vy: 0, energy: 1, heading: 0, thermal: 0, boost: false };
+  const FLY = { alt: 0, y: 0, speed: 0, vy: 0, energy: 1, heading: 0, thermal: 0, boost: false, landing: false };
   let phase = null, pt = 0, airT = 0;
   let flapPhase = 0, propSpin = 0, wingBeat = 0, tuck = 0, fold = 0, glide = 0;
   let milestone = 0, feather = 0, fromCat = false, bonkCd = 0, warned = 0;
@@ -1609,10 +1995,212 @@ export function create(ctx, api) {
     ctx.events.emit('flyer:contact', CONTACT_EV);
   };
   let fogSaved = undefined, fogOn = false, camSaved = null, camChecked = false, flyElevBase = null, flyElevSet = -1;
-  const CAMP = { azimuth: 0, elevation: 0.38 }, GP = { x: 0, z: 0 };
+  let flyDistBase = null, flyDistSet = -1;
+  const CAMP = { azimuth: 0, elevation: 0.38, distance: 44 }, GP = { x: 0, z: 0 };
+  const CAMF = { flyElev: 0.38, flyDist: 44 };      // reused: setParams reads it synchronously
   ctx.state.flying = null;
   let shiftWas = false, hold = false, warmT = 0;
   const touchUI = ctx.state.touch ?? (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
+
+  // ── WAVE 5 (Contract Q): how to fly her ─────────────────────────────────────
+  // The first time you board in a session a CONTROL CARD comes up and the
+  // machine waits on the runway (Wingnut holds her tail) until you press
+  // anything; H or ? (the ? chip on a phone) brings it back while you ride.
+  // While she is up, a compact KEY ROW sits over the hotbar. E — or the LAND
+  // chip on a phone, where the E button leaves the screen in flight — LANDS:
+  // she picks a clear spot and circles down onto it (Space / W / boost pull up).
+  // While riding, E / Enter and H / ? belong to the machine: nothing 60 u
+  // below gets talked to, and the walking help card stays shut.
+  const CARD_KEY = 'cci.flyerCard.v1';            // sessionStorage: once per session
+  let cardSeen = false;
+  try { cardSeen = sessionStorage.getItem(CARD_KEY) === '1'; } catch (e) { /* storage blocked: once per load */ }
+  const CARD = { open: false, waiting: false, since: 0, mode: '' };
+  let landing = false, landAsk = false, helpAsk = false, closeAsk = false, ptrWas = false, rowT = 0;
+  const help = makeFlightHelp(ctx, touchUI, {
+    land() { landAsk = true; },
+    help() { helpAsk = true; },
+    close() { closeAsk = true; },
+  });
+  /** mode 'board': the take-off roll waits for the card · 'air': she flies on under it */
+  function openCard(mode) {
+    CARD.open = true; CARD.waiting = mode === 'board'; CARD.since = ctx.state.elapsed; CARD.mode = mode;
+    help.card(true, mode);
+    if (!cardSeen) { cardSeen = true; try { sessionStorage.setItem(CARD_KEY, '1'); } catch (e) { /* blocked */ } }
+  }
+  function closeCard() {
+    if (!CARD.open) return;
+    CARD.open = false; CARD.waiting = false;
+    help.card(false);
+  }
+  function setLanding(v) {
+    if (landing === v) return;
+    landing = v; help.landing(v);
+    if (!v) {
+      LT.ok = false;
+      try { ui()?.removeMapMarker?.('flyer_land'); } catch (e) { /* optional */ }
+    }
+  }
+
+  // ── E-to-land: a touchdown spot is CHOSEN first, then flown to ─────────────
+  // The autopilot is makeLander() (module level, pure, so a node script can
+  // fly it against a dump of the world: see LAND and makeLander for how it
+  // picks the spot and comes down). Here: the map pin, the gold motes over
+  // the spot, the toasts, and A/D taking the stick back.
+  const lander = makeLander({
+    world, groundAt, seat: SEAT, skip: machineCol,
+    waterAt: (x, z) => ctx.systems.terrain?.waterLevelAt?.(x, z),
+    cols: () => worldCols || ctx.colliders || [],
+  });
+  const LT = lander.LT;
+  let adHold = 0;                            // A/D held while landing: take the stick back after 0.6 s
+
+  // ── polish: the LANDING RING (the spot, shown) ─────────────────────────────
+  // "She picks a clear spot" meant nothing while nothing marked it. From the
+  // moment E picks it, a soft candy-cane ring 7 u across lies on the ground
+  // there: pink and cream stripes turning slowly, a ripple running inward,
+  // a pink bullseye. Unlit (it reads the same inside the machine's shadow and
+  // after dark), fogged, depth-tested and lifted off the grass; the disc is
+  // draped over the ground at pick time (groundAt per vertex: no per-frame
+  // work but two uniforms). One draw call, only while it shows.
+  const RING_R = 3.6;
+  const ringU = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 }, uOn: { value: 0 }, uNight: { value: 0 } }]);
+  const landRing = (() => {
+    const geo = new THREE.RingGeometry(0.02, RING_R, 48, 5);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: ringU, fog: true,
+      transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+      vertexShader: /* glsl */`
+        attribute vec2 aL; varying vec2 vL;
+        #include <fog_pars_vertex>
+        void main(){
+          vL = aL;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }`,
+      fragmentShader: /* glsl */`
+        uniform float uTime; uniform float uOn; uniform float uNight;
+        varying vec2 vL;
+        #include <fog_pars_fragment>
+        void main(){
+          float breathe = 1.0 + 0.045 * sin(uTime * 3.2);
+          float r = length(vL) / breathe;
+          float a = atan(vL.y, vL.x);
+          vec3 pink = vec3(1.0, 0.33, 0.6), cream = vec3(1.0, 0.96, 0.88);
+          // the candy-cane band, stripes turning
+          float band = smoothstep(2.42, 2.58, r) * (1.0 - smoothstep(3.14, 3.3, r));
+          float st = step(0.5, fract(a * 2.5465 + uTime * 0.35));      // 16 stripes
+          vec3 col = mix(pink, cream, st * 0.9);
+          float al = band * 0.95;
+          // a ripple running inward, every 1.6 s
+          float rr = 2.3 - fract(uTime * 0.62) * 1.9;
+          float rip = (1.0 - smoothstep(0.0, 0.16, abs(r - rr))) * smoothstep(0.35, 0.9, rr) * 0.8;
+          col = mix(col, pink, rip * (1.0 - band)); al = max(al, rip);
+          // the bullseye: cream dot in a pink disc
+          float dot0 = 1.0 - smoothstep(0.62, 0.74, r);
+          col = mix(col, mix(pink, cream, 1.0 - smoothstep(0.26, 0.34, r)), dot0); al = max(al, dot0 * 0.95);
+          // a faint pink wash inside, a soft halo outside
+          al = max(al, (1.0 - smoothstep(2.3, 2.5, r)) * 0.14);
+          float halo = smoothstep(3.25, 3.32, r) * (1.0 - smoothstep(3.32, 3.6, r));
+          col = mix(col, pink, halo * (1.0 - band)); al = max(al, halo * 0.35);
+          al *= uOn * (0.82 + 0.18 * sin(uTime * 3.2));
+          if (al < 0.004) discard;
+          gl_FragColor = vec4(col * mix(1.0, 1.25, uNight), al);
+          #include <fog_fragment>
+        }`,
+    });
+    // aL: the flat local xz (the draped y must not bend the pattern)
+    const pos = geo.attributes.position, aL = new Float32Array(pos.count * 2);
+    for (let i = 0; i < pos.count; i++) { aL[i * 2] = pos.getX(i); aL[i * 2 + 1] = pos.getZ(i); }
+    geo.setAttribute('aL', new THREE.BufferAttribute(aL, 2));
+    const m = new THREE.Mesh(geo, mat);
+    m.name = 'flyer_land_ring';
+    m.renderOrder = 4;                        // after the sea (renderOrder 2) and the thermal shells
+    m.visible = false;
+    m.userData.noOcclude = true; m.userData.noFade = true;
+    scene.add(m);
+    return m;
+  })();
+  /** Drape the ring over the ground at the chosen spot (on a pick, never per frame). */
+  function ringAt(x, z) {
+    const pos = landRing.geometry.attributes.position, aL = landRing.geometry.attributes.aL.array;
+    for (let i = 0; i < pos.count; i++) {
+      const lx = aL[i * 2], lz = aL[i * 2 + 1];
+      pos.setXYZ(i, lx, groundAt(x + lx, z + lz) + 0.14, lz);
+    }
+    pos.needsUpdate = true;
+    landRing.position.set(x, 0, z);
+    landRing.geometry.computeBoundingSphere();
+    landRing.updateMatrixWorld();
+  }
+  /** One frame: fade in while landing (and through the roll-out), out after. */
+  function ringUpdate(dt, t) {
+    const want = landing && LT.ok ? 1 : 0;
+    ringU.uOn.value = damp(ringU.uOn.value, want, want ? 5 : 3, dt);
+    if (want === 0 && ringU.uOn.value < 0.01) ringU.uOn.value = 0;
+    landRing.visible = ringU.uOn.value > 0;
+    if (!landRing.visible) return;
+    ringU.uTime.value = t;
+    ringU.uNight.value = 1 - (ctx.state.daylight ?? 1);
+  }
+  // THE LANDING LENS: the chase camera trails the heading, low; circling
+  // down it looked along the rooftops and never at the spot. While landing,
+  // the camera is told to trail the BEARING TO THE SPOT (the only reader of
+  // flying.heading is the camera's tether) while she is still out on the
+  // approach (farther than LAND_TRACK u), and to hold that side once she
+  // circles (the frame slides with her, it does not spin): the ring, the
+  // machine and her path are all in one frame. cameraFollow() tips the lens
+  // down to ~45° and backs it off 1.5× at the same time.
+  const LAND_TRACK = 24;
+  let camHead = 0, landCam = 0;
+  function camHeadUpdate(dt) {
+    const dx = LT.x - S.x, dz = LT.z - S.z;
+    if (dx * dx + dz * dz < LAND_TRACK * LAND_TRACK) return;
+    let d = Math.atan2(dx, dz) - camHead;
+    d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;
+    camHead += d * (1 - Math.exp(-1.1 * dt));
+  }
+  function markSpot() {
+    try { ui()?.addMapMarker?.({ id: 'flyer_land', x: LT.x, z: LT.z, glyph: 'pin', label: 'Landing spot' }); } catch (e) { /* optional */ }
+    ringAt(LT.x, LT.z);
+  }
+  /** Pick the spot for a landing from where she is now. */
+  function planLanding() {
+    if (!lander.plan(S)) return false;
+    markSpot();
+    return true;
+  }
+  /** E in the air: find a clear spot within 45 u (ahead first) and come down onto it. */
+  function startLanding() {
+    if (landing) return;
+    lander.reset(); adHold = 0;
+    if (!planLanding()) {
+      const sea = groundAt(S.x, S.z) <= 0.25;
+      ui()?.toast(sea
+        ? (help.touch ? 'Only sea down there. Get over land, then tap LAND.' : 'Only sea down there. Get over land, then press E to land.')
+        : 'Nowhere clear to set down here. Fly on a little and try again.', 3);
+      return;
+    }
+    setLanding(true);
+    camHead = S.yaw;
+    ui()?.toast(help.touch ? 'Found a clear spot. Coming in to land. A or stick up pulls up.' : 'Found a clear spot. Coming in to land. Space or W pulls up.', 3);
+  }
+  /** One landing frame: the autopilot flies, we mark the spot and hand back if it gives up. */
+  function landStep(dt, th) {
+    const r = lander.step(S, dt, th);
+    if (r === 1) markSpot();
+    camHeadUpdate(dt);
+    if (r < 0) {
+      setLanding(false);
+      ui()?.toast('She could not find a way down here. Try again over open ground.', 3);
+      return;
+    }
+    if (ctx.state.elapsed > LT.markT && S.y - SEAT - LT.gy < 110) {
+      LT.markT = ctx.state.elapsed + 0.45;
+      parts()?.sparkle(LT.x, LT.gy + 0.5, LT.z, CANDY.gummyYellow, 4);
+    }
+  }
 
   // reusable particle option blocks (burst() reads them synchronously)
   const P_TRAIL = { x: 0, y: 0, z: 0, count: 1, color: [0xffffff, 0xffe9a8], speed: 0.5, life: 1.2, size: 0.26, sizeEnd: 0.5, gravity: -0.4, spread: 0.4, alpha: 0.5 };
@@ -1683,6 +2271,7 @@ export function create(ctx, api) {
   /** flight state only — leaves the machine where it is parked */
   function resetFlight() {
     S.vy = 0; S.pitch = 0; S.bank = 0; S.turn = 0; S.speed = 0; S.boostT = 0; S.flapCd = 0; S.sinceFlap = 9;
+    setLanding(false);
     flapPhase = 0; wingBeat = 0; tuck = 0; glide = 0;
   }
 
@@ -1822,7 +2411,7 @@ export function create(ctx, api) {
   // toasts are untouched.
   let quietUntil = -1;                            // debugQuiet(): screenshot hush, see the route API
   ctx.events.on('ui:say', (e) => {
-    const hush = (phase === 'air' && FLY.alt > 20) || ctx.state.elapsed < quietUntil;
+    const hush = (phase === 'air' && FLY.alt > 20) || ctx.state.elapsed < quietUntil || CARD.open;   // (wave 5: and while the control card is up)
     if (!hush || !e || !e.speaker || e.speaker === 'Wingnut') return;
     const u = ui(); if (!u) return;
     try {
@@ -1896,47 +2485,59 @@ export function create(ctx, api) {
   function cameraFollow(dt, alt = 0) {
     const cam = ctx.systems.camera;
     if (!cam?.setParams) return;
+    // the landing lens (see LAND_TRACK): ~45° down at landing heights (steeper
+    // the higher she is when E is pressed, so the spot ahead-and-below stays
+    // in frame), 1.5× further back; eased in and out
+    landCam = damp(landCam, landing && LT.ok ? 1 : 0, 1.6, dt);
+    if (landCam < 0.002) landCam = 0;
+    const landEl = clamp(0.74 + 0.0025 * alt, 0.74, 1.0);
     if (!camSaved) {
       // The camera honours the flight (Contract E: 44 / 0.38 / 40). At cruise
       // height (70 → 150 u) its flyElev eases up to 0.46, so the chase lens
       // looks down onto the canvas instead of along it (edge-on wings read as
       // two red sticks); restored on landing. Below 70 u it is the contract's 0.38.
       if (flyElevBase === null) { const b = cam.params?.flyElev; if (typeof b !== 'number') return; flyElevBase = b; }
+      if (flyDistBase === null) { const b = cam.params?.flyDist; flyDistBase = typeof b === 'number' ? b : 44; }
       const want = flyElevBase + 0.08 * smoothstep(70, 150, alt);
-      if (Math.abs(want - flyElevSet) > 0.002) { flyElevSet = want; cam.setParams({ flyElev: want }); }
+      const e = want + (landEl - want) * landCam, dd = flyDistBase * (1 + 0.5 * landCam);
+      if (Math.abs(e - flyElevSet) > 0.002 || Math.abs(dd - flyDistSet) > 0.05) {
+        flyElevSet = e; flyDistSet = dd; CAMF.flyElev = e; CAMF.flyDist = dd;
+        cam.setParams(CAMF);
+      }
       return;
     }
-    let d = (S.yaw + Math.PI - 0.3) - CAMP.azimuth;
+    const head = landing && LT.ok ? camHead : S.yaw;
+    let d = (head + Math.PI - 0.3 * (1 - landCam)) - CAMP.azimuth;
     d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;
     CAMP.azimuth += d * (1 - Math.exp(-1.6 * dt));
     const elT = 0.38 + 0.24 * smoothstep(40, 300, S.y);
-    CAMP.elevation += (elT - CAMP.elevation) * (1 - Math.exp(-1.2 * dt));
+    CAMP.elevation += (elT + (landEl - elT) * landCam - CAMP.elevation) * (1 - Math.exp(-1.2 * dt));
+    CAMP.distance = 44 * (1 + 0.5 * landCam);
     cam.setParams(CAMP);
   }
   function cameraRestore() {
     camChecked = false;
     if (camSaved) { try { ctx.systems.camera?.setParams?.(camSaved); } catch (e) {} camSaved = null; }
-    if (flyElevBase !== null) { try { ctx.systems.camera?.setParams?.({ flyElev: flyElevBase }); } catch (e) {} flyElevBase = null; flyElevSet = -1; }
+    if (flyElevBase !== null) {
+      try { ctx.systems.camera?.setParams?.({ flyElev: flyElevBase, flyDist: flyDistBase ?? 44 }); } catch (e) {}
+      flyElevBase = null; flyElevSet = -1; flyDistBase = null; flyDistSet = -1;
+    }
+    landCam = 0;
   }
 
   function endFlight() {
     ctx.state.flying = null;
+    ctx.uiRoot?.classList?.remove('fly-riding');
     flyer.userData.noFade = false; flyer.userData.noOcclude = false;
     fogRestore(); cameraRestore(); thermalMarkers(false);
     hud.show(false);
+    closeCard(); setLanding(false); help.row(false);
   }
 
   /** Solid for a flying machine? (claims, low props, open doors are not) */
-  function solidCol(c) {
-    if (!c || c === machineCol || c.solid === false) return false;
-    if (typeof c.h === 'number' && (c.h <= 1.6 || c.h < -50)) return false;
-    return true;
-  }
+  function solidCol(c) { return colSolid(c, machineCol); }
   /** Top of a solid collider in world Y (absolute h, or a size guess). */
-  function colTop(c, guess) {
-    if (typeof c.h === 'number' && c.h > 1.6 && c.h < 1e4) return c.h;
-    return world.height(c.x, c.z) + guess;
-  }
+  function colTop(c, guess) { return colTopAt(c, guess, world); }
 
   /** Push a parked machine out of anything solid (walls, trunks, rocks). */
   function settle(px, pz, r) {
@@ -1971,63 +2572,45 @@ export function create(ctx, api) {
   }
 
   /** Low over a town: bounce off walls / big trunks instead of flying through them. */
+  const BK = { nx: 0, nz: 0, top: 0 };
   function bonk() {
     const cols = worldCols; if (!cols) return false;
     const feet = S.y - SEAT;
-    for (let i = 0; i < cols.length; i++) {
-      const c = cols[i];
-      if (!solidCol(c)) continue;
-      let nx = 0, nz = 0, hit = false, top = 0;
-      const dx = S.x - c.x, dz = S.z - c.z;
-      if (c.box) {
-        if (!(c.w > 0 && c.d > 0)) continue;
-        const reach = (c.w + c.d) * 0.5 + 1.6;
-        if (dx * dx + dz * dz > reach * reach) continue;
-        const cr = Math.cos(c.rot || 0), sr = Math.sin(c.rot || 0);
-        const lx = dx * cr + dz * sr, lz = -dx * sr + dz * cr;
-        const hw = c.w / 2 + 1.0, hd = c.d / 2 + 1.0;
-        if (Math.abs(lx) < hw && Math.abs(lz) < hd) {
-          hit = true; top = colTop(c, clamp(Math.max(c.w, c.d) * 0.9, 4, 24));
-          let ln = 0, lm2 = 0;
-          if (hw - Math.abs(lx) < hd - Math.abs(lz)) ln = Math.sign(lx || 1); else lm2 = Math.sign(lz || 1);
-          nx = ln * cr - lm2 * sr; nz = ln * sr + lm2 * cr;
-        }
-      } else if (c.r >= 1.1) {
-        const rr = c.r + 1.0;
-        if (dx * dx + dz * dz < rr * rr) {
-          hit = true; top = colTop(c, clamp(c.r * 2.4, 4, 30));
-          const d = Math.hypot(dx, dz) || 1e-3; nx = dx / d; nz = dz / d;
-        }
-      }
-      if (!hit) continue;
-      if (feet > top) continue;                                 // cleared the roof
-      contact('bonk');
-      // BUMP OVER IT: push out, slide along the wall (never a U-turn), and hop
-      // up toward the roofline — the machine scrambles over a house like a
-      // startled hen instead of passing through it or ping-ponging off it
-      S.x += nx * 0.8; S.z += nz * 0.8;
-      let fx = Math.sin(S.yaw), fz = Math.cos(S.yaw);
-      const dn = fx * nx + fz * nz;
-      if (dn < -0.35) {
-        fx -= dn * nx; fz -= dn * nz;
-        if (fx * fx + fz * fz > 0.04) S.yaw = Math.atan2(fx, fz);
-      }
-      if (feet - world.height(S.x, S.z) < 4.5) {
-        // coming in to land: a hedge or a wall just ends the roll-out early —
-        // she stops beside it and settles, she does not bounce back up
-        S.speed *= 0.25; S.vy = Math.min(S.vy, -1.5);
-      } else {
-        S.speed *= 0.8;
-        S.vy = Math.max(S.vy, clamp((top - feet) * 0.9 + 2.5, 3, 7));
-      }
-      S.energy = Math.max(0, S.energy - 0.03);
-      ctx.systems.camera?.shake?.(0.35, 0.3);
-      P_DUST.x = S.x; P_DUST.y = S.y + 1.2; P_DUST.z = S.z; P_DUST.count = 10;
+    if (!bonkTest(cols, machineCol, S.x, S.z, feet, world, BK)) return false;
+    const nx = BK.nx, nz = BK.nz, top = BK.top;
+    contact('bonk');
+    if (landing && LT.ok) {
+      // the autopilot's fault, not the visitor's: slide off the wall (no hop
+      // up, no shake, no scolding) and move the spot away from it
+      if (lander.bumped(S, nx, nz)) markSpot();
+      P_DUST.x = S.x; P_DUST.y = S.y + 1.2; P_DUST.z = S.z; P_DUST.count = 6;
       parts()?.burst(P_DUST);
-      if (!(warned & 8)) { warned |= 8; ui()?.toast('BONK. Fly over the roofs, not through them.', 3); }
       return true;
     }
-    return false;
+    // BUMP OVER IT: push out, slide along the wall (never a U-turn), and hop
+    // up toward the roofline — the machine scrambles over a house like a
+    // startled hen instead of passing through it or ping-ponging off it
+    S.x += nx * 0.8; S.z += nz * 0.8;
+    let fx = Math.sin(S.yaw), fz = Math.cos(S.yaw);
+    const dn = fx * nx + fz * nz;
+    if (dn < -0.35) {
+      fx -= dn * nx; fz -= dn * nz;
+      if (fx * fx + fz * fz > 0.04) S.yaw = Math.atan2(fx, fz);
+    }
+    if (feet - world.height(S.x, S.z) < 4.5) {
+      // coming in to land: a hedge or a wall just ends the roll-out early —
+      // she stops beside it and settles, she does not bounce back up
+      S.speed *= 0.25; S.vy = Math.min(S.vy, -1.5);
+    } else {
+      S.speed *= 0.8;
+      S.vy = Math.max(S.vy, clamp((top - feet) * 0.9 + 2.5, 3, 7));
+    }
+    S.energy = Math.max(0, S.energy - 0.03);
+    ctx.systems.camera?.shake?.(0.35, 0.3);
+    P_DUST.x = S.x; P_DUST.y = S.y + 1.2; P_DUST.z = S.z; P_DUST.count = 10;
+    parts()?.burst(P_DUST);
+    if (!(warned & 8)) { warned |= 8; ui()?.toast('BONK. Fly over the roofs, not through them.', 3); }
+    return true;
   }
 
   // Where the rider climbs down, in the machine's own frame (lx across the
@@ -2315,6 +2898,47 @@ export function create(ctx, api) {
      */
     debugQuiet(sec = 8) { quietUntil = ctx.state.elapsed + sec; try { ui()?.clear?.(); } catch (e) { /* optional */ } return true; },
 
+    // ── WAVE 5 (Contract Q): controls card, key row, E-to-land ──────────────
+    /** She is circling down after E / LAND. */
+    get landing() { return landing; },
+    /** The touchdown spot E chose: { ok, x, z, gy (its ground), clear (u to the nearest wall), roof, t (s since E), cands } */
+    get landSpot() { return LT; },
+    /** The safe-height profile over the spot (1-u rings, above its ground) — tests read it. */
+    landProfile() { return lander.profile(); },
+    /** Land now, as E does in the air (refused over the sea, with a toast). */
+    land() { landAsk = true; return phase === 'air'; },
+    /** The control card: open · waiting (the take-off roll holds for it) · seen (this session) · mode. */
+    card: {
+      get open() { return CARD.open; }, get waiting() { return CARD.waiting; },
+      get seen() { return cardSeen; }, get mode() { return CARD.mode; },
+    },
+    /** Open the card while riding ('board' only before the roll has begun) / close it. */
+    showCard(mode = 'air') {
+      if (!phase) return false;
+      openCard(mode === 'board' && phase === 'run' && pt < 0.05 ? 'board' : 'air');
+      return true;
+    },
+    hideCard() { closeCard(); },
+    /** The DOM of the card and the key row (tests measure them). */
+    get helpEls() { return help.els; },
+    /**
+     * Screenshot hook. 'board': seated on the planks with the card up (a quiet
+     * boarding: no escape bookkeeping) · 'air': mid-flight at (x, z, y, yaw)
+     * with the card reopened · 'row': mid-flight, the key row only ·
+     * 'landing': mid-flight, the row showing LAND lit.
+     */
+    debugCard(mode = 'board', x = 150, z = 30, y = 120, yaw = -Math.PI / 2) {
+      if (mode === 'board') {
+        if (!phase && !route.start(true)) return false;
+        openCard('board');
+        return true;
+      }
+      if (!route.debugFly(x, z, y, yaw, true)) return false;
+      if (mode === 'air') openCard('air');
+      if (mode === 'landing') setLanding(true);
+      return true;
+    },
+
     /** Board. `quiet` (screenshot hooks only) skips the take-off fanfare. */
     start(quiet = false) {
       const pl = ctx.systems.player;
@@ -2330,10 +2954,13 @@ export function create(ctx, api) {
       // so containment reads it as a homecoming, not an escape to shout about.
       if (!quiet && fromIsland === 'cat') api.start('flyer', { label: 'The Flying Machine', from: 'cat', to: 'candy' });
       else if (!quiet && fromIsland === 'candy') api.start('flyer', { label: 'The Flying Machine', from: 'candy', to: 'cat', arrived: 'cat' });
-      if (!quiet) ui()?.banner('The Flying Machine', 'built by a cat who read one book');
-      if (!quiet) ui()?.toast(touchUI
-        ? 'A flaps · stick steers + pitches · B boosts · ride the warm air'
-        : 'Space flaps · W/S pitch · A/D bank · Shift boost · ride the warm air', 5);
+      // WAVE 5: the control card replaces the old one-line toast (the key row
+      // below the flight keeps the reminder on screen). Real play only: a
+      // screenshot run (?shot) opens it through route.showCard / debugCard.
+      // The card carries her name and the joke, so the banner (top-centre,
+      // over the card on a phone) only plays on the boardings without it.
+      if (!quiet && !ctx.shot && !cardSeen) openCard('board');
+      else if (!quiet) ui()?.banner('The Flying Machine', 'built by a cat who read one book');
       // the machine's own circle must not shove her rider
       machineCol.solid = false;
       worldCols = ctx.colliders;
@@ -2342,6 +2969,8 @@ export function create(ctx, api) {
       flyer.userData.noFade = true; flyer.userData.noOcclude = true;
       if (gate) gate.enabled = false;
       hud.show(true);
+      help.row(true);
+      ctx.uiRoot?.classList?.add('fly-riding');     // hides the ground's E prompt (E lands now)
       thermalMarkers(true);
       return true;
     },
@@ -2370,6 +2999,7 @@ export function create(ctx, api) {
         watcherUpdate(dt, t, lamp);
         glow.visible = glowU.uLamp.value > 0.01 || glowU.uEye.value > 0.005;
       }
+      ringUpdate(dt, t);
 
       if (!phase) {
         glide = damp(glide, 0, 3, dt);
@@ -2401,6 +3031,8 @@ export function create(ctx, api) {
         return;
       }
       pt += dt;
+      rowT = phase === 'air' && !CARD.open && !landing ? rowT + dt : 0;
+      help.update(dt, rowT > 20);
 
       const inp = ctx.input, keys = inp.keys;
       let ix = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
@@ -2412,6 +3044,46 @@ export function create(ctx, api) {
         (inp.pressed.has('ShiftLeft') || inp.pressed.has('ShiftRight') || (shiftNow && !shiftWas)));
       shiftWas = shiftNow;
       const flapReq = inp.pressed.has('Space');
+
+      // ── WAVE 5: the card, the flight's own help key, and E = land ────────────
+      // (escape updates before interaction and ui, so taking a key out of
+      //  `pressed` here keeps it from reaching them this frame)
+      let helpToggle = helpAsk, eReq = false;
+      helpAsk = false;
+      if (inp.pressed.has('KeyH') || inp.pressed.has('Slash')) { inp.pressed.delete('KeyH'); inp.pressed.delete('Slash'); helpToggle = true; }
+      if ((phase === 'run' || phase === 'air') && (inp.pressed.has('KeyE') || inp.pressed.has('Enter'))) {
+        inp.pressed.delete('KeyE'); inp.pressed.delete('Enter'); eReq = true;
+      }
+      {
+        const P = inp.pointer, ptr = !!(P.down || P.orbit);
+        if (CARD.open) {
+          // any input dismisses it (and still does its job: a Space that
+          // closes the card also flaps); the E or H that closes it does not
+          // also land / reopen. A short grace swallows the boarding press.
+          const v = inp.virtualRaw || inp.virtual;
+          const any = inp.pressed.size > 0 || eReq || helpToggle || closeAsk || (ptr && !ptrWas) || inp.wheel !== 0 ||
+            (v && Math.abs(v.x || 0) + Math.abs(v.y || 0) > 0.35);
+          if ((any && t - CARD.since > 0.2) || t - CARD.since > 15) { closeCard(); eReq = false; }
+          helpToggle = false;
+        } else if (helpToggle && phase !== 'sink') openCard('air');
+        ptrWas = ptr; closeAsk = false;
+      }
+      if (phase === 'air' && !hold && (eReq || landAsk)) startLanding();
+      landAsk = false;
+
+      if (phase === 'run' && CARD.waiting) {
+        // the card is up: Wingnut holds her tail on the planks until you are ready
+        pt = 0;
+        glide = 0; fold = damp(fold, 0, 6, dt);
+        propSpin += dt * 2.2;
+        flapPhase = Math.sin(t * 1.3) * 0.22;
+        wingBeat = damp(wingBeat, 0.1, 3, dt);
+        S.pitch = damp(S.pitch, 0, 4, dt);
+        setFlyer();
+        rider.place(S.x, S.y, S.z, S.yaw);
+        hud.update(S, 0, 0);
+        return;
+      }
 
       if (phase === 'run') {
         // pedal down the field: prop spins up, wings start beating; A/D steer
@@ -2496,7 +3168,22 @@ export function create(ctx, api) {
         flapPhase += dt * 6; propSpin += dt * 34; wingBeat = damp(wingBeat, 0.12, 3, dt);
       } else {
         const th = thNow = thermalAt(S.x, S.z);
-        stepFlight(S, ix, iy, flapReq, boostReq, th, dt);
+        // feet above the ground under her: stepFlight's ground effect (a flap
+        // near the ground keeps its strength on an empty tank)
+        S.agl = S.y - SEAT - Math.max(groundAt(S.x, S.z), 0);
+        // WAVE 5: HOLDING Space keeps flapping (every FLAP_HOLD s); a fresh
+        // press still flaps at once (down to FLAP_CD)
+        const flapNow = flapReq || (keys.has('Space') && S.sinceFlap >= F_.FLAP_HOLD);
+        adHold = landing && Math.abs(ix) > 0.3 ? adHold + dt : 0;
+        if (landing && (flapReq || iy > 0.3 || boostReq || adHold > 0.6)) {
+          setLanding(false);
+          ui()?.toast('Landing called off. Up she goes.', 2);
+        }
+        // a landing switched on without a spot (a screenshot hook): find one now
+        if (landing && !LT.ok && !planLanding()) setLanding(false);
+        // E: fly to the chosen spot, circle it down, straight in (see landStep)
+        if (landing) landStep(dt, th);
+        else stepFlight(S, ix, iy, flapNow, boostReq, th, dt);
         if (S.flapped) {
           wingBeat = 0.35 + bite(S.y) * 0.8;
           P_FLAP.x = S.x + Math.cos(S.yaw) * 4.2; P_FLAP.y = S.y + 1.9; P_FLAP.z = S.z - Math.sin(S.yaw) * 4.2;
@@ -2544,12 +3231,12 @@ export function create(ctx, api) {
 
       // the contract for the camera / map / everyone else
       FLY.alt = alt; FLY.y = S.y; FLY.speed = S.speed; FLY.vy = S.vy; FLY.energy = S.energy;
-      FLY.heading = S.yaw; FLY.thermal = thNow; FLY.boost = S.boostT > 0;
+      FLY.heading = landing && LT.ok ? camHead : S.yaw; FLY.thermal = thNow; FLY.boost = S.boostT > 0; FLY.landing = landing;
       ctx.state.flying = FLY;
       fogUpdate();
       if (!camChecked && airT > 0.6) cameraCheck();
       cameraFollow(dt, alt);
-      hud.update(S, alt, FLY.thermal);
+      hud.update(S, alt, FLY.thermal, landing);
 
       // trailing sparkle so you can read the flight path from a distance
       if (t > feather) {
@@ -2596,6 +3283,11 @@ export function create(ctx, api) {
       // wings caught at a beat that depends on where she is (so two views
       // never show the identical pose)
       fromCat = false; fromIsland = null; milestone = 0;
+      // a fresh moment: no landing (or its spot) and no card left over from an earlier hook
+      setLanding(false); closeCard();
+      ringU.uOn.value = 0; landRing.visible = false; landCam = 0;
+      // (and no take-off-corridor debug overlay left on by an earlier view)
+      corridorShow(false);
       try { ui()?.clear?.(); } catch (e) { /* optional */ }
       flapPhase = ((x * 0.37 + z * 0.23 + y * 0.051) % 6.2832 + 6.2832) % 6.2832;
       wingBeat = 0.12; glide = 1;
@@ -2701,13 +3393,13 @@ function makeHud(ctx) {
   let on = false, lastAlt = -1, lastMark = -1, lastE = -1, lastCd = -1, lastVs = '', low = false, ready = null, thOn = false;
   return {
     show(v) { if (v !== on) { on = v; el.classList.toggle('on', v); } },
-    update(S, alt, th) {
+    update(S, alt, th, landing = false) {
       if (!on) return;
       const a = Math.max(0, Math.round(S.y));
       if (a !== lastAlt) { lastAlt = a; num.firstChild.nodeValue = String(a); }
       const m = Math.round(clamp(S.y / 360, 0, 1) * 1000) / 10;
       if (m !== lastMark) { lastMark = m; mark.style.bottom = m + '%'; }
-      const w = S.vy > 1.2 ? 'climbing' : S.vy < -4 ? 'diving' : S.vy < -0.8 ? 'gliding' : 'level';
+      const w = landing ? 'landing' : S.vy > 1.2 ? 'climbing' : S.vy < -4 ? 'diving' : S.vy < -0.8 ? 'gliding' : 'level';
       if (w !== lastVs) { lastVs = w; vs.firstChild.nodeValue = w; }
       const e = Math.round(S.energy * 100) / 100;
       if (e !== lastE) { lastE = e; fill.style.transform = 'scaleX(' + e + ')'; }
@@ -2716,6 +3408,249 @@ function makeHud(ctx) {
       if (c !== lastCd) { lastCd = c; cd.style.transform = 'scaleX(' + c + ')'; }
       if ((S.boostCd <= 0) !== ready) { ready = S.boostCd <= 0; boost.classList.toggle('ready', ready); }
       if ((th > 0.3) !== thOn) { thOn = th > 0.3; therm.classList.toggle('on', thOn); }
+    },
+  };
+}
+
+// ── WAVE 5: the control card + the key row ───────────────────────────────────
+// Own DOM under ctx.uiRoot, in the HUD's one plate family (.cci-plate and
+// .cci-key come from ui/style.js; the colours are its --panel / --edge / --ink
+// variables, so the night dimming applies). The card sits bottom-centre over
+// the hotbar, clear of the machine in the middle of the frame; the row takes
+// the same slot while you fly. On a phone the faces are the phone's own
+// buttons (A pink, B blue, the stick) plus two tappable chips of ours: LAND
+// (the E button leaves the screen in flight) and ?. ui.showHud(false) (the
+// cinema class) hides both. No per-frame DOM work: classes flip on change.
+function makeFlightHelp(ctx, touch, hooks) {
+  const root = ctx.uiRoot;
+  const nop = { card() {}, row() {}, landing() {}, update() {}, els: null };
+  // (the row's groups: see buildRow)
+  if (!root || typeof document === 'undefined') return nop;
+  if (!document.getElementById('fly-help-style')) {
+    const st = document.createElement('style');
+    st.id = 'fly-help-style';
+    st.textContent = `
+#ui .fly-card, #ui .fly-row { opacity: 0; visibility: hidden;
+  transition: transform .3s cubic-bezier(.2,.9,.3,1.15), opacity .2s, visibility 0s linear .3s; }
+#ui .fly-card.on, #ui .fly-row.on { opacity: 1; visibility: visible; transition: transform .3s cubic-bezier(.2,.9,.3,1.15), opacity .2s, visibility 0s; }
+#ui.cci-cinema .fly-card, #ui.cci-cinema .fly-row { display: none !important; }
+/* while she is ridden, E lands: the ground's "E Talk to …" pill (interaction
+   measures in 2-D, so everyone under her flight path is "near") would give E
+   a second meaning. touch.js hides it on phones (.tch-fly); this is desktop. */
+#ui.fly-riding .cci-prompt { visibility: hidden !important; }
+/* desktop: right-middle, between the clock and the minimap (the machine and
+   her rider hold the middle of the frame, the dialogue the bottom) */
+#ui .fly-card { z-index: 27; right: 22px; top: 50%; width: min(448px, calc(100vw - 32px)); box-sizing: border-box; padding: 11px 16px 11px 14px;
+  transform: translate(18px, -50%) scale(.96); transform-origin: 100% 50%; }
+#ui .fly-card.on { transform: translate(0, -50%) scale(1); }
+/* reopened mid-air (H / ?): narrower, docked high on the right under the
+   clock, over the sky, so the island she is flying toward stays in view
+   (the energy tip lives on the boarding card) */
+#ui .fly-card.air:not(.touch) { top: 146px; width: min(356px, calc(100vw - 32px)); padding: 9px 13px 9px 11px;
+  transform: translate(18px, 0) scale(.96); transform-origin: 100% 0; }
+#ui .fly-card.air.on:not(.touch) { transform: translate(0, 0) scale(1); }
+#ui .fly-card.air .fly-card-tip { display: none; }
+#ui .fly-card.air .fly-card-head { margin-bottom: 7px; }
+#ui .fly-card.air .fly-card-head b { font-size: 19px; }
+#ui .fly-card.air .fly-card-grid { row-gap: 5px; column-gap: 10px; }
+#ui .fly-card.air .fly-card-t { font-size: 12px; }
+#ui .fly-card.air .fly-card-foot { margin-top: 7px; padding-top: 6px; }
+/* phone: centred (she waits on the planks anyway), a little smaller */
+#ui .fly-card.touch { right: auto; left: 50%; transform: translate(-50%, -47%) scale(.8); transform-origin: 50% 50%; }
+#ui .fly-card.touch.on { transform: translate(-50%, -50%) scale(.84); }
+#ui .fly-card-head { display: flex; flex-direction: column; gap: 3px; margin: 0 0 9px 2px; }
+#ui .fly-card-head b { font: 800 22px/1 var(--fdisp); color: var(--ink); }
+#ui .fly-card-grid { display: grid; grid-template-columns: max-content 1fr; column-gap: 12px; row-gap: 7px; align-items: center; }
+#ui .fly-card-k { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 58px; }
+#ui .fly-card-k em { font: 800 9px/1.05 var(--fbody); font-style: normal; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); text-align: left; }
+#ui .fly-card-t { font: 700 13px/1.25 var(--fbody); color: var(--ink); text-wrap: balance; }
+#ui .fly-card-t b { font-weight: 900; }
+#ui .fly-card-tip { margin-top: 9px; font: 700 11.5px/1.3 var(--fbody); color: var(--ink-soft); }
+#ui .fly-card-tip b { color: var(--ink); font-weight: 900; }
+#ui .fly-card-foot { margin-top: 9px; padding-top: 8px; border-top: 2px dashed rgba(43,36,66,.2);
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+#ui .fly-card-go { font: 800 10.5px/1 var(--fbody); letter-spacing: .12em; text-transform: uppercase; color: var(--edge);
+  padding: 6px 10px 5px; border-radius: 999px; background: var(--gold); border: 2px solid var(--edge); box-shadow: 0 2px 0 var(--edge);
+  animation: fly-go 1.2s ease-in-out infinite; }
+@keyframes fly-go { 50% { transform: scale(1.05); } }
+#ui .fly-card-again { display: inline-flex; align-items: center; gap: 5px; font: 800 9.5px/1 var(--fbody); letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-soft); white-space: nowrap; }
+#ui .fly-card .cci-key, #ui .fly-row .cci-key { min-width: 19px; height: 19px; border-width: 2px; border-radius: 6px; box-shadow: 0 2px 0 var(--edge);
+  font-size: 10.5px; letter-spacing: 0; text-transform: none; }
+/* bottom-centre, riding just above the hotbar (and its hint line); it steps
+   aside while the dialogue box (which docks in the same slot) is up */
+#ui .fly-row { z-index: 25; left: 50%; bottom: var(--fly-help-b, 18px); display: flex; align-items: center; gap: 9px; padding: 6px 13px 7px 9px;
+  border-radius: 999px; white-space: nowrap; transform: translate(-50%, 10px); font: 800 9.5px/1 var(--fbody); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
+#ui .fly-row.on { transform: translate(-50%, 0); }
+/* after ~20 s of flight with the card shut it steps back (the HUD frames the
+   play space on all four sides); a landing, the card or a hover bring it back */
+#ui .fly-row.on.dim { opacity: .4; transition: transform .3s cubic-bezier(.2,.9,.3,1.15), opacity .8s, visibility 0s; }
+#ui .fly-row.on.dim:hover { opacity: 1; }
+#ui .fly-row .pull em { color: var(--ink); }
+#ui .fly-row .g { display: inline-flex; align-items: center; gap: 4px; }
+#ui .fly-row em { font-style: normal; margin-left: 2px; }
+#ui .fly-row .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-soft); opacity: .6; flex: 0 0 auto; }
+#ui .fly-row .hit { cursor: pointer; border-radius: 8px; }
+#ui .fly-row .land.on .cci-key, #ui .fly-row .land.on .fly-tland { background: linear-gradient(180deg, #ffe9a8, var(--gold)); }
+#ui .fly-row .land.on em { color: var(--ink); }
+/* the phone's own faces */
+#ui .fly-tb { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%;
+  border: 2px solid var(--edge); box-sizing: border-box; font: 900 10px/1 var(--fbody); color: #fff; letter-spacing: 0; }
+#ui .fly-ta { background: var(--pink); }
+#ui .fly-tbb { background: #4f8fe0; }
+#ui .fly-stick { position: relative; display: inline-block; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--edge);
+  box-sizing: border-box; background: var(--panel-2); }
+#ui .fly-stick i { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--edge); }
+#ui .fly-tland { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 999px; border: 2px solid var(--edge);
+  box-sizing: border-box; background: #fffdf8; font: 900 9.5px/1 var(--fbody); letter-spacing: .1em; color: var(--ink); box-shadow: 0 2px 0 var(--edge); }
+#ui .fly-tq { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--edge);
+  box-sizing: border-box; background: #fffdf8; font: 900 11px/1 var(--fbody); color: var(--ink); box-shadow: 0 2px 0 var(--edge); }
+/* on a phone the two chips are real buttons: ≥ 40 px to hit */
+#ui .fly-row.touch { gap: 7px; padding: 4px 6px 4px 11px; }
+#ui .fly-row.touch .hit { min-height: 40px; padding: 0 7px; margin: -4px 0; }
+#ui .fly-row.touch .fly-tland, #ui .fly-row.touch .fly-tq { height: 28px; }
+#ui .fly-row.touch .fly-tq { width: 28px; }
+@media (max-height: 520px), (max-width: 640px) {
+  #ui .fly-card { width: min(430px, calc(100vw - 24px)); padding: 8px 12px 9px 10px; }
+  #ui .fly-card.on:not(.touch) { transform: translate(0, -50%) scale(.86); }
+  #ui .fly-card-head { margin-bottom: 6px; }
+  #ui .fly-card-head b { font-size: 18px; }
+  #ui .fly-card-grid { row-gap: 5px; }
+  #ui .fly-card-t { font-size: 12px; }
+  #ui .fly-card-tip { display: none; }
+  #ui .fly-card-foot { margin-top: 7px; padding-top: 6px; }
+}`;
+    document.head.appendChild(st);
+  }
+  const K = (t) => `<span class="cci-key">${t}</span>`;
+  const TA = '<span class="fly-tb fly-ta">A</span>', TB = '<span class="fly-tb fly-tbb">B</span>';
+  const STICK = '<span class="fly-stick"><i></i></span>', LAND = '<span class="fly-tland">LAND</span>', Q = '<span class="fly-tq">?</span>';
+  const card = document.createElement('div');
+  card.className = 'cci cci-plate cci-hit fly-card';
+  card.setAttribute('role', 'dialog');
+  card.setAttribute('aria-label', 'Flying machine controls');
+  const row = document.createElement('div');
+  row.className = 'cci cci-plate muted fly-row';
+  row.setAttribute('aria-label', 'Flight controls');
+  root.append(card, row);
+  const tap = (el, fn) => el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); fn(); });
+  tap(card, () => hooks.close());
+  // "tap anywhere": while the card is up any press on the page closes it (and
+  // still does its own job: the A button still flaps). A tap on the left half
+  // that never moves the stick would otherwise not count as input at all.
+  const anyTap = () => hooks.close();
+  let cardOn = false, rowOn = false, landOn = false, mode = '', faces = null, go = null, landEl = null, landLab = null;
+  const goText = () => mode === 'board' ? (faces ? 'Tap anywhere to take off' : 'Press any key to take off') : (faces ? 'Tap anywhere to close' : 'Any key closes this');
+  const landText = () => faces ? (landOn ? 'LANDING…' : 'LAND') : (landOn ? 'landing' : 'land');
+  /** Keyboard faces, or the phone's buttons: follows touch.js (it can switch on at the first touch). */
+  function build() {
+    const t = !!(ctx.systems.touch?.enabled ?? touch);
+    if (t === faces) return;
+    faces = t;
+    const lines = t ? [
+      [TA, '<b>Flap</b>: tap, or <b>hold</b> to keep flapping. Every flap lifts her.'],
+      [STICK + '<em>up<br>down</em>', '<b>Up</b> noses up: flaps climb harder · <b>down</b> dives'],
+      [STICK + '<em>left<br>right</em>', '<b>Bank</b> left / right'],
+      [TB, '<b>Boost</b> dash (the ring shows the recharge)'],
+      [LAND, '<b>Land</b>: she picks a clear spot below and circles down onto it'],
+    ] : [
+      [K('Space'), '<b>Flap</b>: tap, or <b>hold</b> to keep flapping. Every flap lifts her.'],
+      [K('W') + K('S'), '<b>W</b> noses up: flaps climb harder · <b>S</b> dives for speed'],
+      [K('A') + K('D'), '<b>Bank</b> left / right'],
+      [K('Shift'), '<b>Boost</b> dash (recharges in 12 s)'],
+      [K('E'), '<b>Land</b>: she picks a clear spot below and circles down onto it'],
+    ];
+    card.innerHTML = `<div class="fly-card-head"><span class="cci-eyebrow">The flying machine · built by a cat who read one book</span><b>How to fly her</b></div>
+<div class="fly-card-grid">${lines.map(([k, x]) => `<span class="fly-card-k">${k}</span><span class="fly-card-t">${x}</span>`).join('')}</div>
+<div class="fly-card-tip">Flapping costs <b>energy</b>; gliding and the <b>warm shimmer</b> over landmarks give it back. Up past 330 the air gets thin.</div>
+<div class="fly-card-foot"><span class="fly-card-go"></span><span class="fly-card-again">${t ? Q : K('H')} shows this again</span></div>`;
+    go = card.querySelector('.fly-card-go');
+    go.textContent = goText();
+    row.classList.toggle('touch', t);
+    card.classList.toggle('touch', t);
+    rowBuilt = null;
+    buildRow();
+  }
+  /**
+   * The key row. Landing, it keeps only what matters then, with the way out
+   * IN the row (the toast that said so fades): E LANDING · W / Space PULL UP
+   * (phone: LANDING… · A PULL UP). Rebuilt on a change of state only.
+   */
+  let rowBuilt = null;
+  function buildRow() {
+    const t = faces, key = (t ? 't' : 'k') + (landOn ? 'L' : 'F');
+    if (key === rowBuilt) return;
+    rowBuilt = key;
+    const sep = '<i class="sep"></i>';
+    const landG = t ? `<span class="g land hit cci-hit" role="button" aria-label="Land">${LAND}</span>`
+      : `<span class="g land hit cci-hit" role="button">${K('E')}<em>land</em></span>`;
+    const qG = t ? `<span class="g qm hit cci-hit" role="button" aria-label="Flight controls">${Q}</span>`
+      : `<span class="g qm hit cci-hit" role="button">${K('H')}<em>controls</em></span>`;
+    if (landOn) {
+      row.innerHTML = t
+        ? `${landG}${sep}<span class="g pull">${TA}<em>pull up</em></span>${qG}`
+        : `${landG}${sep}<span class="g pull">${K('W')}${K('Space')}<em>pull up</em></span>${sep}${qG}`;
+    } else {
+      row.innerHTML = t
+        ? `<span class="g">${TA}<em>flap · hold</em></span>${sep}<span class="g">${TB}<em>boost</em></span>${sep}${landG}${qG}`
+        : `<span class="g">${K('Space')}<em>flap · hold</em></span>${sep}<span class="g">${K('W')}${K('S')}<em>climb · dive</em></span>${sep}`
+          + `<span class="g">${K('A')}${K('D')}<em>bank</em></span>${sep}<span class="g">${K('Shift')}<em>boost</em></span>${sep}${landG}${sep}${qG}`;
+    }
+    landEl = row.querySelector('.land');
+    landLab = landEl.querySelector('em') || landEl.querySelector('.fly-tland');
+    landEl.classList.toggle('on', landOn);
+    landLab.textContent = landText();
+    tap(landEl, () => hooks.land());
+    tap(row.querySelector('.qm'), () => hooks.help());
+  }
+  build();
+  let sayEl = null, barEl = null, chk = 0, sayUp = false, lastB = -1, dimOn = false;
+  const sync = () => {
+    card.classList.toggle('on', cardOn);
+    row.classList.toggle('on', rowOn && !cardOn && !sayUp);
+  };
+  /** Sit the row on top of the hotbar stack (the rack + its hint line), wherever it is. */
+  function place() {
+    let b = 18;
+    if (!barEl || !barEl.isConnected) barEl = root.querySelector('.cci-bar');
+    if (barEl && barEl.style.display !== 'none' && !faces) {
+      let top = Infinity;
+      const hintEl = barEl.querySelector('.cci-bar-hint');
+      for (const el of [barEl, hintEl]) {
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        if (r.height > 0 && r.top < top) top = r.top;
+      }
+      if (top < Infinity) b = Math.max(b, Math.round(window.innerHeight - top + 9));
+    }
+    if (b !== lastB) { lastB = b; row.style.setProperty('--fly-help-b', b + 'px'); }
+  }
+  return {
+    els: { card, row },
+    /** true while the phone's faces are showing */
+    get touch() { return faces; },
+    card(v, m = 'air') {
+      if (v) { build(); if (m !== mode) { mode = m; go.textContent = goText(); } card.classList.toggle('air', m === 'air'); }
+      if (v !== cardOn) {
+        cardOn = v; sync();
+        if (v) window.addEventListener('pointerdown', anyTap, true); else window.removeEventListener('pointerdown', anyTap, true);
+      }
+    },
+    row(v) { if (v) { build(); place(); chk = 0; } if (v !== rowOn) { rowOn = v; sync(); } },
+    /** 4 Hz while riding: follow the hotbar, step aside for the dialogue box (cached nodes, no allocation); `dim` steps the row back. */
+    update(dt, dim = false) {
+      if (dim !== dimOn) { dimOn = dim; row.classList.toggle('dim', dim); }
+      if (!rowOn || (chk -= dt) > 0) return;
+      chk = 0.25;
+      place();
+      if (!sayEl || !sayEl.isConnected) sayEl = root.querySelector('.cci-say');
+      const up = !!sayEl && sayEl.style.display !== 'none';
+      if (up !== sayUp) { sayUp = up; sync(); }
+    },
+    landing(v) {
+      if (v === landOn) return;
+      landOn = v;
+      buildRow();
     },
   };
 }

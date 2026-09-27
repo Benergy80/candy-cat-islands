@@ -290,6 +290,9 @@ if (fs.existsSync(vdir)) for (const f of fs.readdirSync(vdir)) if (f.endsWith('.
 }
 let camViews = {};
 try { camViews = JSON.parse(fs.readFileSync(path.join(vdir, 'camera.json'), 'utf8')); } catch { /* §9 file not there yet */ }
+// mode 4 (first person, WAVE 5 Contract Q) views are not §9 rows: the lens is in his head, so nothing here measures
+// them (their own frames are rendered with render.mjs --view cam_fp_*); the §9 rows stay the modes-1-3 set
+for (const [k, v] of Object.entries(camViews)) if (v?.call && ('camera.firstPerson' in v.call || v.call['camera.setMode'] === 4)) delete camViews[k];
 
 // Probe set P — 15, fixed order (§1). The first 13 are the seed probe's gameplay views.
 const P = ['candy_arrival', 'cat_arrival', 'cat_plaza', 'cat_park', 'cat_gym', 'candy_lake', 'sky_dawn_harbor', 'candy_village',

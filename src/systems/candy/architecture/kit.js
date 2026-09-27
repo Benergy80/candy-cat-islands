@@ -886,7 +886,34 @@ export function windowPane(B, x, y, z, rotY, o = {}) {
 }
 
 /**
+ * A licorice BUNTING STRING through world points [[x, y, z], …] (the flag tops),
+ * merged into the builder's licorice bucket. WAVE 5 (artifacts): every run of
+ * bunting in Candyland hung from nothing — flags in a neat catenary with no line
+ * read from the game camera as confetti frozen in mid-air.
+ */
+export function buntingString(B, pts, r = 0.04) {
+  if (!pts || pts.length < 2) return null;
+  const curve = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(p[0], p[1], p[2])));
+  return B.add('licorice', new THREE.TubeGeometry(curve, Math.max(8, pts.length * 3), r, 4, false), { color: C.licorice });
+}
+/**
+ * The bunting flag: a PENNANT whose top edge (local y = 0, along local X) is the
+ * pivot — it hangs from its string and swings about it. Scale (w, h, 1).
+ */
+export function pennantGeometry() {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0, 0, 0.5, 0, 0, 0, -1, 0], 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 1, 1, 1, 0.5, 0], 2));
+  return g;
+}
+
+/**
  * Icing scallop drip along an eave edge (a run of overlapping spheres).
+ * `rotY` is the yaw of the RUN — the run goes along (cos rotY, −sin rotY), the
+ * local X of a box built with rot [0, rotY, 0] — NOT the facing normal of the
+ * board or wall it hangs off. (WAVE 5: five boards and the palace plinth passed
+ * `rotY + π/2` and grew strings of beads sticking straight out into the air.)
  * 5×4 segments, not 8×6: there are ~600 of these across Candyland and at a
  * 0.22 radius nobody can tell them apart, but the difference is ~20k triangles
  * — which is a whole giant cupcake's worth of budget.

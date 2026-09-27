@@ -228,7 +228,19 @@ export function create(ctx) {
       const far = Math.hypot(cam.x - CANDY_CENTER.x, cam.z - CANDY_CENTER.z) > 360;
       const show = cam.x < 40 && !far;
       if (show !== !hidden) { hidden = !show; group.visible = show; }
-      if (!show || ctx.state.paused) return;
+      if (ctx.state.paused) return;
+      if (!show) {
+        // WAVE 5 birds-flicker: the sugar-glider V is a SKY event over the
+        // strait, not ground wildlife — its mesh lives outside this group, and
+        // a crossing already in the air flies on to its end (birds.coast)
+        // instead of vanishing mid-frame when the lens crosses x = 40.
+        const b = parts.birds;
+        if (b?.coast && b.airborne?.()) {
+          flapClock.value = ctx.state.elapsed;
+          try { b.coast(dt, ctx); } catch (err) { if (!b.__warned) { console.error('[candyCreatures/birds] coast error', err); b.__warned = true; } }
+        }
+        return;
+      }
 
       flapClock.value = ctx.state.elapsed;
       LOD.begin(ctx);                   // the walkers' animation LOD (common.js)

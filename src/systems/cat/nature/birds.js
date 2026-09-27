@@ -85,11 +85,33 @@ export function createBirds(ctx, geoGull, geoPigeon, mat, geoBlob, matBlob) {
     blobMesh.renderOrder = -1;
   }
 
-  function place(mesh, i, x, y, z, yaw, roll, pitch, s) {
+  // ── lens keep-out (WAVE 5 birds-flicker) ──────────────────────────────────
+  // The gulls wheel 9.5–17.5 u up and the game lens rides 8–21 u up, so a gull
+  // regularly passes within a few units of it. The camera's see-through window
+  // used to dither any bird out nearer than ~11 u (its near-lens clip), which
+  // is what made them vanish mid-frame and pop back; the birds are now exempt
+  // from the window (nature.js), and instead an AIRBORNE bird is drawn further
+  // along its own sight line — same pixel, never a frame-filling slab. The
+  // remap d → √(d² + K²) is smooth everywhere (no threshold, nothing toggles):
+  // 6 u reads as 11.7, 20 u as 22.4, 40 u as 41.2. Grounded pigeons are not
+  // moved (a sight line through a pecking pigeon runs into the lawn).
+  const KEEP = 10;
+  let lens = null;
+  function place(mesh, i, x, y, z, yaw, roll, pitch, s, air = 1) {
+    if (lens && air > 0) {
+      const dx = x - lens.x, dy = y - lens.y, dz = z - lens.z;
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d > 1e-3) {
+        const k = 1 + (Math.sqrt(d * d + KEEP * KEEP) / d - 1) * air;
+        x = lens.x + dx * k; y = lens.y + dy * k; z = lens.z + dz * k;
+      }
+    }
     _e.set(pitch, yaw, roll, 'YXZ');
     _m.compose(_p.set(x, y, z), _q.setFromEuler(_e), _s.set(s, s, s));
     mesh.setMatrixAt(i, _m);
   }
+  // 0 on the ground … 1 from 6 u up: the keep-out grows in as a pigeon climbs
+  const airK = (h) => (h <= 2 ? 0 : h >= 6 ? 1 : ((h - 2) / 4) * ((h - 2) / 4) * (3 - 2 * ((h - 2) / 4)));
   function blob(i, x, z, gy, air, s) {
     if (!blobMesh) return;
     const k = Math.max(0, 1 - air / 2.2) * s;
@@ -103,7 +125,8 @@ export function createBirds(ctx, geoGull, geoPigeon, mat, geoBlob, matBlob) {
     gulls, pigeons,
     /** Where the gulls are right now — cats may want to stare. */
     gullPositions: () => gulls.map((g) => ({ x: g.cx + Math.cos(g.a) * g.r, y: g.y, z: g.cz + Math.sin(g.a) * g.r * 0.8 })),
-    update(dt, t, player) {
+    update(dt, t, player, lensPos) {
+      lens = lensPos || null;
       for (let i = 0; i < gulls.length; i++) {
         const g = gulls[i];
         g.a += g.w * dt;
@@ -128,7 +151,7 @@ export function createBirds(ctx, geoGull, geoPigeon, mat, geoBlob, matBlob) {
           if (d < 8.5) { b.state = 1; b.t = 0; b.ca = Math.atan2(b.z - pz, b.x - px); b.flap = 1.15; swayDirty = true; }
           // UPRIGHT at rest — the old idle pitch of 0.08 rad with a 0.85 peck
           // laid the bird on its face; now it stands and only DIPS to peck
-          place(pigeonMesh, i, b.x, b.y, b.z, b.yaw, 0, Math.sin(b.peck) > 0.78 ? 0.62 : -0.06, b.s);
+          place(pigeonMesh, i, b.x, b.y, b.z, b.yaw, 0, Math.sin(b.peck) > 0.78 ? 0.62 : -0.06, b.s, 0);
           blob(i, b.x, b.z, W.height(b.x, b.z), 0, b.s);
         } else {
           const target = b.state === 1
@@ -144,8 +167,8 @@ export function createBirds(ctx, geoGull, geoPigeon, mat, geoBlob, matBlob) {
           if (b.state === 1 && b.t > 1.1) { b.state = 2; b.t = 0; b.ca = Math.atan2(b.z - b.hub.z, b.x - b.hub.x); }
           else if (b.state === 2 && b.t > 4 + (i % 5) && d > 12) { b.state = 3; b.t = 0; }
           else if (b.state === 3 && Math.abs(b.y - target.y) < 0.35 && Math.hypot(b.x - b.hx, b.z - b.hz) < 0.7) { b.state = 0; b.t = 0; b.flap = 0; swayDirty = true; }
-          place(pigeonMesh, i, b.x, b.y, b.z, b.yaw, 0, -0.12, b.s);
           const gy = W.height(b.x, b.z);
+          place(pigeonMesh, i, b.x, b.y, b.z, b.yaw, 0, -0.12, b.s, airK(b.y - gy));
           blob(i, b.x, b.z, gy, b.y - gy, b.s);
         }
         if (swayDirty) pigeonSway.array[i] = b.flap;

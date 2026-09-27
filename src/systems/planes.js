@@ -15,8 +15,9 @@
 //                   lane each pass — picked to dodge the clouds — laying two soft,
 //                   puffy contrails that spread, drift and fade.
 //   CATBLIMP        a pink-and-mint gored blimp with a cat face and twitching
-//                   ears; "SUGAR" on the port flank, "CATNIP" to starboard (the
-//                   letters glow at night); rounded gondola with striped awnings,
+//                   ears; "SUGAR" on the starboard flank, "CATNIP" to port (the
+//                   letters glow at night; polish pass: SUGAR is the side the
+//                   default lens sees at both masts and on the ride); rounded gondola with striped awnings,
 //                   a cat captain looking out of the front window (a passenger to
 //                   starboard), bunting, big engine pods with pusher props, and
 //                   rounded fins. Drifts a slow oval over the strait at 59-62 u.
@@ -71,11 +72,13 @@
 //
 // WAVE 4 · Contract L — AIR ROUTES (the same builder owns escape/blimp.js and
 // escape/biplane.js, which hold the rides; this file flies the aircraft)
-//   BLIMP SCHEDULE  two mooring masts: Sugar Pier (nose north to a mast on the
-//                   beach, the rope ladder landing on the planks) and Fish Harbor
-//                   (nose east to a mast on the lawn). Each pass: nose in, moor
-//                   20 s (ladder drops, props idle, letters lit after dark),
-//                   back off, climb, drift to the other mast (speed 4.6).
+//   BLIMP SCHEDULE  two mooring masts: the Sugar Mooring (WAVE 5 · Contract Q:
+//                   the remote west headland past Chocolate Lake's far shore,
+//                   nose north-east to a mast on the headland's crown, the ladder
+//                   landing on a wafer; it used to be Sugar Pier) and Fish
+//                   Harbor (nose east to a mast on the lawn). Each pass: nose in, moor 20 s (ladder drops, props
+//                   idle, letters lit after dark), back off, climb, cruise the
+//                   Candy Kingdom's south coast and the strait (speed 7.6).
 //                   planes.blimp = { moored:'candy'|'cat'|null, eta(mast),
 //                   departIn, ladder (0..1), phase, leg, seat(out), foot(mast),
 //                   masts, cycle } — day AND night.
@@ -143,9 +146,11 @@ export const ROUTES = {
       [-82, 50.5, -64], [-54, 47, -22],
     ],
   },
-  // A slow oval over the strait: Sugar Pier's end ↔ Main Street, 60 u.
+  // The blimp flies the schedule legs built from AIR.masts (only `speed` is
+  // read). WAVE 5: 7.6 (was 4.6) — the Sugar Mooring moved to the far
+  // south-west, so each leg is now ≈ 370 u of coastline instead of the strait.
   blimp: {
-    speed: 4.6,
+    speed: 7.6,
     pts: [
       [-30, 60, 22], [-16, 61, -28], [28, 62, -52], [78, 62, -40], [108, 61, -6],
       [106, 60, 44], [72, 59, 78], [20, 60, 84], [-20, 60, 64],
@@ -159,12 +164,25 @@ export const ROUTES = {
 
 // ── WAVE 4 · the ground end of the air routes ───────────────────────────────
 // Masts: `foot` is where the rope ladder lands (where you board); the blimp
-// hangs `LAD_BACK` ahead of it and the mast stands under its nose. Sugar Pier's
-// foot is ON the pier planks (deck = terrain at [x, z] + lift, as pier.js
-// builds it). The strip: centre, axis angle (0 = east, + toward south), size.
+// hangs `LAD_BACK` ahead of it and the mast stands under its nose. A `deck`
+// foot stands on planks (terrain at [x, z] + lift); a `pad` foot on the Sugar
+// Mooring's landing wafer (the highest ground within pad.r + lift — the
+// terrain mesh included). The strip: centre, axis angle (0 = east, + toward south), size.
 export const AIR = {
   masts: {
-    candy: { foot: [-44, 22.2], heading: Math.PI, label: 'Sugar Pier', island: 'candy', to: 'cat', deck: [-46, 22, 0.62] },
+    // WAVE 5 · Contract Q: the Candy Kingdom's mast left Sugar Pier (Ben: "it
+    // should be in a more remote part of the island") for the SUGAR MOORING on
+    // the west headland — the rocky point at the foot of Gumdrop Cliffs, past
+    // Chocolate Lake's far side: sea to the west and south, ≈ 200 u from the
+    // pier and 40 u from the lake (polish pass: it first stood on the lake's
+    // south shore, where every frame of it was the lake's boathouse and
+    // fountain). It sits in the clear pocket between the cliffs' sugar-rock
+    // boulders, the south ledge and the big gumdrop on the beach. Nose
+    // NORTH-EAST (the mast inland on the crown), tail out over the beach, so
+    // she noses in from the open sea to the south-west — and lies broadside
+    // to the default iso lens, SUGAR flank toward it. The ladder lands on a
+    // thick wafer whose top clears the highest ground under it by `pad.lift`.
+    candy: { foot: [-239.3, 46.3], heading: Math.PI * 0.75, label: 'Sugar Mooring', island: 'candy', to: 'cat', pad: { r: 2.9, lift: 0.3 } },
     cat: { foot: [97, 60], heading: Math.PI / 2, label: 'Fish Harbor', island: 'cat', to: 'candy' },
   },
   ladder: 7.4,                       // rope ladder, balcony floor → ground
@@ -976,8 +994,13 @@ export function create(ctx) {
       kb.part(new THREE.BoxGeometry(0.26, 2.7, 0.08), null, (x, y) => ((Math.floor(y * 2 + 20) % 2) ? C.gummy : C.cream), bone);
       kb.part(new THREE.SphereGeometry(0.24, 8, 6), null, C.gold, bone);
     }
-    // lettering (decal): SUGAR to port (+X), CATNIP to starboard (−X)
-    for (const [side, rect] of [[1, RECT.sugar], [-1, RECT.catnip]]) {
+    // lettering (decal): SUGAR to starboard (−X), CATNIP to port (+X). The
+    // default iso lens sees her starboard side at both masts (the Sugar Mooring
+    // noses north-east — broadside to it — Fish Harbor east; the lens is
+    // south-east of both)
+    // and escape/blimp.js films the ride from starboard: the name everybody
+    // reads — HUD, map, timetable — is the name on the hull in every shot.
+    for (const [side, rect] of [[-1, RECT.sugar], [1, RECT.catnip]]) {
       const NU = 18, NV = 4, base = kd.count, z0 = -6.4, z1 = 7.6, a0 = -0.36, a1 = 0.36;
       for (let j = 0; j <= NV; j++) for (let i = 0; i <= NU; i++) {
         const u = i / NU, v = j / NV;
@@ -2044,7 +2067,7 @@ export function create(ctx) {
 
   // ════════════════════════════════════════════════════════════════════════════
   // BLIMP SCHEDULE (Contract L) — two moorings, two legs, one cycle
-  //   [0, dw)            moored at Sugar Pier (ladder down, props idling)
+  //   [0, dw)            moored at the Sugar Mooring (ladder down, props idling)
   //   [dw, dw+AB)        unmoor (back off + climb, still facing the mast), pivot,
   //                      drift the strait, line up, nose in at Fish Harbor
   //   [dw+AB, 2dw+AB)    moored at Fish Harbor
@@ -2055,11 +2078,21 @@ export function create(ctx) {
   const MI = {};
   for (const [name, m] of Object.entries(AIR.masts)) {
     const fx = Math.sin(m.heading), fz = Math.cos(m.heading);
-    const fy = m.deck ? gH(m.deck[0], m.deck[1]) + m.deck[2] : gH(m.foot[0], m.foot[1]);
+    // `pad`: the ladder lands on a low wafer (escape/blimp.js builds it and
+    // registers it as a walkable) whose top clears the highest ground under it
+    let fy;
+    if (m.deck) fy = gH(m.deck[0], m.deck[1]) + m.deck[2];
+    else if (m.pad) {
+      // over world.height AND the rendered terrain mesh (which rides up to 0.22 over it)
+      const meshH = terrainMeshSampler(world), top = (x, z) => Math.max(gH(x, z), meshH(x, z));
+      fy = top(m.foot[0], m.foot[1]);
+      for (let a = 0; a < 16; a++) for (const rr of [1.2, 2.4, m.pad.r]) fy = Math.max(fy, top(m.foot[0] + Math.cos(a / 16 * TAU) * rr, m.foot[1] + Math.sin(a / 16 * TAU) * rr));
+      fy += m.pad.lift;
+    } else fy = gH(m.foot[0], m.foot[1]);
     const cx = m.foot[0] + fx * LAD_BACK, cz = m.foot[1] + fz * LAD_BACK, cy = fy + AIR.ladder - LAD_TOP.y;
     const tx = cx + fx * NOSE, tz = cz + fz * NOSE;
     MI[name] = {
-      name, label: m.label, island: m.island, to: m.to, heading: m.heading, fx, fz,
+      name, label: m.label, island: m.island, to: m.to, heading: m.heading, fx, fz, pad: m.pad || null,
       foot: { x: m.foot[0], y: fy, z: m.foot[1] }, centre: { x: cx, y: cy, z: cz },
       top: { x: tx, y: cy + 0.1, z: tz }, base: { x: tx, y: gH(tx, tz), z: tz },
     };
@@ -2079,16 +2112,30 @@ export function create(ctx) {
   BM[B.beaconC].makeTranslation(MI.candy.top.x, MI.candy.top.y + 2.35, MI.candy.top.z);
   BM[B.beaconK].makeTranslation(MI.cat.top.x, MI.cat.top.y + 2.35, MI.cat.top.z);
   const LEG = {
-    // over open water the gondola stays above ~30 u (the biplane's passenger
-    // runs wave-hop underneath at ~20 u)
-    cat: blimpLeg('candy', 'cat', [[-26, 36, 44], [6, 50, 52], [36, 42, 60]]),
-    candy: blimpLeg('cat', 'candy', [[70, 38, 76], [34, 50, 82], [-4, 50, 74], [-28, 40, 64]]),
+    // WAVE 5: the Sugar Mooring is on the west headland. Both legs run the
+    // Candy Kingdom's south coast over open water — outbound on the inside
+    // line, home on the outside, so the two make a loop — and cross the strait
+    // SOUTH of the piers (the rainbow bridge's U stands over the north strait).
+    // Over the biplane's airfield corridor (its climb-out teardrop tops out at
+    // 41 u near (-104, 118)) the gondola rides ≥ 55 u; over the strait the
+    // biplane's passenger run wave-hops underneath at ~20 u.
+    // Out: back off south-west over the beach, swing south-east past the neck
+    // of the headland and out over the bay, east along the coast. Home: along
+    // the outer line to z 125, then a 24-u right-hand arc (tangent to that line
+    // and to the approach line, centred on (-260, 101)) out over open sea, so
+    // she comes in north-eastward, tail to the beach.
+    // Measured (tools/_tmp/blimpp/legs.mjs): out 387 u / 69 s, home 487 u /
+    // 82 s, cycle 190 s; tightest turn 15 u radius; cruise clearance ≥ 28.6 u.
+    cat: blimpLeg('candy', 'cat', [[-236, 30, 64], [-222, 35, 78], [-202, 41, 94], [-178, 47, 107], [-148, 58, 112], [-100, 63, 106],
+      [-56, 58, 94], [-14, 52, 80], [30, 46, 66]]),
+    candy: blimpLeg('cat', 'candy', [[70, 40, 78], [28, 52, 94], [-24, 58, 110], [-84, 64, 122], [-140, 64, 124],
+      [-194, 54, 125], [-245, 46, 125], [-274.2, 42, 120.4], [-283.3, 39, 106.8], [-282, 35, 91.3]]),
   };
   const CYC = { dw: BLS.dwell, ab: LEG.cat.T, ba: LEG.candy.T };
   CYC.P = 2 * CYC.dw + CYC.ab + CYC.ba;
   CYC.catAt = CYC.dw + CYC.ab;
-  // the first mooring at Sugar Pier comes ~45 s into the game — after the
-  // opening cinematic has landed on the visitor, not in the middle of it
+  // the first mooring at the Sugar Mooring comes ~45 s into the game (she
+  // cruises the south coast during the opening cinematic)
   let blimpOff = CYC.P - 45;
   const BS = { phase: 'moored', mast: null, leg: null, dwellT: 0, dwellLeft: 0, ladK: 0, t: 0, x: 0, y: 0, z: 0, heading: 0, pitch: 0, speed: 0, transit: 0, prop: 0 };
   function blimpSample(tb, o) {
@@ -2215,7 +2262,8 @@ export function create(ctx) {
     get speed() { return BS.speed; },
     get altitude() { return BS.y; },
     /** The passenger's standing spot on the balcony (world), and which way to face. */
-    seat(out) { out.set(0.05, BAL.y + 0.02, BAL.z + 0.2).applyMatrix4(BM[B.blimp]); out.facing = BS.heading + Math.PI / 2; return out; },
+    /** (facing: out over the starboard rail — the SUGAR side, where the ride camera sits) */
+    seat(out) { out.set(-0.05, BAL.y + 0.02, BAL.z + 0.2).applyMatrix4(BM[B.blimp]); out.facing = BS.heading - Math.PI / 2; return out; },
     ladderTop(out) { return out.copy(blimpLadTop); },
     ladderBottom(out) { return out.copy(blimpLadBot); },
     foot: (mast) => MI[mast]?.foot || null,
@@ -2585,8 +2633,8 @@ export function create(ctx) {
         try {
           mkBiplane.x = air.biplane.x; mkBiplane.z = air.biplane.z; ui.addMapMarker(mkBiplane);
           mkBlimp.x = air.blimp.x; mkBlimp.z = air.blimp.z;
-          mkBlimp.label = BS.mast === 'candy' ? 'SUGAR blimp · boarding at Sugar Pier' : BS.mast === 'cat' ? 'SUGAR blimp · boarding at Fish Harbor'
-            : BS.leg === 'cat' ? 'SUGAR blimp · bound for Fish Harbor' : 'SUGAR blimp · bound for Sugar Pier';
+          mkBlimp.label = BS.mast === 'candy' ? 'SUGAR blimp · boarding at the Sugar Mooring' : BS.mast === 'cat' ? 'SUGAR blimp · boarding at Fish Harbor'
+            : BS.leg === 'cat' ? 'SUGAR blimp · bound for Fish Harbor' : 'SUGAR blimp · bound for the Sugar Mooring';
           ui.addMapMarker(mkBlimp);
         } catch { /* the map is optional */ }
       }
@@ -2679,7 +2727,9 @@ export function create(ctx) {
       };
       test('biplane', (u) => api.pathPoint('biplane', u), 600, 4);
       // the blimp is only held to the rule in open cruise (it moors at masts by design)
-      test('blimp', (u) => { const q = blimpSample(u * CYC.P, { prop: 0 }); return q.phase === 'cruise' && q.transit > 0.9 ? q : { x: 0, y: 999, z: 0 }; }, 900, 13);
+      // (and not on the final 40 u into a mast: she noses in low over the water by design)
+      const nearMast = (q) => Math.hypot(q.x - MI.candy.centre.x, q.z - MI.candy.centre.z) < 40 || Math.hypot(q.x - MI.cat.centre.x, q.z - MI.cat.centre.z) < 40;
+      test('blimp', (u) => { const q = blimpSample(u * CYC.P, { prop: 0 }); return q.phase === 'cruise' && q.transit > 0.9 && !nearMast(q) ? q : { x: 0, y: 999, z: 0 }; }, 900, 13);
       test('jet', (u) => ({ x: -560 + 1120 * u, y: ROUTES.jet.alt - 4, z: 0 }), 400, 8);
       return out;
     },

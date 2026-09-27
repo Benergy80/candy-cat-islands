@@ -1,0 +1,233 @@
+{
+"vp_peak_bench": {
+"time": 11,
+"call": {
+"viewpoints.goto": "peak"
+},
+"frames": 40
+},
+"vp_peak_day": {
+"time": 10.5,
+"call": {
+"viewpoints.goto": "peak",
+"viewpoints.view": "peak"
+},
+"frames": 130
+},
+"vp_cupcake_bench": {
+"time": 11,
+"call": {
+"viewpoints.goto": "cupcake"
+},
+"frames": 40
+},
+"vp_cupcake_day": {
+"time": 10.5,
+"call": {
+"viewpoints.goto": "cupcake",
+"viewpoints.view": "cupcake"
+},
+"frames": 130
+},
+"vp_pier_bench": {
+"time": 11,
+"call": {
+"viewpoints.goto": "pier"
+},
+"frames": 40
+},
+"vp_pier_day": {
+"time": 10.5,
+"call": {
+"viewpoints.goto": "pier",
+"viewpoints.view": "pier"
+},
+"frames": 130
+},
+"vp_palace_bench": {
+"time": 11,
+"call": {
+"viewpoints.goto": "palace"
+},
+"frames": 40
+},
+"vp_palace_day": {
+"time": 10.5,
+"call": {
+"viewpoints.goto": "palace",
+"viewpoints.view": "palace"
+},
+"frames": 130
+},
+"vp_delta_bench": {
+"time": 11,
+"call": {
+"viewpoints.goto": "delta"
+},
+"frames": 40
+},
+"vp_delta_day": {
+"time": 10.5,
+"call": {
+"viewpoints.goto": "delta",
+"viewpoints.view": "delta"
+},
+"frames": 130
+},
+"vp_heights_bench": {
+"time": 11,
+"call": {
+"viewpoints.goto": "heights"
+},
+"frames": 40
+},
+"vp_heights_day": {
+"time": 10.5,
+"call": {
+"viewpoints.goto": "heights",
+"viewpoints.view": "heights"
+},
+"frames": 130
+},
+"vp_watch_bench": {
+"time": 11,
+"call": {
+"viewpoints.goto": "watch"
+},
+"frames": 40
+},
+"vp_watch_day": {
+"time": 10.5,
+"call": {
+"viewpoints.goto": "watch",
+"viewpoints.view": "watch"
+},
+"frames": 130
+},
+"vp_cove_bench": {
+"time": 11,
+"call": {
+"viewpoints.goto": "cove"
+},
+"frames": 40
+},
+"vp_cove_day": {
+"time": 10.5,
+"call": {
+"viewpoints.goto": "cove",
+"viewpoints.view": "cove"
+},
+"frames": 130
+},
+"vp_harbor_bench": {
+"time": 11,
+"call": {
+"viewpoints.goto": "harbor"
+},
+"frames": 40
+},
+"vp_harbor_day": {
+"time": 10.5,
+"call": {
+"viewpoints.goto": "harbor",
+"viewpoints.view": "harbor"
+},
+"frames": 130
+},
+"vp_arrivals_bench": {
+"time": 11,
+"call": {
+"viewpoints.goto": "arrivals"
+},
+"frames": 40
+},
+"vp_arrivals_day": {
+"time": 10.5,
+"call": {
+"viewpoints.goto": "arrivals",
+"viewpoints.view": "arrivals"
+},
+"frames": 130
+},
+"vp_peak_night": {
+"time": 22,
+"call": {
+"viewpoints.goto": "peak",
+"viewpoints.view": "peak"
+},
+"frames": 185
+},
+"vp_pier_night": {
+"time": 22,
+"call": {
+"viewpoints.goto": "pier",
+"viewpoints.view": "pier"
+},
+"frames": 185
+},
+"vp_harbor_night": {
+"time": 22,
+"call": {
+"viewpoints.goto": "harbor",
+"viewpoints.view": "harbor"
+},
+"frames": 185
+},
+"vp_cove_night": {
+"time": 22,
+"call": {
+"viewpoints.goto": "cove",
+"viewpoints.view": "cove"
+},
+"frames": 185
+},
+"vp_pier_rainbow": {
+"time": 11,
+"call": {
+"escape.routes.bridge.debugRaise": true,
+"viewpoints.goto": "pier",
+"viewpoints.view": "pier"
+},
+"frames": 185
+},
+"vp_cove_night_late": {
+"time": 23.5,
+"call": {
+"viewpoints.goto": "cove",
+"viewpoints.view": "cove"
+},
+"frames": 185
+},
+"vp_watch_night": {
+"time": 22,
+"call": {
+"viewpoints.goto": "watch",
+"viewpoints.view": "watch"
+},
+"frames": 185
+},
+"vp_cupcake_night": {
+"time": 22,
+"call": {
+"viewpoints.goto": "cupcake",
+"viewpoints.view": "cupcake"
+},
+"frames": 185
+},
+"vp_arrivals_night": {
+"time": 2.5,
+"call": {
+"viewpoints.goto": "arrivals",
+"viewpoints.view": "arrivals"
+},
+"frames": 185
+},
+"vp_delta_end": {
+"time": 10.5,
+"call": {
+"viewpoints.goto": "delta",
+"viewpoints.view": "delta"
+},
+"frames": 200
+}
+}
