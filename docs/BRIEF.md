@@ -471,3 +471,44 @@ six spots and finds no "Candyland"; renders of the biplane banner, the welcome a
   guest room in frame, the lamp, the wardrobe, the cat). **lighthouse (cat/architecture/outskirts.js):** Ben: "The player should be able to
   reach the lighthouse beacon" — a walkable spiral stair inside (or an iron ladder + gallery), handrails, the gallery walkable with the
   beacon lens turning, a viewpoint plaque up top (hand the spot to viewpoints), the door open-able per Contract O.
+
+## WAVE 6 — interiors everywhere + the overhead indoor camera (added 2026-09-26; queued behind WAVE 4c and WAVE 5)
+Ben: "we need to be able to see better when we are inside of buildings. the whole interior should be visible. Default angle should be
+overhead when inside of buildings. All the buildings in town should have interiors and working entry and exit points."
+### Contract R
+- **Interior registry (shared contract):** every enterable room registers itself in its architecture system's `api.interiors` with the
+  EXISTING shape `{ id, name, x, z, w, d, rot, inside(x,z) }` PLUS `floorY`, `ceilY` (the roof/ceiling height the camera may rise to once
+  hidden), `door: {x, z, facing}` (the walkable threshold's centre and outward yaw) and `fit: {cx, cz, rx, rz}` (the box the camera must keep
+  in frame, usually the room minus 0.3 u). The camera's `indoors()` already reads `api.interiors` of the architecture systems; extend, never
+  rename. The palace and the cave keep their own authored framing (they are not "town buildings").
+- **Overhead indoor camera (camera.js, all three modes; mode 4 unchanged):** when `indoors()` is a registered room: elevation eases to
+  ≈ 1.05 rad (near top-down but with wall faces readable), the aim = the room's `fit` centre biased 30% toward the visitor, the distance
+  fitted so the whole `fit` box is inside the frame with 8% margin (compute from FOV and aspect; clamp 9–26 u), azimuth snapped to the room's
+  `rot` (so walls are square to the frame; Q/E still rotate by 90°), the roof/ceiling hidden and the near walls faded by the architecture's
+  own cover builders (they exist for candy houses; cat buildings get the same), no cutout window indoors (cutK 0), the lens never inside a
+  wall (the dolly floor 5.5 stays as a backstop), and the transition in/out eased over 0.6 s from the door. Exiting restores the previous
+  framing. The mode chip shows a small "inside" tag. camvis: a new §7 row per interior view (candy_in_house0, cat_in_meow, every new room's
+  hero view) — the visitor and all four walls' bases inside the frame, no wall between lens and visitor unfaded.
+- **Interiors for every town building — Candy Kingdom (candy/architecture.js + candy/architecture/*.js; owner "rooms-candy"):** every
+  building in Gumdrop Village (houses, shops, the bakery, etc.) and the Great Cupcake's ground floor get: a walkable floor (Contract A), an
+  opening door per Contract O (≥ 1.4 × 2.3, collider gap = visual gap, a stoop), an interior kit (floor, skirting, 2–4 furniture pieces, a
+  lamp with a warm pool at night, a window with light; per building type: home / shop / civic / workshop), fade shell + hidden roof when
+  inside, the registry entry above, a place name for the HUD (placeOverride), an interactable or two inside (a shopkeeper line, a bed to
+  nap in, a cupboard with a candy), NPCs never spawned inside. Merged geometry: ≤ +3 draw calls per building (interior drawn only when the
+  visitor is inside or the roof is hidden; hidden otherwise). Exit = walk out the door (the same threshold both ways); a second exit only
+  where the building has a back door already drawn.
+- **Interiors for every town building — Cat Island (cat/architecture.js + cat/architecture/*.js incl. interiors.js; owner "rooms-cat"):**
+  every Main Street shop (Purrbucks, The Fish Monger, Yarn & Twine, the Travel Agency, Clip Snip, the dispensary, Meow Donald's, etc.), the
+  Purrliament, the Arrivals building, the gym, Fish Harbor's sheds, all nine Whisker Heights houses and the guest house: same rules; the
+  cat-proportion joke stays (the HUMANS door beside the cat door is the one you use; cat doors decorative); shopkeeper cats already staged
+  by citizens keep their spots (coordinate via `citizens.staging` read-only; if a stager stands inside a new room, register the room's
+  floor so the cat stands on it). ≤ +3 draw calls per building.
+- **Verification:** a scripted tour enters and exits EVERY registered room (list them: expect ≥ 25): walk in through the door (no pushOut
+  hit inside a 1 u corridor), `indoors()` true within 1 s, camera elevation ≥ 1.0 and the whole `fit` box inside the frustum (project the
+  four corners), roof hidden, walls faded, walk out, `indoors()` false, framing restored; renders of every room from inside (day + night)
+  READ by a critic ("cosy, legible, the whole room at a glance"); budgets: ≤ 450 calls / 1.3M tris at every hero view, fpsbench within 5%,
+  mobilebench within budget (interiors hidden unless inside).
+
+> **RETIRED (2026-09-26, Ben):** Contract O's "dusk ritual" — "it is too complex and messes with things once the islands are connected."
+> The Sourling files are back at their WAVE 4 state (freeze-and-stare at 19:30, then home; the night hunt, water melt, dawn reversion,
+> the cap of 10 and the raids unchanged). Do not rebuild the ritual.

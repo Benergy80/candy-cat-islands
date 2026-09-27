@@ -930,7 +930,8 @@ export function create(ctx) {
   let SEPN = 0;
   function separateTigers() {
     _live.length = 0;
-    for (const c of cats) if (c.tigerK > 0.5 && !c.carryTo) {
+    const held = ctx.state.paused && bedtime.active;
+    for (const c of cats) if (c.tigerK > 0.5 && !c.carryTo && !(held && bedtime.frozen(c))) {
       c.capT = tigerScale(c); c.capSy = Math.sin(c.yaw); c.capCy = Math.cos(c.yaw);
       _live.push(c);
     }
@@ -2353,8 +2354,12 @@ export function create(ctx) {
       const cam = ctx.camera;
       _lodPM.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
       _lodFrus.setFromProjectionMatrix(_lodPM);
+      // (a paused carry holds its carrier, escort and sleeper exactly as they
+      //  stand — no gait, breath or head bob drifting on: citizens/carry.js)
+      const held = ctx.state.paused && bedtime.active;
       for (let ci = 0; ci < cats.length; ci++) {
         const cat = cats[ci];
+        if (held && bedtime.frozen(cat)) continue;
         const d2 = (cat.x - player.x) ** 2 + (cat.z - player.z) ** 2;
         cat.lookAt = d2 < 225 ? player : null;
         cat.nearCam = d2 < 4900;

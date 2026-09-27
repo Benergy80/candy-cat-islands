@@ -265,20 +265,85 @@ export function buildStreet(T) {
   const cuts = [...faces(pbF, PBW, PBD), ...faces(taF, TAW, TAD)];
 
   // ── roadway + sidewalks ────────────────────────────────────────────────────
-  // ...and all of it is GROUND (T.paved): the slabs are laid flat at the highest
-  // ground along each run, so on this hillside they stand 0.1–1 u over the
-  // terrain, and the visitor and every cat on the street waded through them.
-  const paveBoxes = [];
-  const road = CL.map(([x, z]) => [x, z]);
-  ribbon(b, road, 7.4, (x, z) => T.ground(x, z), 0xa1917a, { th: 0.34, lift: 0.12, kerb: false, seg: 4, out: paveBoxes });
+  // ...and all of it is GROUND (T.paved). The slabs used to be laid FLAT at the
+  // highest ground along each 4 u run, a staircase up the hillside: the road
+  // and sidewalks stepped 0.4–0.76 u at every joint and the visitor and every
+  // cat on the street hopped down them with a landing puff. Now every piece is
+  // tilted onto the ground it covers (ribbon's o.surf), 1.2 u at a time:
+  //   · the ROAD rides the terrain mesh's own top (gTop: the local max over a
+  //     grid-diagonal ring bounds the linearly interpolated ground, as
+  //     terrain/paths.js does) + 0.12, but at least 0.04 under the cobbled
+  //     path the terrain lays down the middle (see roadSurf);
+  //   · its KERBS are the road's own (a sidewalk kerb sat on the sidewalk's
+  //     plane, 0–0.76 over the road): 0.15 over the road's plane at its edge;
+  //   · the SIDEWALKS ride their own ground + 0.12, but never below the road
+  //     edge beside them (+0.06) and never more than 0.26 over it, so from the
+  //     road it is 0.15 up onto the kerb and at most 0.11 on to the flags.
+  const RING = [];
+  { const gr = (T.world.ISLANDS.cat.radius * 2.36) / 208 * 1.05; for (let a = 0; a < 8; a++) RING.push([Math.cos(a * Math.PI / 4) * gr, Math.sin(a * Math.PI / 4) * gr]); }
+  const gTop = (x, z) => { let m = T.ground(x, z); for (const [dx, dz] of RING) { const h = T.ground(x + dx, z + dz); if (h > m) m = h; } return m; };
+  const LIFT = 0.12, KERB = 0.15;
+  // The cobbled path (terrain/paths.js 'cat_main': a 4 u ribbon crowned 0.175
+  // over gTop, falling to −0.04 at its shoulders) runs down the middle of the
+  // road, and it is what the street IS from the game camera. Inside it the
+  // road keeps at least 0.04 under the cobbles' own surface, so they show all
+  // the way down the hill (the flat plateaus hid them in patches); out at the
+  // kerbs, where the path has feathered into the ground, it is gTop + 0.12.
+  const cp = T.world.PATHS.find((q) => q.id === 'cat_main');
+  const cpts = cp ? new T.THREE.CatmullRomCurve3(cp.points.map((q) => new T.THREE.Vector3(q[0], 0, q[1])), false, 'centripetal', 0.5).getSpacedPoints(420).filter((v) => v.x > 88 && v.x < 156) : [];
+  const ROWF = [[0, 0.175, 1], [0.66, 0.14, 1], [1.02, 0.075, 0.82], [1.28, -0.04, 0]];
+  const pathTop = (x, z) => {
+    let best = Infinity;
+    for (let i = 0; i < cpts.length - 1; i++) {
+      const a = cpts[i], q = cpts[i + 1], dx = q.x - a.x, dz = q.z - a.z, L2 = dx * dx + dz * dz || 1;
+      const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / L2));
+      const d = Math.hypot(x - a.x - dx * t, z - a.z - dz * t);
+      if (d < best) best = d;
+    }
+    const f = best / (cp.width / 2);
+    if (!(f < 1.28)) return null;
+    let k = 0; while (k < ROWF.length - 2 && f > ROWF[k + 1][0]) k++;
+    const [f0, y0, c0] = ROWF[k], [f1, y1, c1] = ROWF[k + 1], u = (f - f0) / (f1 - f0);
+    const gh = T.ground(x, z);
+    return gh + (gTop(x, z) - gh) * (c0 + (c1 - c0) * u) + y0 + (y1 - y0) * u;
+  };
+  const roadSurf = (x, z) => {
+    const g = gTop(x, z), pt = cp ? pathTop(x, z) : null;
+    return pt == null ? g + LIFT : Math.max(g + 0.03, Math.min(g + LIFT, pt - 0.04));
+  };
+  // Laid in three strips across (a 4.4 u middle under the cobbles and 1.5 u
+  // either side out to the kerbs): one plane 7.4 u wide cannot follow the
+  // cobbles' crown and the kerbs' ground at once, and stood over the cobbles.
+  const offLine = (u) => CL.map(([x, z]) => { const sl = slopeAt(x), len = Math.hypot(1, sl); return [x + (sl / len) * u, z - u / len]; });
+  const roadBoxes = [], paveBoxes = [];
+  ribbon(b, offLine(0), 4.4, null, 0xa1917a, { th: 0.34, surf: roadSurf, seg: 1.2, out: roadBoxes });
+  ribbon(b, offLine(2.95), 1.5, null, 0xa1917a, { th: 0.34, surf: roadSurf, kerbSides: [false, true], kerbH: KERB, kerbColor: 0x9c8c70, seg: 1.2, out: roadBoxes });
+  ribbon(b, offLine(-2.95), 1.5, null, 0xa1917a, { th: 0.34, surf: roadSurf, kerbSides: [true, false], kerbH: KERB, kerbColor: 0x9c8c70, seg: 1.2, out: roadBoxes });
+  const roadTop = T.pavedTest(roadBoxes);
+  // (x, z) → [centreline x, offset across (+ = north)]
+  const toStreet = (px, pz) => {
+    let x = px;
+    for (let k = 0; k < 4; k++) { const sl = slopeAt(x), L = Math.hypot(1, sl); x += ((px - x) + (pz - streetZ(x)) * sl) / (L * L); }
+    const sl = slopeAt(x), L = Math.hypot(1, sl);
+    return [x, ((px - x) * sl - (pz - streetZ(x))) / L];
+  };
+  // the road's top at its edge beside (px, pz): its plane at 3.3 and 2.9 in,
+  // run on to 3.7 (the kerb stands on the edge itself)
+  const edgeY = (px, pz) => {
+    const [x, u] = toStreet(px, pz), sl = slopeAt(x), L = Math.hypot(1, sl), sg = Math.sign(u || 1);
+    const a = roadTop(x + (sl / L) * 3.3 * sg, streetZ(x) - 3.3 * sg / L), b2 = roadTop(x + (sl / L) * 2.9 * sg, streetZ(x) - 2.9 * sg / L);
+    return a == null ? gTop(px, pz) + LIFT : b2 == null ? a : a + (a - b2);
+  };
+  const walkSurf = (x, z) => { const e = edgeY(x, z); return Math.min(e + 0.26, Math.max(e + 0.06, gTop(x, z) + LIFT)); };
   for (const side of [-1, 1]) {
     const walk = CL.map(([x, z]) => {
       const s = slopeAt(x), len = Math.hypot(1, s);
       return [x + (s / len) * 5.4 * side, z + (-1 / len) * 5.4 * side];
     });
-    ribbon(b, walk, 3.6, (x, z) => T.ground(x, z), 0xd8c9ab, { th: 0.5, lift: 0.12, kerb: true, kerbColor: 0x9c8c70, seg: 4, cuts, out: paveBoxes });
+    // (the road owns the inner kerb; this one lines the OUTER edge)
+    ribbon(b, walk, 3.6, null, 0xd8c9ab, { th: 0.5, surf: walkSurf, kerbSides: side > 0 ? [false, true] : [true, false], kerbH: KERB, kerbColor: 0x9c8c70, seg: 1.2, cuts, out: paveBoxes });
   }
-  const streetFloor = T.paved('cat_main_street', paveBoxes);
+  const streetFloor = T.paved('cat_main_street', roadBoxes.concat(paveBoxes));
   // Painted pawprints down the middle of the road. These were 112 squashed
   // spheres that read as blurred smudges on the tarmac (and cost ~4.5k tris);
   // now they are painted on the road surface as one atlas quad per stride.
@@ -336,14 +401,20 @@ export function buildStreet(T) {
     goodsOut: 0.46,
     goods: (bb, ff, lx, lz, y) => { for (let i = 0; i < 4; i++) bb.cyl(ff.px(lx - 1.2 + i * 0.8, lz + 0.31), y - 0.08, ff.pz(lx - 1.2 + i * 0.8, lz + 0.31), 0.15, 0.12, 0.44, 0xf4f0e0, { seg: 8, ry: ff.ry, ao: 0 }); },
   });
-  T.stoop(pbF, pbDX, PBD / 2, 3.0, pbY, { wall: PBT, gap: PBG, front: 0.41, floor: streetFloor });
+  const pbSteps = T.stoop(pbF, pbDX, PBD / 2, 3.0, pbY, { wall: PBT, gap: PBG, front: 0.41, floor: streetFloor });
+  // the doorstep: the barista's prints out of the door and off up the street
+  T.doorstep(pbF, pbDX, PBD / 2, {
+    steps: pbSteps, front: 0.41, sw: 3.0, mat: ['WIPE YOUR PAWS', 'we know your order'], moss: true,
+    trails: [{ from: [pbDX - 0.2, PBD / 2 + 1.3], to: [pbDX - 3.4, PBD / 2 + 4.2], n: 8, s: 0.8 }],
+    bones: [[pbDX + 2.3, PBD / 2 + 0.9, 2.2]],
+  });
   const pbRoom = T.room({ id: 'purrbucks', x: pbF.x, z: pbF.z, w: PBW - PBT * 2, d: PBD - PBT * 2, rot: pbF.ry, y: pbF.y, floorY: pbY, h: PBFY, label: 'Purrbucks' });
   // a café door: green, glazed above (lit from inside after dark), cream
   // glazing bars, hung on the right so it opens clear of the armchairs
   T.door({
     id: 'purrbucks', room: pbRoom, y: pbF.y, ry: pbF.ry, w: PBG, color: 0x1f6a4a, field: 0x2a7d58, trim: 0xf4f0e0, flap: 0xf4f0e0,
     style: 'glazed', glassMat: 'win', glassFrom: 0.5, hinge: 1,
-    x: pbF.px(pbDX, PBD / 2 + 0.36), z: pbF.pz(pbDX, PBD / 2 + 0.36), inset: 0.36 + PBT, sill: pbY, top: pbF.y + PBGH,
+    x: pbF.px(pbDX, PBD / 2 + 0.36), z: pbF.pz(pbDX, PBD / 2 + 0.36), inset: 0.36 + PBT, wall: PBT, sill: pbY, top: pbF.y + PBGH,
     say: 'warm milk. it is always warm milk. it is always exactly right.', speaker: 'PURRBUCKS',
   });
   T.roomDetail('purrbucks', () => purrbucksInterior(T, frame(pbF.x, pbY, pbF.z, pbF.ry), { hw: (PBW - PBT * 2) / 2, hd: (PBD - PBT * 2) / 2, doorX: pbDX, doorW: PBG }));
@@ -427,14 +498,20 @@ export function buildStreet(T) {
   });
   // (the sidewalk here stands 0.23 OVER the shop's floor: no flight, a step
   // down off the paving onto the threshold — the saddest shop sits low)
-  T.stoop(taF, taDX, TAD / 2, 3.0, taY, { wall: TAT, gap: TAG, front: 0.41, floor: streetFloor });
+  const taSteps = T.stoop(taF, taDX, TAD / 2, 3.0, taY, { wall: TAT, gap: TAG, front: 0.41, floor: streetFloor });
+  // the doorstep: a cat's prints come up to the Travel Agency, stop, and turn
+  // round (nobody has opened it in years); moss, because nobody sweeps it
+  T.doorstep(taF, taDX, TAD / 2, {
+    steps: taSteps, front: 0.41, sw: 3.0, mat: ['COME IN', '(and stay in)'], moss: true,
+    trails: [{ from: [taDX + 2.6, TAD / 2 + 4.6], to: [taDX + 0.2, TAD / 2 + 1.5], n: 9, s: 0.8, turn: 3 }],
+  });
   const taRoom = T.room({ id: 'travel', x: taF.x, z: taF.z, w: TAW - TAT * 2, d: TAD - TAT * 2, rot: taF.ry, y: taF.y, floorY: taY, h: TAFY, label: 'Travel Agency' });
   // a faded oxblood door (the CLOSED board's red), dusty glass nobody has
   // cleaned in years (matte: it does not light up), glazing bars in the trim grey
   T.door({
     id: 'travel', room: taRoom, y: taF.y, ry: taF.ry, w: TAG, color: 0x6e3a30, field: 0x7a453a, trim: 0x5a6a70, flap: 0xc9c2b2,
     style: 'glazed', glass: 0x7d8a8c, glassFrom: 0.45, hinge: -1,
-    x: taF.px(taDX, TAD / 2 + 0.36), z: taF.pz(taDX, TAD / 2 + 0.36), inset: 0.36 + TAT, sill: taY, top: taF.y + TAGH,
+    x: taF.px(taDX, TAD / 2 + 0.36), z: taF.pz(taDX, TAD / 2 + 0.36), inset: 0.36 + TAT, wall: TAT, sill: taY, top: taF.y + TAGH,
     say: 'the door is not locked. it has never been locked. nobody has opened it in years.', speaker: 'TRAVEL AGENCY',
   });
   T.roomDetail('travel', () => travelInterior(T, frame(taF.x, taY, taF.z, taF.ry), { hw: (TAW - TAT * 2) / 2, hd: (TAD - TAT * 2) / 2, doorX: taDX, doorW: TAG }));
@@ -896,14 +973,22 @@ export function buildMeowDonalds(T) {
   });
   T.solidify(mdSegs, f.y + MH);
   T.claimRing(f.x, f.z, 17.4, 11.4, 0);
-  T.stoop(f, mdDX, MD / 2, 3.2, mdY, { wall: MDT, gap: mdGap, front: 0.15, floor: court });
+  const mdSteps = T.stoop(f, mdDX, MD / 2, 3.2, mdY, { wall: MDT, gap: mdGap, front: 0.15, floor: court });
+  // the doorstep: prints from three directions converging on the door (the
+  // lunch queue), and the evidence of lunch
+  T.doorstep(f, mdDX, MD / 2, {
+    steps: mdSteps, front: 0.15, sw: 3.2, mat: ['WELCOME', 'you look hungry'], moss: true,
+    trails: [{ from: [mdDX - 3.2, MD / 2 + 4.4], to: [mdDX - 0.5, MD / 2 + 1.4], n: 7, s: 0.8 },
+      { from: [mdDX + 3.0, MD / 2 + 5.0], to: [mdDX + 0.5, MD / 2 + 1.5], n: 7, s: 0.85 }],
+    bones: [[mdDX + 2.4, MD / 2 + 0.8, 1.1], [mdDX - 2.6, MD / 2 + 1.1, -0.4]],
+  });
   const mdRoom = T.room({ id: 'meow', x: f.x, z: f.z, w: MW - MDT * 2, d: MD - MDT * 2, rot: 0, y: f.y, floorY: mdY, h: 4.5, label: "Meow Donald's" });
   // a fast-food door: all glass above a red kick panel, in a yellow frame,
   // hung on the right so it swings in clear of the corner booth
   T.door({
     id: 'meow', room: mdRoom, y: f.y, ry: 0, w: mdGap, color: MDY, field: MDR, trim: MDY, flap: 0xfff6dd,
     style: 'glazed', glassMat: 'win', glassFrom: 0.5, hinge: 1,
-    x: f.px(mdDX, MD / 2 + 0.4), z: f.pz(mdDX, MD / 2 + 0.4), inset: 0.4 + MDT, sill: mdY, top: f.y + 3.25,
+    x: f.px(mdDX, MD / 2 + 0.4), z: f.pz(mdDX, MD / 2 + 0.4), inset: 0.4 + MDT, wall: MDT, sill: mdY, top: f.y + 3.25,
     say: 'a cat in a paper hat holds the door for you. "in?" she says. "in," you agree.', speaker: "MEOW DONALD'S",
   });
   T.roomDetail('meow', () => meowInterior(T, frame(f.x, mdY, f.z, 0), { hw: (MW - MDT * 2) / 2, hd: (MD - MDT * 2) / 2 }));

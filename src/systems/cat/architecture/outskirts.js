@@ -557,13 +557,22 @@ function buildGuestHouse(T) {
   // system to plant a twelve-metre cypress squarely across the doorway.
   for (let i = 1; i <= 3; i++) T.claim(f.px(gDX, GD / 2 + i * 3.2), f.pz(gDX, GD / 2 + i * 3.2), 4.4, 4.4, GRY);
   // terracotta treads to go with the roof, a cream stone sill to go with the band
-  T.stoop(f, gDX, GD / 2, 3.0, GFY, { wall: GT, gap: GGAP, color: 0xc0714c, sillColor: 0xe8dcc0 });
+  const gSteps = T.stoop(f, gDX, GD / 2, 3.0, GFY, { wall: GT, gap: GGAP, color: 0xc0714c, sillColor: 0xe8dcc0 });
+  // the doorstep: a mat that already knows, a tiger's prints that lead IN and
+  // none that lead out, a house cat's that come up to the step and think
+  // better of it, a finished fish, moss in the joints
+  T.doorstep(f, gDX, GD / 2, {
+    steps: gSteps, sw: 3.0, mat: ['WELCOME HOME', 'you live here now'], moss: true,
+    trails: [{ from: [gDX + 0.5, GD / 2 + 7.0], to: [gDX + 0.05, GD / 2 + 1.1], n: 7, s: 1.7, c: 0x4e3b2a },
+      { from: [gDX + 2.9, GD / 2 + 4.6], to: [gDX + 0.9, GD / 2 + 1.6], n: 7, s: 0.8, turn: 3 }],
+    bones: [[gDX - 2.0, GD / 2 + 0.7, 0.9]],
+  });
   const room = T.room({ id: 'guest', x: GX, z: GZ, w: GW - GT * 2, d: GD - GT * 2, rot: GRY, y: GY, floorY: GFY, h: GCEIL, label: 'The Guest House' });
   // hung on the RIGHT: the room's side wall is 0.8 u left of the doorway, and
   // a 2.2 leaf folded back there buried its latch edge and knob in the dado
   T.door({
     id: 'guest', room, y: GY, ry: GRY, w: GGAP, color: 0x2a8f8a, field: 0x33a39c, flap: 0xfdf6e4,
-    x: f.px(gDX, GD / 2 + 0.4), z: f.pz(gDX, GD / 2 + 0.4), inset: 0.4 + GT, sill: GFY, top: GY + GGH, hinge: 1,
+    x: f.px(gDX, GD / 2 + 0.4), z: f.pz(gDX, GD / 2 + 0.4), inset: 0.4 + GT, wall: GT, sill: GFY, top: GY + GGH, hinge: 1,
     say: 'unlocked. of course it is unlocked. it is your room.', speaker: 'THE GUEST HOUSE',
   });
   T.roomDetail('guest', () => guestInterior(T, frame(GX, GFY, GZ, GRY), { hw: (GW - GT * 2) / 2, hd: (GD - GT * 2) / 2, doorX: gDX, doorW: GGAP }));
@@ -1483,7 +1492,8 @@ export function buildHarbor(T) {
   const hf = frame(101.0, QY, 73.6, 0.55);
   block(b, hf, 6.4, 4.4, 5.0, 0xc6dee6, { quoins: true, plinthColor: PAL.stone, bandColor: 0xf0f6f6, sink: 0.4 });
   tileRoof(b, hf, 6.4, 0, 5.0, 0x55707e, { top: 4.4, alongX: true, pitch: 0.35, kind: 'slate', ridge: 0x3c525c });
-  doorUnit(b, hf, -1.6, 2.52, { w: 1.8, h: 2.9, color: 0x1d3557, humanSide: 1, humanSignCell: T.humansLabel() });
+  // (no arched head: the HARBOURMASTER board starts where the surround stops)
+  doorUnit(b, hf, -1.6, 2.52, { w: 1.8, h: 2.9, color: 0x1d3557, humanSide: 1, humanSignCell: T.humansLabel(), headRise: 0 });
   windowUnit(b, hf, 1.7, 2.5, 1.8, 1.9, 1.8, { trim: 0x1d3557, cushion: true, cushionColor: 0xe8514a });
   loafCat(b, hf.px(2.2, 2.86), hf.y + 1.98, hf.pz(2.2, 2.86), 1.2, PAL.fur[5], { ry: hf.ry + 1.5 });
   const hmSign = T.plaque(4.6, 0.9, [{ t: 'HARBOURMASTER', s: 0.5, c: '#eaf6ff' }, { t: 'in. always in.', s: 0.24, c: '#9fd8ff', weight: 'italic bold' }], { bg: '#1d3557', border: '#f2c14e', borderW: 0.06, dpu: 130 });
@@ -1679,6 +1689,9 @@ function watchRails(T, sb, W) {
 // ═════════════════════════════════════════════════════════════════════════════
 // THE WATCHTOWER + NOT-AN-EXIT BEACH
 // ═════════════════════════════════════════════════════════════════════════════
+/** The Watchtower doorway as built (for the door verifiers): its one gap width and
+ *  the reveals' z range. */
+export const WATCH_DOOR = { gap: 0, zIn: 0, zOut: 0 };
 export function buildWatchtower(T) {
   const b = T.b, A = T.A;
   const LX = 214, LZ = 31, LY = T.ground(LX, LZ);
@@ -1881,13 +1894,80 @@ export function buildWatchtower(T) {
   const kf = frame(LX + 7.6, T.ground(LX + 7.6, LZ + 5.4), LZ + 5.4, 0.5);
   block(b, kf, 8.0, 4.6, 6.4, 0xf2e9d4, { quoins: true, plinthColor: PAL.stone });
   tileRoof(b, kf, 8.0, 0, 6.4, 0xd8402e, { top: 4.6, alongX: true, pitch: 0.35, ridge: 0x9e2c1e });
-  doorUnit(b, kf, -2.0, 3.22, { w: 2.0, h: 3.1, color: 0x2f4a5a, humanSide: 1, humanSignCell: T.humansLabel() });
+  // (a segmental head that stops under the eaves)
+  doorUnit(b, kf, -2.0, 3.22, { w: 2.0, h: 3.1, color: 0x2f4a5a, humanSide: 1, humanSignCell: T.humansLabel(), headRise: 0.62 });
   windowUnit(b, kf, 2.0, 3.2, 1.8, 2.2, 2.0, { trim: 0x2f4a5a, cushion: true, flowers: true });
   b.box(kf.px(2.6, -1.0), kf.y + 4.6, kf.pz(2.6, -1.0), 1.0, 2.2, 1.0, 0xf2e9d4, { ry: kf.ry, ao: 0 });
   b.box(kf.px(2.6, -1.0), kf.y + 6.7, kf.pz(2.6, -1.0), 1.3, 0.3, 1.3, PAL.stoneDark, { ry: kf.ry, ao: 0 });
   T.colBox(kf.x, kf.z, 8.4, 6.8, kf.ry, kf.y + 4.6);
   // the tower: the ring wall is solid, the doorway is not, and the footprint is
   // still CLAIMED so nobody else plants anything in it
+  // THE DOORWAY'S REVEALS (Contract O: the collider gap is the visible gap).
+  // The two jamb slabs are tangent boxes, so the faces they turn to the
+  // opening are RADIAL: the stone gap was 1.889 at the room side and flared to
+  // 2.27 at the step, while solidify's +0.1 of depth pushed their colliders a
+  // further 0.05 into the room (1.855 there, 1.986 at the leaf). Now a stone
+  // reveal lines each side of the opening square to the door, from the jamb's
+  // inner corner to its outer one, its face exactly on that corner: the gap is
+  // one width, 2·gHalf, all the way through, and the reveal's collider is the
+  // reveal. The jambs' own colliders are trimmed to the slabs (d − 0.1 + 0.1),
+  // so nothing solid stands inside the reveal faces either.
+  {
+    const jambs = wallSegs.map((sg) => {
+      let dA = Math.atan2(sg.z - LZ, sg.x - LX) - DOOR_A;
+      while (dA > Math.PI) dA -= Math.PI * 2; while (dA < -Math.PI) dA += Math.PI * 2;
+      return { sg, dA };
+    }).sort((p, q) => Math.abs(p.dA) - Math.abs(q.dA)).slice(0, 2);
+    let gHalf = Infinity, zIn = Infinity, zOut = -Infinity;
+    for (const { sg } of jambs) {
+      const c = Math.cos(sg.rot), s = Math.sin(sg.rot);          // kit yaw: local X = (c, −s), local Z = (s, c)
+      for (const u of [-1, 1]) for (const v of [-1, 1]) {
+        const cx = sg.x + u * sg.w / 2 * c + v * sg.d / 2 * s, cz = sg.z - u * sg.w / 2 * s + v * sg.d / 2 * c;
+        const lat = Math.abs(cx - LX);
+        if (lat < gHalf - 1e-9) { gHalf = lat; zIn = cz; }
+      }
+    }
+    for (const { sg } of jambs) {
+      const c = Math.cos(sg.rot), s = Math.sin(sg.rot);
+      for (const u of [-1, 1]) for (const v of [-1, 1]) {
+        const cx = sg.x + u * sg.w / 2 * c + v * sg.d / 2 * s, cz = sg.z - u * sg.w / 2 * s + v * sg.d / 2 * c;
+        // the jamb's end face: the two corners nearest the opening
+        if (Math.abs(cx - LX) < gHalf + 0.25) zOut = Math.max(zOut, cz);
+      }
+      sg.d -= 0.1;                                                // solidify adds it back: collider = slab
+    }
+    // (its face 3 mm inside the jamb's corner, so the two never share an edge)
+    gHalf -= 0.003;
+    // THE DOOR FRAME (doors-fix round 3). The reveals were stone in the SHELL,
+    // and so were the lintel and keystone: from inside, with the shell gone, the
+    // leaf stood half a metre outside the room's ring with nothing round it —
+    // a board propped against the tower. Now each reveal IS the frame's jamb:
+    // the same box (its face still exactly on gHalf, so the gap is still one
+    // width and its collider is still the reveal), the same pale stone (the
+    // dark leaf reads against it from the step), but authored into the
+    // district, not the shell, so it stays when the shell fades; a head board
+    // in the lintel's stone spans the gap under the lintel
+    // (its underside at the head of the gap, FL + 2.55), a moulding runs up the
+    // outside of the latch jamb (not the hinge jamb: the open leaf swings out
+    // through that corner), and the hinge jamb carries the HINGE: T.door turns
+    // the leaf about (LX − 0.95, LZ + 3.3), 9 mm behind the jamb's face (inside
+    // the jamb), and the leaf's brass knuckles (hungLeaf) stand against that
+    // face, so an iron hinge leaf screwed flat to the face (1 mm proud of it,
+    // nothing in the gap) runs from each knuckle back into the reveal, and the
+    // leaf's iron straps (`straps`) carry on across its face.
+    const RW = 0.22, rz = (zIn + zOut) / 2, rd = zOut - zIn, TIM = 0xe8dcc4, CAP = 0xf4ecd8;
+    for (const sd of [-1, 1]) {
+      const rx = LX + sd * (gHalf + RW / 2);
+      b.box(rx, FL - 0.02, rz, RW, 2.58, rd, TIM, { ao: 0.4, aoBase: FL });
+      T.wall(rx, rz, RW, rd, 0, FL + bandH * 2);
+    }
+    b.box(LX + gHalf + RW + 0.05, FL - 0.02, zOut - 0.07, 0.1, 2.6, 0.2, CAP, { ao: 0.3, aoBase: FL });               // latch-side moulding
+    b.box(LX, FL + 2.55, rz, 2 * (gHalf + RW), 0.12, rd, TIM, { ao: 0, shade: 0.86 });                                 // head board
+    b.box(LX + 0.05, FL + 2.55, zOut - 0.07, 2 * (gHalf + RW) + 0.1, 0.14, 0.2, CAP, { ao: 0 });                       // its outer moulding
+    // (the leaf's knuckles: hinge frame x 0, z 0.10 → world z LZ + 3.40, heights FL + 0.32 / FL + 1.88, 0.3 tall)
+    for (const ky of [0.32, 2.5 - 0.62]) b.box(LX - gHalf - 0.009, FL + ky + 0.02, LZ + 3.27, 0.02, 0.26, 0.25, 0x2b2b30, { ao: 0, mat: 'metal' });
+    WATCH_DOOR.gap = 2 * gHalf; WATCH_DOOR.zIn = zIn; WATCH_DOOR.zOut = zOut;
+  }
   T.solidify(wallSegs, FL + bandH * 2);
   T.claimRing(LX, LZ, 8.5, 8.5, 0);
   // the doorway's head: a stone lintel bedded into the curve of the ring wall
@@ -1902,9 +1982,16 @@ export function buildWatchtower(T) {
   // bare plinth: the flattened landmark core reaches FL + 0.02 here
   const watchRoom = T.room({ id: 'watch', x: LX, z: LZ, w: RIN * 2, d: RIN * 2, rot: 0, y: FL, floorY: FL + 0.1, h: bandH * 2, label: 'The Watchtower' });
   T.door({
-    id: 'watch', room: watchRoom, y: FL, ry: 0, w: 1.9, h: 2.5, color: 0x2f4a5a, field: 0x3b5c6e, trim: 0x24394a, flap: 0xf2e9d4, style: 'panel',
+    id: 'watch', room: watchRoom, y: FL, ry: 0, w: 1.9, h: 2.5, color: 0x2f4a5a, field: 0x3b5c6e, trim: 0x24394a, flap: 0xf2e9d4, style: 'panel', straps: 0x2b2b30,
     x: LX + Math.cos(DOOR_A) * 3.3, z: LZ + Math.sin(DOOR_A) * 3.3, r: 3.4,
     say: 'the keeper is up the stairs. she has been up the stairs for eleven years.', speaker: 'THE WATCHTOWER',
+  });
+  // the landing: no mat (the leaf swings out across it), the keeper's cat's
+  // prints up the flight and in, a fish she was not given, moss at the drum
+  T.doorstep(frame(LX, FL, LZ, 0), 0, WATCH_DOOR.zOut - LZ, {
+    sw: WATCH_DOOR.gap + 0.44, moss: true,
+    trails: [{ from: [0.6, FZ0 + 1.6], to: [0.15, 4.0], n: 9, s: 0.85 }],
+    bones: [[1.9, 4.05, -0.5]],
   });
   watchInterior(T, frame(LX, FL, LZ, 0), { rIn: RIN });
 

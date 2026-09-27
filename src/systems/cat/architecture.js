@@ -116,6 +116,7 @@ export function create(ctx) {
     }
   }
   const claims = [];       // build-time footprint claims, dissolved on frame 1
+  const dressing = [];     // doorstep dressing, laid after every district (T.doorstep)
   let stoops = 0;          // entrance step runs (see T.stoop)
   ctx.colliders = ctx.colliders || [];
   ctx.walkables = ctx.walkables || [];
@@ -176,6 +177,57 @@ export function create(ctx) {
   // an additive decal needs no back-face pass (one draw, not two) — both tiers
   // since Contract J (A/B-diffed: 0 px at cat_night)
   mats.spill.forceSinglePass = true;
+
+  // ── door prompts ───────────────────────────────────────────────────────────
+  // interaction.js has no priority: the NEAREST entry in reach names the E
+  // prompt. A door's entry is its THRESHOLD, a segment through the doorway from
+  // just inside to just outside, and getPos reports the point of it nearest the
+  // visitor, so the door is measured from the doorway on BOTH sides — as near
+  // from the room as from the step (the old single point stood 1.1–1.5 u out in
+  // the street: from indoors, after the dawn wake-up, the shut Guest House door
+  // was out of reach and the wardrobe said "Open the wardrobe" at the leaf).
+  // It is its TRUE distance, with no bias: a door you stand in wins because it
+  // is the nearest thing, and a cat on the step beside you (Patty holds Meow
+  // Donald's door) or the lens log at your elbow still answers E. (A 1 cm
+  // "the door always wins within 2 u" rule blanketed every greeter, counter and
+  // lens log within 2 u of a doorway.)
+  // Out in FRONT the segment runs on `front` further, to where the old point
+  // stood, so from the street the door still reaches as far as it did; that
+  // longer reach counts for no less than DOOR_NEAR, so the reported distance is
+  // continuous and never shrinks as he walks up to the door:
+  //   d = max(d_long, min(d_threshold, DOOR_NEAR))
+  // and it is never below 5 mm, so an entry that stands ON him (distance 0: the
+  // carry's "Skip to bedtime" / "Get up") still owns E while he is carried
+  // through the doorway. One scratch object per door: no allocation per call.
+  const DOOR_NEAR = 2.0, DOOR_MIN = 0.005;
+  function thresholdPos(ax, az, bx, bz, y, front = 0.9) {
+    const out = { x: (ax + bx) / 2, y: y + 0.4, z: (az + bz) / 2 };
+    const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1, Lf = 1 + front / Math.sqrt(L2);
+    return () => {
+      const p = ctx.systems.player?.position;
+      if (!p) { out.x = (ax + bx) / 2; out.z = (az + bz) / 2; return out; }
+      const t0 = ((p.x - ax) * dx + (p.z - az) * dz) / L2;
+      // the threshold's nearest point, and how far it is
+      const t = t0 < 0 ? 0 : t0 > 1 ? 1 : t0;
+      const qx = ax + dx * t, qz = az + dz * t, ex = p.x - qx, ez = p.z - qz;
+      const ds = Math.sqrt(ex * ex + ez * ez);
+      if (ds <= DOOR_NEAR) {
+        if (ds >= DOOR_MIN) { out.x = qx; out.z = qz; return out; }
+        // (standing on the threshold line: 5 mm from him, toward it)
+        const k = ds > 1e-9 ? DOOR_MIN / ds : 0;
+        out.x = p.x + (qx - p.x) * k + (k === 0 ? DOOR_MIN : 0); out.z = p.z + (qz - p.z) * k;
+        return out;
+      }
+      // beyond it: the longer segment's nearest point, but never nearer than DOOR_NEAR
+      const tl = t0 < 0 ? 0 : t0 > Lf ? Lf : t0;
+      const lx = ax + dx * tl, lz = az + dz * tl, fx = p.x - lx, fz = p.z - lz;
+      const dl = Math.sqrt(fx * fx + fz * fz);
+      if (dl >= DOOR_NEAR) { out.x = lx; out.z = lz; return out; }
+      const k = DOOR_NEAR / ds;
+      out.x = p.x + (qx - p.x) * k; out.z = p.z + (qz - p.z) * k;
+      return out;
+    };
+  }
 
   // ── the shared authoring context handed to every district ──────────────────
   const T = {
@@ -326,23 +378,50 @@ export function create(ctx) {
     addDeck(x0, x1, z0, z1, y) { deck.push({ x0, x1, z0, z1, y }); },
 
     /**
+     * DOORSTEP DRESSING (doors-fix round 3): the four metres in front of an
+     * enterable door were bare slabs at eye level — one grey plane, one beige
+     * one. Queued now, laid after EVERY district is built (so the heights read
+     * the town's paving, steps and landings, not just the hillside):
+     *   f, lx, lz0  the building frame, the door's centre along the facade and
+     *               the outer face of its wall (o.front: a facade slab proud of it)
+     *   o.steps     T.stoop's return (the mat lies on the top step)
+     *   o.sw        the flight's width;  o.mat [line, line]: the mat's words (o.matW wide)
+     *   o.trails    [{ from: [a, l], to: [a, l], n, s, turn }] paw prints (a along
+     *               the facade, l out of it; toes point from → to; s = size, 1 a
+     *               house cat, 1.7 a tiger; turn: the last `turn` prints walk back)
+     *   o.bones     [[a, l, yaw]] a fish skeleton someone has finished
+     *   o.moss      moss tufts in the joints at the wall's foot and the steps' ends
+     * Everything merges into the district's matte + the sign page: no draw calls.
+     */
+    doorstep(f, lx, lz0, o = {}) { dressing.push({ f, lx, lz0, o, d: kit.d }); },
+
+    /**
      * PAVING IS GROUND (Contract A). The town's street, sidewalks and plazas
-     * are raised slabs — a ribbon's pieces are laid flat at the highest ground
-     * along them, so on Main Street's hillside they stand 0.1–1 u over the
-     * terrain — and none of them was a walkable: the visitor, every cat and
-     * every tiger waded through them, knee-deep on the Travel Agency's step.
+     * are raised slabs — a flat ribbon's pieces are laid at the highest ground
+     * along them (Main Street's are tilted onto the ground: ribbon's o.surf,
+     * and their tops here are planes) — and none of them was a walkable: the
+     * visitor, every cat and every tiger waded through them, knee-deep on the
+     * Travel Agency's step.
      * `boxes` are ribbon()'s o.out pieces { x, z, c, s, hw, hd, top }; `discs`
      * paving()'s returned surfaces ({ at(x, z) → top | null }, exact to the
      * drawn polygon and rim facets). Registers one walkable and returns its
      * test (x, z) → the paving top there, or null. No allocation per call.
      */
     paved(id, boxes = [], discs = []) {
+      const test = T.pavedTest(boxes, discs);
+      ctx.walkables.push({ id, test });
+      return test;
+    },
+    /** T.paved's test without registering a walkable (a builder asking where
+     *  paving it has just laid stands, before it lays the next). A box's top
+     *  is its plane: top + ga·along + gb·across (ribbon's o.surf pieces). */
+    pavedTest(boxes = [], discs = []) {
       const n = boxes.length, CS = 4;
       const bx = new Float64Array(n), bz = new Float64Array(n), bc = new Float64Array(n), bs = new Float64Array(n);
-      const bw = new Float64Array(n), bd = new Float64Array(n), bt = new Float64Array(n);
+      const bw = new Float64Array(n), bd = new Float64Array(n), bt = new Float64Array(n), ga = new Float64Array(n), gb = new Float64Array(n);
       let X0 = Infinity, X1 = -Infinity, Z0 = Infinity, Z1 = -Infinity;
       boxes.forEach((q, i) => {
-        bx[i] = q.x; bz[i] = q.z; bc[i] = q.c; bs[i] = q.s; bw[i] = q.hw; bd[i] = q.hd; bt[i] = q.top;
+        bx[i] = q.x; bz[i] = q.z; bc[i] = q.c; bs[i] = q.s; bw[i] = q.hw; bd[i] = q.hd; bt[i] = q.top; ga[i] = q.ga || 0; gb[i] = q.gb || 0;
         const ex = Math.abs(q.c) * q.hw + Math.abs(q.s) * q.hd, ez = Math.abs(q.s) * q.hw + Math.abs(q.c) * q.hd;
         X0 = Math.min(X0, q.x - ex); X1 = Math.max(X1, q.x + ex); Z0 = Math.min(Z0, q.z - ez); Z1 = Math.max(Z1, q.z + ez);
       });
@@ -368,7 +447,8 @@ export function create(ctx) {
             if (u > bw[i] || u < -bw[i]) continue;
             const v = dx * bs[i] + dz * bc[i];
             if (v > bd[i] || v < -bd[i]) continue;
-            if (best === null || bt[i] > best) best = bt[i];
+            const y = bt[i] + ga[i] * v + gb[i] * u;
+            if (best === null || y > best) best = y;
           }
         }
         // (a disc knows its own drawn n-gon and faceted rim: parts.js discSurface)
@@ -378,7 +458,6 @@ export function create(ctx) {
         }
         return best;
       };
-      ctx.walkables.push({ id, test });
       return test;
     },
 
@@ -515,10 +594,13 @@ export function create(ctx) {
       };
       doorList.push(d);
       if (o.room) o.room.doors.push(d);
-      // the interactable itself: stand in front of it and press E
+      // the interactable itself: its point is the THRESHOLD, from 0.6 inside
+      // the leaf to 0.4 outside it, measured by its true distance (see
+      // thresholdPos; its long reach runs on 1.1 to where the point stood)
       const px = o.x + s * 1.5, pz = o.z + c * 1.5;
       pending.push({
         id: 'door_' + o.id, x: px, z: pz, r: o.r ?? 3.0, label: 'Open door',
+        getPos: thresholdPos(o.x - s * 0.6, o.z - c * 0.6, o.x + s * 0.4, o.z + c * 0.4, o.y, 1.1), door: d,
         onInteract(c2, self) {
           d.open = !d.open;
           blocker.solid = !d.open;
@@ -580,6 +662,32 @@ export function create(ctx) {
       // so the gap stays Wg. Solid only while the door is open (the blocker
       // has it shut).
       const leafCols = [], lb = leafBoxes(A, Wl, TH, 0);
+      // THE JAMB LINING (o.wall = the wall's thickness). The reveal was bare
+      // plaster: seen from a step to one side, a pale sliver of it ran the full
+      // height between the shut leaf's latch edge and the jamb, so a closed door
+      // did not read as closed; and the reveal, the casing and the lintel are
+      // all the SHELL's, which is gone while you are in the room, so from inside
+      // the leaf stood alone in a gap in a low wainscot. Now the gap is lined in
+      // the leaf's own timber, a shade darker (two jamb boards and a head board,
+      // each face 1 mm inside the gap — the depth buffer resolves that at any
+      // distance the camera reaches — backs in the wall: the gap you see is
+      // still Wg, the collider gap), with an architrave round it on the room
+      // side, and all of it is the district's, not the shell's: it stays when
+      // the shell fades, so from inside the door has a frame. The open leaf
+      // stands ≥ 0.1 u into the room at the hinge (see leafBoxes), clear of the
+      // 0.03 architrave.
+      if (o.wall) {
+        const wT = o.wall, jc = o.jamb ?? o.color ?? P.PAL.wood, JT = 0.06, IN = 0.001, top = sill + Hl + 0.03;
+        const at2 = (a, n) => [ix + c * a + s * n, iz - s * a + c * n];     // (along the wall from the gap's centre, out of the inner face)
+        const q = [];
+        for (const sd of [-1, 1]) {
+          q.push([at2(sd * (Wg / 2 - IN + JT / 2), wT / 2), sill - 0.03, JT, top - sill + 0.03 + IN, wT - 0.006, 0.7]);        // jamb board
+          q.push([at2(sd * (Wg / 2 + 0.09), -0.015), sill - 0.03, 0.18, top - sill + 0.21, 0.03, 0.82]);                  // architrave leg (room side)
+        }
+        q.push([at2(0, wT / 2), top - IN, Wg + JT * 2 - IN * 2, 0.08, wT - 0.006, 0.6]);                                   // head board (soffit)
+        q.push([at2(0, -0.015), top, Wg + 0.36, 0.18, 0.03, 0.9]);                                                          // architrave head
+        for (const [pt, y, w, h, d, sh] of q) kit.box(pt[0], y, pt[1], w, h, d, jc, { ry, ao: 0, shade: sh });
+      }
       hung.forEach((hg, k) => {
         const side = leaves[k], off = side * (Wg / 2 + A - 0.01);
         leafColliders(ix + c * off, iz - s * off, ry + hg.swing, -side, lb, leafCols);
@@ -591,11 +699,14 @@ export function create(ctx) {
       };
       doorList.push(d);
       if (o.room) o.room.doors.push(d);
-      // the interactable, just outside the doorway: close enough to reach from
-      // indoors too, now that a shut door stops you at the inner face
+      // the interactable: its point is the THRESHOLD, from 0.2 inside the
+      // leaf's inner face to 0.2 outside the doorway, so it is as near from
+      // indoors as from the step (see thresholdPos: at the Guest House, after
+      // the dawn wake-up, the shut door said "Open the wardrobe" at the leaf)
       const px = o.x + s * 1.1, pz = o.z + c * 1.1;
       pending.push({
         id: 'door_' + o.id, x: px, z: pz, r: o.r ?? 3.0, label: 'Open door',
+        getPos: thresholdPos(ix - s * 0.2, iz - c * 0.2, o.x + s * 0.2, o.z + c * 0.2, sill), door: d,
         onInteract(c2, self) {
           d.open = !d.open;
           blocker.solid = !d.open;
@@ -668,6 +779,94 @@ export function create(ctx) {
   for (const [name, fn] of districts) {
     try { kit.at(name); fn(T); }
     catch (err) { console.error(`[cat/arch] district ${name} failed:`, err); }
+  }
+
+  // ── the doorsteps (T.doorstep), now that every district's paving exists ──
+  {
+    const DR = rng(hash('cat-doorsteps'));
+    // where a foot would land: the hillside, or the town's own paving / steps /
+    // landings over it (walkables within a storey of the terrain; a walkable
+    // that needs the visitor, like the tower stair, simply does not answer)
+    const top = (x, z) => {
+      const h0 = world.height(x, z); let h = h0;
+      for (const w of ctx.walkables) {
+        if (!w || !w.test) continue;
+        let t = null; try { t = w.test(x, z); } catch (e) { t = null; }
+        if (typeof t === 'number' && t === t && t > h - 0.05 && t < h0 + 1.3) h = t;
+      }
+      return h;
+    };
+    const DOME = { seg: 7, rings: 1, phiLength: Math.PI / 2, ao: 0 };      // a one-ring dome: a flat fan, 7 triangles
+    /** one paw print at (x, z), toes toward yaw (0 = +z), size s */
+    const paw = (x, z, yaw, s, col) => {
+      const fx = Math.sin(yaw), fz = Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
+      const y = Math.min(top(x, z), top(x + fx * 0.16 * s, z + fz * 0.16 * s), top(x - fx * 0.08 * s, z - fz * 0.08 * s)) + 0.003;
+      // near-flat (sy 0.05): a dome this low shades like the ground it is
+      // pressed into, so it reads as a print, not a pebble
+      kit.sph(x, y, z, 0.075 * s, col, { ...DOME, sx: 1.2, sy: 0.05, ry: yaw });
+      for (let i = 0; i < 4; i++) {
+        const a = -0.72 + i * 0.48, d = 0.14 * s * (i === 0 || i === 3 ? 0.88 : 1);
+        kit.sph(x + (fx * Math.cos(a) + rx * Math.sin(a)) * d, y, z + (fz * Math.cos(a) + rz * Math.sin(a)) * d, 0.036 * s, col, { ...DOME, seg: 6, sy: 0.1 });
+      }
+    };
+    /** a finished fish: spine, ribs, a head and a tail, lying flat */
+    const fishbone = (x, z, yaw, s = 1) => {
+      const c = 0xece2c8, fx = Math.sin(yaw), fz = Math.cos(yaw), y = top(x, z);
+      kit.box(x, y, z, 0.035 * s, 0.03 * s, 0.44 * s, c, { ry: yaw, ao: 0 });
+      [0.2, 0.27, 0.25, 0.17].forEach((w, i) => { const k = (0.13 - i * 0.075) * s; kit.box(x + fx * k, y, z + fz * k, w * s, 0.022 * s, 0.026 * s, c, { ry: yaw, ao: 0 }); });
+      kit.cone(x + fx * 0.2 * s, y + 0.045 * s, z + fz * 0.2 * s, 0.07 * s, 0.15 * s, c, { seg: 4, rx: Math.PI / 2, ry: yaw, ao: 0 });
+      kit.cone(x - fx * 0.2 * s, y + 0.035 * s, z - fz * 0.2 * s, 0.075 * s, 0.1 * s, c, { seg: 3, rx: Math.PI / 2, ry: yaw + Math.PI, ao: 0 });
+    };
+    const MOSS = [0x5c7a36, 0x6c8c40, 0x4a672c];
+    const tuft = (x, z, r) => kit.sph(x, top(x, z) + r * 0.05, z, r, MOSS[(DR() * 3) | 0], { seg: 6, rings: 3, sy: 0.32, flat: true, ao: 0 });
+    for (const job of dressing) {
+      const { f, lx, lz0, o } = job;
+      kit.at(job.d);
+      const L = (a, l) => [f.px(a, l), f.pz(a, l)];
+      const fr = o.front ?? 0, sw = o.sw ?? 2.4, st = o.steps && o.steps.length ? o.steps : null;
+      // the mat, on the top step (or the ground in front of the door)
+      if (o.mat) {
+        // the top step's tread that shows: from the sill (a shopfront's runs
+        // o.front out over the step) to the step's nosing, 2 cm short of both
+        const t0 = st ? Math.max(st[0].lz - 0.5, lz0 + fr + 0.03) + 0.02 : lz0 + fr + 0.2, t1 = st ? st[0].lz + 0.48 : t0 + 0.72;
+        const MW = o.matW ?? Math.min(1.6, sw - 0.5), MD = Math.min(0.7, t1 - t0);
+        const cell = atlas.panel(MW, MD, (g, W, H) => {
+          const R = rng(hash('mat' + o.mat[0]));
+          g.fillStyle = '#c29a62'; g.fillRect(0, 0, W, H);
+          for (let i = 0; i < 900; i++) { g.fillStyle = R() < 0.55 ? 'rgba(92,60,24,.24)' : 'rgba(246,214,150,.22)'; g.fillRect(R() * W, R() * H, 1 + R() * 2.5, 1); }
+          const bw = H * 0.1; g.strokeStyle = '#6b4a24'; g.lineWidth = bw; g.strokeRect(bw / 2, bw / 2, W - bw, H - bw);
+          drawLines(g, W, H, [{ t: o.mat[0], s: 0.42, c: '#2a1606', shadow: false }, { t: o.mat[1] || '', s: 0.22, c: '#5a2410', weight: 'italic bold', shadow: false }], { padX: 0.12, fill: 0.72 });
+        }, 160);
+        // it lies on the highest surface under it: the step, or where a
+        // sloping street's paving stands above the step's end, the paving
+        const p = L(lx, (t0 + t1) / 2);
+        // (its body reaches down to the step, so a lifted end never floats)
+        const base = st ? st[0].top : top(p[0], p[1]);
+        let my = base;
+        for (const [ca, cl] of [[-1, t0], [1, t0], [-1, t1], [1, t1]]) { const q = L(lx + ca * MW / 2, cl); my = Math.max(my, top(q[0], q[1])); }
+        kit.box(p[0], base - 0.005, p[1], MW + 0.06, my - base + 0.033, MD + 0.06, 0x7a5a30, { ry: f.ry, ao: 0 });
+        kit.signFlat(cell, p[0], my + 0.0295, p[1], MW, MD, { ry: f.ry });
+      }
+      // paw prints
+      for (const tr of (o.trails || [])) {
+        const n = tr.n ?? 8, s = tr.s ?? 1, col = tr.c ?? 0x57432f, back = tr.turn ?? 0;
+        const A = L(tr.from[0], tr.from[1]), B = L(tr.to[0], tr.to[1]);
+        const dx = B[0] - A[0], dz = B[1] - A[1], len = Math.hypot(dx, dz) || 1, yaw = Math.atan2(dx, dz);
+        const rx = dz / len, rz = -dx / len;                         // right of the direction of travel
+        for (let i = 0; i < n; i++) {
+          const fwd = i < n - back;
+          const t = fwd ? i / Math.max(1, n - back - 1) : 1 - (i - (n - back) + 1) * 0.45 / Math.max(1, back);
+          const side = (i % 2 ? 1 : -1) * 0.1 * s * (fwd ? 1 : -1) + (fwd ? 0 : 0.34 * s);
+          paw(A[0] + dx * t + rx * side, A[1] + dz * t + rz * side, fwd ? yaw : yaw + Math.PI, s, col);
+        }
+      }
+      for (const [a, l, yaw] of (o.bones || [])) { const p = L(a, l); fishbone(p[0], p[1], f.ry + yaw, 1.1); }
+      if (o.moss) for (const sd of [-1, 1]) {
+        // at the foot of the wall beside the flight, and where its treads meet the ends
+        for (let i = 0; i < 3; i++) { const p = L(lx + sd * (sw / 2 + 0.12 + DR() * 0.55), lz0 + fr + 0.08 + DR() * 0.3); tuft(p[0], p[1], 0.1 + DR() * 0.08); }
+        if (st) for (const sp of st) { const p = L(lx + sd * (sw / 2 - 0.06), sp.lz + 0.44); kit.sph(p[0], sp.top + 0.004, p[1], 0.07 + DR() * 0.04, MOSS[(DR() * 3) | 0], { seg: 6, rings: 3, sy: 0.3, flat: true, ao: 0 }); }
+      }
+    }
   }
 
   // sign materials, one pair per atlas page (pages are allocated lazily)
@@ -784,8 +983,9 @@ export function create(ctx) {
     if (!I) return;
     for (const p of pending) {
       let i = 0;
-      I.register({
+      const e = I.register({
         id: 'cat_' + p.id, x: p.x, z: p.z, r: p.r, label: p.label,
+        ...(p.getPos ? { getPos: p.getPos } : null),
         onInteract(c, self) {
           if (p.onInteract) return p.onInteract(c, self);
           const line = p.lines[i % p.lines.length]; i++;
@@ -793,6 +993,7 @@ export function create(ctx) {
           p.onEach?.(c, i);
         },
       });
+      if (p.door) { p.door.entry = e; e.label = p.door.open ? 'Close door' : 'Open door'; }
     }
   }
   let registered = false;
@@ -828,6 +1029,14 @@ export function create(ctx) {
     d.open = open;
     d.blocker.solid = !open;
     if (d.leafCols) for (const lc of d.leafCols) lc.solid = open;
+    // the prompt follows the door, whoever moved it (a story beat, the carry's
+    // tuck-in and wake-up): it said "Close door" at a shut door after the dawn
+    // wake-up, because only the E handler ever rewrote it
+    const e = d.entry;
+    if (e) {
+      e.label = open ? 'Close door' : 'Open door';
+      if (ctx.systems.interaction?.nearest?.() === e) ctx.systems.ui?.prompt(e.label, e);
+    }
   }
 
   const ms = (typeof performance !== 'undefined' ? performance.now() : 0) - t0;

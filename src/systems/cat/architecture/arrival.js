@@ -179,7 +179,8 @@ export function buildArrival(T) {
   b.box(cb.px(1.7, 2.5), cb.y + 1.2, cb.pz(1.7, 2.5), 2.8, 0.22, 0.75, PAL.stoneLight, { ry: cb.ry, ao: 0 });
   b.sign(depCell, cb.px(1.7, 2.52), cb.y + 3.2, cb.pz(1.7, 2.52), 2.2, 0.55, { ry: cb.ry });
   const cbE = frame(cb.px(3.1, 0), cb.y, cb.pz(3.1, 0), cb.ry + Math.PI / 2);
-  doorUnit(b, cbE, 0, 0, { w: 1.9, h: 2.9, human: true, humanSide: -1, humanSignCell: T.humansLabel(), color: PAL.trim[1] });
+  // (a low segmental head: the booth's eaves come down 0.27 over the surround)
+  doorUnit(b, cbE, 0, 0, { w: 1.9, h: 2.9, human: true, humanSide: -1, humanSignCell: T.humansLabel(), color: PAL.trim[1], headRise: 0.24 });
   T.colBox(cb.x, cb.z, 6.4, 4.8, cb.ry);
   T.act('customs', cb.px(1.7, 4.2), cb.pz(1.7, 4.2), 'Departures window', [
     'the DEPARTURES window is bricked up. the mortar is still wet. it is always still wet.',

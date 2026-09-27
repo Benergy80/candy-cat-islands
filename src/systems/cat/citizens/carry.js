@@ -118,6 +118,17 @@ const ESCORT_GAP = 4.4;
 // near-black slab for the payoff of the whole carry).
 const APPROACH_L = 7.5, DOOR_LEAD = 13;
 const LENS_RAYS_T = 24;                         // rays a frame for the tripod searches
+// THE WHOLE STRETCH the doorstep's lens films — from the cut, APPROACH_L out,
+// to the step — is sampled every STRETCH_DS u (him: his middle, and a hand
+// either side of him; the jaws every other sample), and a blocked ray there
+// costs a tripod far more than any framing preference: a lens that loses him
+// behind a porch post or a neighbour's wall for a third of a second is not
+// the doorstep's lens while any other is clean (pickDoorTripod). The cut
+// itself then waits until the lens actually sees him (tripodSees), at the
+// latest the start of the leg up to the step (CUT_LATEST u out).
+const STRETCH_DS = 0.5, SW_MID = 2.5, SW_SIDE = 0.8, SW_JAW = 0.4;
+const CUT_LATEST = APPROACH_OUT + 0.6;
+const MAXSPH = 1024;
 
 // the bed, as containment/scenery.js draws it (y above the room's floor)
 const MATTRESS = 0.855, BLANKET_TOP = 1.07;
@@ -146,7 +157,7 @@ export function createBedtime(ctx, H) {
     mode: 'hang', k: 1, tuckU: 0, blanket: 0, blanketLen: 2.05,
     s: 0, cut: null, skip: null, lines: 0, black: false, fadeReq: 0,
     o: null, cine: null, az0: 0, camAz: 0, side: 0, camD: CAM_D0,
-    gripErr: 0, maxGripErr: 0, frames: 0, lampK: 0, lampWant: 0,
+    gripErr: 0, maxGripErr: 0, headD: 0, maxHeadD: 0, headShift: 0, maxHeadShift: 0, hsx: 0, hsy: 0, hsz: 0, hsAt: -1, frames: 0, lampK: 0, lampWant: 0,
     routeOK: false, routeTries: 0, arriveI: 0, doorOpen: false,
     savedFacing: 0, pDown: false, lastStage: null, fadeDir: 0, fadeT: 0, fadeDur: 0,
     win: [0, 0, 0, 0], clock: 0,
@@ -629,6 +640,59 @@ export function createBedtime(ctx, H) {
     // CATCH_HEAD_RATE) and is lower than his collar; his heels stay on the
     // ground (the jaws a hand under the collar, never his shoes in the paving)
     if (need > 0) outP.y += Math.min(need, HEEL_CAP);
+    holdHead(c, outP, outQ);
+  }
+  // HIS HEAD IN THE JAWS (verifier: his head node within 0.5 u of the muzzle
+  // or the jaw, every frame he hangs). hangPose puts his COLLAR at the grip;
+  // about it his swing, the lens's twist and a carrier pitching its head down
+  // a slope all turn his head — at the worst phase of the three (the downhill
+  // into Whisker Heights) 0.50 u from the teeth, with no margin. Past
+  // HEAD_SOFT his body is drawn toward the nearer of the two, HEAD_PULL of the
+  // excess and HEAD_SHIFT at most: his collar leaves the grip by a few
+  // centimetres, and his head never swings out of the jaws. (Never down into
+  // the ground: a pull that would put a corner of him under it is given back.)
+  // The pull is taken on the carry's own clock: paused, it holds (his rig's
+  // head keeps breathing under a paused game; he must not).
+  const HEAD_SOFT = 0.36, HEAD_PULL = 0.6, HEAD_SHIFT = 0.12;
+  const _hl = new THREE.Vector3(), _hM = new THREE.Vector3(), _hJ = new THREE.Vector3();
+  /** His head node (player/visitor.js nodes.head) in his group's own frame,
+   *  as the rig posed it this frame (player.js ran before late()); null if
+   *  there is no such node. */
+  function headLocal(out) {
+    const p = pl(), g = p?.group, h = p?.visitor?.nodes?.head;
+    if (!g || !h) return null;
+    out.copy(h.position);
+    let n = h.parent;
+    for (; n && n !== g; n = n.parent) { n.updateMatrix(); out.applyMatrix4(n.matrix); }
+    if (n !== g) return null;
+    return out.multiply(g.scale);
+  }
+  function holdHead(c, P, Q) {
+    if (B.hsAt === B.clock) { P.x += B.hsx; P.y += B.hsy; P.z += B.hsz; return; }  // (paused: as it was)
+    B.hsAt = B.clock;
+    B.headShift = 0; B.hsx = 0; B.hsy = 0; B.hsz = 0;
+    const TG = c.rig?.tiger || c.TG;
+    // (mouthOf's static jaws — a rig not drawn yet —: no teeth to hold to;
+    //  mouthOf, just called, brought the head pivot's world matrix up to date)
+    if (!TG || !TG.headPivot || !TG.muzzleN || !TG.jawN || !((c.tigerK ?? 1) > 0.5)) { B.headD = 0; return; }
+    if (!headLocal(_hl)) { B.headD = 0; return; }
+    _hl.applyQuaternion(Q).add(P);                                     // his head, as hung
+    _hM.copy(TG.muzzleN.position).applyMatrix4(TG.headPivot.matrixWorld);
+    _hJ.copy(TG.jawN.position).applyMatrix4(TG.headPivot.matrixWorld);
+    const dM = _hl.distanceTo(_hM), dJ = _hl.distanceTo(_hJ);
+    const T = dM <= dJ ? _hM : _hJ, d = Math.min(dM, dJ);
+    B.headD = d;
+    if (d <= HEAD_SOFT) return;
+    const m = Math.min(HEAD_SHIFT, (d - HEAD_SOFT) * HEAD_PULL), k = m / d;
+    const dx = (T.x - _hl.x) * k, dy = (T.y - _hl.y) * k, dz = (T.z - _hl.z) * k, y0 = P.y;
+    P.x += dx; P.y += dy; P.z += dz;
+    if (dy < 0) {
+      const need = clearance(P, Q, 0.08);
+      if (need > 0) P.y += Math.min(need, -dy);
+    }
+    const ey = P.y - y0;                                                // (what of the pull stood)
+    B.headShift = Math.hypot(dx, ey, dz); B.hsx = dx; B.hsy = ey; B.hsz = dz;
+    B.headD = Math.hypot(_hl.x + dx - T.x, _hl.y + ey - T.y, _hl.z + dz - T.z);
   }
   /** The body box for the pose he is in (and, for a moment after a change,
    *  the one he is leaving: the rig blends between them). */
@@ -792,6 +856,55 @@ export function createBedtime(ctx, H) {
     if (!P || !C) return cam()?.params?.azimuth ?? 0.78;
     const dx = C.x - P.x, dz = C.z - P.z;
     return dx * dx + dz * dz > 1e-4 ? Math.atan2(dx, dz) : (cam()?.params?.azimuth ?? 0.78);
+  }
+
+  // ── the lens and the lamps' glow ────────────────────────────────────────────
+  // particles.js offers no near-lens cull and no pause for its ambient layers
+  // (ambient.js's own nearLens guards only its specks, at spawn): the lamp
+  // halos — additive glows parked on Main Street's lanterns and strung bulbs,
+  // 1.5–4 u across — washed the frame orange where the walk's lens passed
+  // through one. Their anchors are public (particles.ambient.lanterns /
+  // .bulbs, flat x,y,z): within NUDGE_R of one the walk's lens is eased up to
+  // NUDGE_MAX u straight away from it (the falling blossom over Whisker
+  // Heights has no anchor to keep away from: see the report).
+  const NUDGE_R = 2.6, NUDGE_MAX = 0.5;
+  const _nz = { az: 0, el: 0, dk: 1 }, _ne = { d: 0, x: 0, y: 0, z: 0 };
+  function nearAnchor(L, px, py, pz, o) {
+    if (!L || !L.length) return;
+    for (let i = 0; i + 2 < L.length; i += 3) {
+      const dx = px - L[i], dy = py - L[i + 1], dz = pz - L[i + 2], dd = Math.hypot(dx, dy, dz);
+      if (dd < o.d) { o.d = dd; o.x = dx; o.y = dy; o.z = dz; }
+    }
+  }
+  function emitterNudge(A, az, el, dist, out) {
+    out.az = 0; out.el = 0; out.dk = 1;
+    const amb = ctx.systems.particles?.ambient; if (!amb || !A) return out;
+    const ce = Math.cos(el), px = A.x + Math.sin(az) * ce * dist, py = A.y + Math.sin(el) * dist, pz = A.z + Math.cos(az) * ce * dist;
+    _ne.d = NUDGE_R;
+    nearAnchor(amb.lanterns, px, py, pz, _ne); nearAnchor(amb.bulbs, px, py, pz, _ne);
+    if (_ne.d >= NUDGE_R || _ne.d < 1e-3) return out;
+    const push = NUDGE_MAX * smoothstep(NUDGE_R, NUDGE_R - 1.2, _ne.d), l = _ne.d;
+    const qx = px + _ne.x / l * push - A.x, qy = py + _ne.y / l * push - A.y, qz = pz + _ne.z / l * push - A.z;
+    const nd = Math.hypot(qx, qy, qz); if (nd < 1) return out;
+    // (only where the nudged lens still sees him: the walk's plan cleared the
+    //  lens it planned, not this one — half a metre put a shop's hanging sign
+    //  across him for half a second)
+    if (!nudgeSees(A.x + qx, A.y + qy, A.z + qz)) { B.nudgeBlocked = (B.nudgeBlocked || 0) + 1; return out; }
+    out.az = wrapPi(Math.atan2(qx, qz) - az); out.el = Math.asin(clamp(qy / nd, -0.99, 0.99)) - el; out.dk = nd / dist;
+    return out;
+  }
+  const NOCC = { list: [], x: NaN, z: NaN, r: 0, ms: 0, inst: new Float32Array(6 * 512), instO: [], instI: new Int32Array(512), instN: 0 };
+  const _nP = new THREE.Vector3(), _nT = new THREE.Vector3();
+  function nudgeSees(x, y, z) {
+    const c = B.cat; if (!c) return true;
+    mouthOf(c, _m);
+    if (!(Math.hypot(NOCC.x - _m.x, NOCC.z - _m.z) < 4)) gatherOcc(_m.x, _m.z, CAM_D0 + 5, null, NOCC);
+    const keep = occNow; occNow = NOCC;
+    try {
+      _nP.set(x, y, z);
+      _nT.set(_m.x, _m.y - 0.75, _m.z); if (rayHit(_nP, _nT, 0.55) !== Infinity) return false;
+      _nT.set(_m.x, _m.y - 0.2, _m.z); return rayHit(_nP, _nT, 0.55) === Infinity;
+    } finally { occNow = keep; }
   }
 
   // ── fades ──────────────────────────────────────────────────────────────────
@@ -1056,13 +1169,16 @@ export function createBedtime(ctx, H) {
   // (inst: the instanced props round the spot — lamp posts, trees, bollards —
   //  as world boxes, six floats each, and the mesh each came from: a thin
   //  post the triangle list never held stood between the catch's lens and him)
-  const OCC = { list: [], x: NaN, z: NaN, r: 0, rays: 0, ms: 0, inst: new Float32Array(6 * 512), instO: [], instN: 0 };
-  const WOCC = { list: [], x: NaN, z: NaN, r: 0, ms: 0, inst: new Float32Array(6 * 512), instO: [], instN: 0 };   // (the walk plan's own)
+  const OCC = { list: [], x: NaN, z: NaN, r: 0, rays: 0, ms: 0, inst: new Float32Array(6 * 512), instO: [], instI: new Int32Array(512), instN: 0 };
+  const WOCC = { list: [], x: NaN, z: NaN, r: 0, ms: 0, inst: new Float32Array(6 * 512), instO: [], instI: new Int32Array(512), instN: 0 };   // (the walk plan's own)
+  // (the doorstep's own: its search, and the cut's check that the lens sees
+  //  him — the room's search re-gathers OCC round the room meanwhile)
+  const DOCC = { list: [], x: NaN, z: NaN, r: 0, ms: 0, inst: new Float32Array(6 * 512), instO: [], instI: new Int32Array(512), instN: 0 };
   let occNow = OCC;                                          // what rayHit tests (its list and its boxes)
   // A cat is never a wall to these searches (they skip every NPC), but a tiger
   // standing where the shot WILL have it — the carrier at a pose it has not
   // reached yet — is: spheres, each tested only on the rays it can stand in.
-  const SPH = new Float32Array(4 * 256);
+  const SPH = new Float32Array(4 * MAXSPH);
   let sphN = 0, sphA = 0, sphB = 0;
   const FRAME = [[-0.62, -0.42], [0, -0.5], [0.62, -0.42], [-0.72, 0.08], [0.72, 0.08], [-0.52, 0.5], [0, 0.56], [0.52, 0.5]];
   const LENS_RAYS = 18;                                 // rays a frame for a framing search
@@ -1093,7 +1209,10 @@ export function createBedtime(ctx, H) {
       for (let i = 0; i < kids.length; i++) st.push(kids[i]);
       if (!o.isMesh || o.isSkinnedMesh || !o.geometry || o.userData?.silhouette) continue;
       const m = Array.isArray(o.material) ? o.material[0] : o.material;
-      if (!m || m.depthWrite === false || m.transparent || m.blending === THREE.AdditiveBlending) continue;
+      if (!m) continue;
+      // (O.see: see-through surfaces that are walls all the same — the
+      //  rainbow's glowing bands, for the raid's lens)
+      if ((m.depthWrite === false || m.transparent || m.blending === THREE.AdditiveBlending) && !(O.see && O.see.test(o.name || ''))) continue;
       if (NOT_WALL.test(o.name || '')) continue;
       if (o.isInstancedMesh) { gatherInst(o, x, z, r, O); continue; }
       const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere();
@@ -1123,7 +1242,7 @@ export function createBedtime(ctx, H) {
       if (_ib.max.y - _ib.min.y < 0.35 || _ib.isEmpty()) continue;
       const j = O.instN * 6;
       A[j] = _ib.min.x; A[j + 1] = _ib.min.y; A[j + 2] = _ib.min.z; A[j + 3] = _ib.max.x; A[j + 4] = _ib.max.y; A[j + 5] = _ib.max.z;
-      O.instO[O.instN++] = o;
+      O.instI[O.instN] = i; O.instO[O.instN++] = o;
     }
   }
   /** Where the ray L + d·t (t in [t0, t1]) enters box j of O.inst (∞: it misses). */
@@ -1140,6 +1259,21 @@ export function createBedtime(ctx, H) {
     return t0;
   }
   const drawn = (o) => { for (let q = o; q; q = q.parent) if (!q.visible) return false; return true; };
+  // (rayStrict: the near-lens clip's exemption off — a post a pace from a
+  //  tripod is not cut away, it is DITHERED: a stippled dark column down a
+  //  third of the doorstep's frame)
+  let rayStrict = false;
+  /** Does the ray _rc (set up by rayHit) meet instance idx of o's own triangles? */
+  const _pm = new THREE.Mesh(), _pim = new THREE.Matrix4(), _ph = [];
+  function instExact(o, idx) {
+    o.getMatrixAt(idx, _pim);
+    _pm.geometry = o.geometry; _pm.material = o.material;
+    _pm.matrixWorld.multiplyMatrices(o.matrixWorld, _pim);
+    _ph.length = 0;
+    try { _pm.raycast(_rc, _ph); } catch (e) { return true; }
+    for (let k = 0; k < _ph.length; k++) if (_ph[k].point.y - floorAt(_ph[k].point.x, _ph[k].point.z) > 0.45) return true;
+    return false;
+  }
   /** What stands between L and T (short of T by `pad`): the distance from L
    *  of the first thing drawn (or the hillside) the ray meets — Infinity when
    *  clear. The ground where the ray grazes it (≤ 0.45 over the floor there)
@@ -1177,8 +1311,9 @@ export function createBedtime(ctx, H) {
       const hx = L.x + _ld.x * t, hy = L.y + _ld.y * t, hz = L.z + _ld.z * t;
       if (hy - floorAt(hx, hz) <= 0.45) continue;
       const o = IO.instO[i];
-      if (t < nc && cm?.isPatched?.(o)) continue;
+      if (t < nc && !rayStrict && cm?.isPatched?.(o)) continue;
       if (!drawn(o)) continue;
+      if (IO.precise && !instExact(o, IO.instI[i])) continue;
       best = t; OCC.by = (o.name || 'instanced') + '#box@' + t.toFixed(1);
       if (!nearest) return best;
     }
@@ -1191,7 +1326,7 @@ export function createBedtime(ctx, H) {
       for (let k = 0; k < _rh.length; k++) {
         const h = _rh[k];
         if (h.distance >= best || h.point.y - floorAt(h.point.x, h.point.z) <= 0.45) continue;
-        if (h.distance < nc && cm?.isPatched?.(o)) continue;
+        if (h.distance < nc && !rayStrict && cm?.isPatched?.(o)) continue;
         best = h.distance; OCC.by = (o.name || o.type) + '@' + h.distance.toFixed(1);
         if (!nearest) return best;
       }
@@ -1234,13 +1369,13 @@ export function createBedtime(ctx, H) {
     // (o.fn: a scorer of its own — the tripods', whose subjects carry weights
     //  and spheres; o.then: called with the job once it is done)
     B.lensJob = { tag, A: A ? A.clone() : null, subj: o.fn ? subj : subj.map((v) => v.clone()), cands, i: 0, best: null, bs: Infinity, apply, rays: 0, ms: OCC.ms, frames: 0,
-      fn: o.fn || null, then: o.then || null, budget: o.budget || LENS_RAYS, pre: o.pre || null, post: o.post || null };
+      fn: o.fn || null, then: o.then || null, budget: o.budget || LENS_RAYS, pre: o.pre || null, post: o.post || null, occ: o.occ || OCC };
     stepLens();
   }
   function stepLens() {
     const J = B.lensJob; if (!J) return;
     const t0 = performance.now(), r0 = OCC.rays;
-    occNow = OCC;
+    occNow = J.occ || OCC;                      // (the doorstep's search: its own set, DOCC)
     J.frames++;
     if (J.pre) J.pre();
     try {
@@ -1270,7 +1405,7 @@ export function createBedtime(ctx, H) {
   }
 
   // ── the tripods: the doorstep's, the room's ────────────────────────────────
-  function sphPush(x, y, z, r) { if (sphN >= 256) return; const i = sphN * 4; SPH[i] = x; SPH[i + 1] = y; SPH[i + 2] = z; SPH[i + 3] = r; sphN++; }
+  function sphPush(x, y, z, r) { if (sphN >= MAXSPH) return; const i = sphN * 4; SPH[i] = x; SPH[i + 1] = y; SPH[i + 2] = z; SPH[i + 3] = r; sphN++; }
   // a tiger's body in its own frame, × its scale: [forward, up, radius]
   const BODY_SPH = [[-0.62, 0.95, 0.5], [0, 0.95, 0.52], [0.56, 1.02, 0.5]];
   /** A tiger standing at (x, y, z) facing yaw, as spheres (T: its scale;
@@ -1352,6 +1487,28 @@ export function createBedtime(ctx, H) {
     }
     return s;
   }
+  /** Anything drawn within NEAR_L of a tripod's lens across its frame (the
+   *  eight frame rays and the centre, the near-lens exemption off): NEAR_W
+   *  each — the lens that had a porch post a pace off it filmed the doorstep
+   *  through a stippled dark column. */
+  const NEAR_L = 4.2, NEAR_W = 0.35;
+  function lensNear(P, A, fov, cut = Infinity) {
+    _lf.subVectors(A, P); const dist = _lf.length(); if (dist < 0.5) return 0;
+    _lf.divideScalar(dist); _lr.crossVectors(_lf, _UP).normalize(); _lu.crossVectors(_lr, _lf);
+    const tv = Math.tan((fov * Math.PI / 180) / 2), th = tv * (ctx.camera?.aspect || 1.6);
+    let s = 0;
+    rayStrict = true;
+    try {
+      for (let i = 0; i <= FRAME.length; i++) {
+        const sx = i < FRAME.length ? FRAME[i][0] * th * dist : 0, sy = i < FRAME.length ? FRAME[i][1] * tv * dist : 0;
+        _lt.set(A.x + _lr.x * sx + _lu.x * sy, A.y + _lr.y * sx + _lu.y * sy, A.z + _lr.z * sx + _lu.z * sy);
+        const hd = rayHit(P, _lt, 0.3, true);
+        if (hd < NEAR_L) { s += NEAR_W; if (OCC.why) OCC.why.push('near' + i + ':' + OCC.by); }
+        if (s >= cut) break;
+      }
+    } finally { rayStrict = false; }
+    return s;
+  }
   const _tp = new THREE.Vector3();
   /** Point the running shot from a tripod at T onto aimAt(). */
   function tripodAngles(T) {
@@ -1372,6 +1529,45 @@ export function createBedtime(ctx, H) {
     //  re-issued at once, this frame: the lens never shows the follow framing)
     try { cam()?.snap?.(); } catch (e) { /* camera gone */ }
     recut();
+  }
+  /** Does the doorstep's tripod see him NOW — his middle, and a hand either
+   *  side of it across the line of sight (at least one), past the scene round
+   *  the door (DOCC) and the carrier's own body? (The cut waits for it.) */
+  const _ts = new THREE.Vector3(), _tm = new THREE.Vector3();
+  function tripodSees(leafRay = false) {
+    const c = B.cat, T0 = B.doorTripod; if (!c || !T0) return true;
+    mouthOf(c, _m);
+    _ts.set(T0.x, T0.y, T0.z);
+    const keep = occNow; occNow = DOCC;
+    const n0 = sphN;
+    tigerSph(tigerScale(c), c.x, c.y, c.z, c.yaw, null);
+    sphA = n0; sphB = sphN;
+    let ok = false;
+    try {
+      _tm.set(_m.x, _m.y - 0.75, _m.z);
+      if (rayHit(_ts, _tm, 0.55) === Infinity) {
+        const dx = _tm.x - _ts.x, dz = _tm.z - _ts.z, l = Math.hypot(dx, dz) || 1, ux = -dz / l * 0.45, uz = dx / l * 0.45;
+        _tm.set(_m.x + ux, _m.y - 0.75, _m.z + uz);
+        ok = rayHit(_ts, _tm, 0.55) === Infinity;
+        if (!ok) { _tm.set(_m.x - ux, _m.y - 0.75, _m.z - uz); ok = rayHit(_ts, _tm, 0.55) === Infinity; }
+      }
+    } finally { sphA = 0; sphB = 0; sphN = n0; occNow = keep; }
+    // (the door's own leaf, as it stands now — the searches leave it out: it
+    //  swings open before their shots — which, swung wide, stood between the
+    //  doorstep's lens and him on the step)
+    if (ok && leafRay) {
+      const d = HS.door;
+      for (const L of [d?.holder, d?.pair]) {
+        if (!L || !drawn(L)) continue;
+        _tm.set(_m.x, _m.y - 0.75, _m.z);
+        _ld.subVectors(_tm, _ts); const D = _ld.length(); _ld.divideScalar(D);
+        _rc.ray.set(_ts, _ld); _rc.near = 0.25; _rc.far = D - 0.55; _rh.length = 0;
+        try { _rc.intersectObject(L, true, _rh); } catch (e) { /* no leaf */ }
+        if (_rh.length) { ok = false; break; }
+      }
+    }
+    if (!ok) B.cutWait = (B.cutWait || 0) + 1;
+    return ok;
   }
   /** THE DOORSTEP'S TRIPOD. Searched as the walk comes within APPROACH_L of
    *  the step (update 'carry'; on arrival if the walk was shorter), cut to
@@ -1396,7 +1592,7 @@ export function createBedtime(ctx, H) {
     const r1 = clearRun(a + cur * TUNE.doorOff, D0), r2 = clearRun(a - cur * TUNE.doorOff, D0);
     B.doorSide = r2 > r1 + 1.0 ? -cur : cur;
     B.doorRuns = [+r1.toFixed(1), +r2.toFixed(1)];
-    gatherOcc(HS.step.x, HS.step.z, TUNE.doorDist + APPROACH_L + 6);
+    gatherOcc(HS.step.x, HS.step.z, TUNE.doorDist + APPROACH_L + 6, null, DOCC);
     sphN = 0;
     const V = () => new THREE.Vector3();
     const Js = jawsAt(c, HS.step.x, HS.step.z, yawIn, V());
@@ -1471,6 +1667,73 @@ export function createBedtime(ctx, H) {
     let thIn = 0;
     if (tail) { const qx = tail.x - HS.step.x, qz = tail.z - HS.step.z; thIn = Math.atan2(qx * HS.lx + qz * HS.lz, qx * HS.ox + qz * HS.oz); }
     const thLo = Math.max(-APPROACH_ANG, Math.min(thIn, 0) - 0.3), thHi = Math.min(APPROACH_ANG, Math.max(thIn, 0) + 0.3);
+    // THE WHOLE STRETCH the lens films (STRETCH_DS): one sample of him — his
+    // middle, a hand either side of him, the jaws every other sample — the
+    // carrier's own body round him as spheres
+    let sN = 0;
+    const stretchAt = (x, z, y, out, tag) => {
+      const J = jawsAt(c, x, z, y, V());
+      const s0 = sphN; tigerSph(T, x, floorAt(x, z), z, y, headBehind(J, y, T, V())); const s1 = sphN;
+      const ox = Math.cos(y) * 0.45, oz = -Math.sin(y) * 0.45, my = J.y - 0.75;
+      out.push({ p: V().set(J.x, my, J.z), w: SW_MID, s0, s1, tag: tag + 'M' },
+        { p: V().set(J.x + ox, my, J.z + oz), w: SW_SIDE, s0, s1, tag: tag + 'M+' }, { p: V().set(J.x - ox, my, J.z - oz), w: SW_SIDE, s0, s1, tag: tag + 'M-' });
+      if ((sN++ & 1) === 0) out.push({ p: J, w: SW_JAW, s0, s1, tag: tag + 'J' });
+      return J;
+    };
+    // the rail's tail as retail(th) will lay it: from the tail's start, round
+    // the approach point, to the step (flat [x, z, …])
+    const legPath = (Ap) => {
+      const pts = [];
+      const sx = HS.step.x, sz = HS.step.z, ax = Ap.x, az = Ap.z;
+      if (!tail) { pts.push(ax, az, sx, sz); return pts; }
+      const px = tail.x, pz = tail.z, l1 = Math.hypot(ax - px, az - pz), l2 = Math.hypot(sx - ax, sz - az);
+      pts.push(px, pz);
+      if (l1 > 0.3 && l2 > 0.3) {
+        const r1 = Math.min(1.4, l1 * 0.4), r2 = Math.min(1.4, l2 * 0.4);
+        const qx = ax - (ax - px) / l1 * r1, qz = az - (az - pz) / l1 * r1, ex = ax + (sx - ax) / l2 * r2, ez = az + (sz - az) / l2 * r2;
+        pts.push(qx, qz);
+        for (let k = 1; k < 4; k++) { const u = k / 4, w0 = (1 - u) * (1 - u), w1 = 2 * u * (1 - u), w2 = u * u; pts.push(qx * w0 + ax * w1 + ex * w2, qz * w0 + az * w1 + ez * w2); }
+        pts.push(ex, ez);
+      } else pts.push(ax, az);
+      pts.push(sx, sz);
+      return pts;
+    };
+    // every STRETCH_DS along a polyline, its first point left out (the common
+    // stretch ends there) and short of its last (the step's own subjects)
+    const walkPoly = (pts, fn) => {
+      let d0 = STRETCH_DS;
+      for (let i = 0; i + 3 < pts.length; i += 2) {
+        const ax = pts[i], az = pts[i + 1], bx = pts[i + 2], bz = pts[i + 3], L = Math.hypot(bx - ax, bz - az);
+        if (L < 1e-4) continue;
+        const y = Math.atan2(bx - ax, bz - az);
+        let d = d0;
+        for (; d < L - 1e-6; d += STRETCH_DS) {
+          const x = ax + (bx - ax) * d / L, z = az + (bz - az) * d / L;
+          if (i + 4 >= pts.length - 1 && L - d < 0.35) break;
+          fn(x, z, y);
+        }
+        d0 = d - L;
+      }
+    };
+    // the common part: from the cut (APPROACH_L out, or where he is now) to
+    // where the tail's leg begins — the same walk for every lens
+    // (where the lens will be LOOKING as it films: it follows the jaws — the
+    //  aim a static tiger's aimAt() gives — so its frame sweeps from the cut
+    //  to the step; a post a pace off the lens outside the step's frame
+    //  swung into the frame at the cut)
+    const aimOf = (x, z, y) => { const Q = jawsAt(c, x, z, y, V(), false); Q.y += 0.3 * T - 0.25; return Q; };
+    let Acut = null;
+    if (!inPath) {
+      const seg = R.seg;
+      const sA = Math.max(B.s, R.L - APPROACH_L), sB = tail ? R.cum[tail.k] : R.L - 0.6;
+      for (let q = sA; q <= sB + 1e-3; q += STRETCH_DS) {
+        railAt(q, _t); const x = _t.x, z = _t.z, y = railYaw(q, 1.8, c.yaw);
+        stretchAt(x, z, y, subj, 'st' + (R.L - q).toFixed(1));
+        if (!Acut) Acut = aimOf(x, z, y);
+      }
+      R.seg = seg;
+      B.stretchN = subj.length;
+    }
     const legFor = (phi) => {
       let th = phi - Math.sign(phi) * Math.PI / 2;
       const prof = th >= thLo && th <= thHi;
@@ -1483,16 +1746,16 @@ export function createBedtime(ctx, H) {
       if (ok && !inPath && tail) for (let u = 0.25; u < 1; u += 0.25) if (!freeAt(tail.x + (Ap.x - tail.x) * u, tail.z + (Ap.z - tail.z) * u, 0.45)) { ok = false; break; }
       if (!ok) return railLeg();                     // (no way up that side of the path: the route's own)
       const hy = Math.atan2(HS.step.x - Ap.x, HS.step.z - Ap.z), subs = [], pts = [];
-      if (!inPath) for (const f of [0.1, 0.5, 0.9]) {
-        const x = Ap.x + (HS.step.x - Ap.x) * f, z = Ap.z + (HS.step.z - Ap.z) * f;
-        const J = jawsAt(c, x, z, hy, V());
-        const s0 = sphN; tigerSph(T, x, floorAt(x, z), z, hy, headBehind(J, hy, T, V())); const s1 = sphN;
-        const ox = Math.cos(hy) * 0.5, oz = -Math.sin(hy) * 0.5;
-        subs.push({ p: J, w: 0.3, s0, s1, tag: 'legJ' + f }, { p: V().set(J.x, J.y - 0.75, J.z), w: 0.6, s0, s1, tag: 'legM' + f },
-          { p: V().set(J.x + ox, J.y - 0.75, J.z + oz), w: 0.3, s0, s1, tag: 'legM+' + f }, { p: V().set(J.x - ox, J.y - 0.75, J.z - oz), w: 0.3, s0, s1, tag: 'legM-' + f });
-        pts.push(x, z, J.x, J.z);
-      }
-      L = { th, prof, ok, hy, subs, pts };
+      // (the whole of it: round the corner from the route onto the leg, and up
+      //  the leg to the step — a porch post between three samples of it hid
+      //  him for a third of a second)
+      const la = [];
+      if (!inPath) walkPoly(legPath(Ap), (x, z, y) => { const J = stretchAt(x, z, y, subs, 'leg'); pts.push(x, z, J.x, J.z); la.push(x, z, y); });
+      // (the frame at the leg's middle, as the lens follows him up it)
+      // (and at its first sample: the cut, when the route's own tail begins
+      //  further out than APPROACH_L and the common stretch is empty)
+      const m3 = Math.floor(la.length / 6) * 3;
+      L = { th, prof, ok, hy, subs, pts, A: la.length ? aimOf(la[m3], la[m3 + 1], la[m3 + 2]) : null, A0: la.length && !Acut ? aimOf(la[0], la[1], la[2]) : null };
       legs.set(key, L);
       return L;
     };
@@ -1503,18 +1766,19 @@ export function createBedtime(ctx, H) {
       if (RLEG) return RLEG;
       const subs = [], pts = [], seg = R.seg;
       let hy = yawIn;
-      if (!inPath) for (const q of [4.0, 2.2, 0.6]) {
-        if (R.L < q + 0.3) continue;
-        railAt(R.L - q, _t); const x = _t.x, z = _t.z, y = railYaw(R.L - q, 1.8, yawIn); hy = y;
-        const J = jawsAt(c, x, z, y, V());
-        const s0 = sphN; tigerSph(T, x, floorAt(x, z), z, y, headBehind(J, y, T, V())); const s1 = sphN;
-        const ox = Math.cos(y) * 0.5, oz = -Math.sin(y) * 0.5;
-        subs.push({ p: J, w: 0.3, s0, s1, tag: 'railJ' + q }, { p: V().set(J.x, J.y - 0.75, J.z), w: 0.6, s0, s1, tag: 'railM' + q },
-          { p: V().set(J.x + ox, J.y - 0.75, J.z + oz), w: 0.3, s0, s1, tag: 'railM+' + q }, { p: V().set(J.x - ox, J.y - 0.75, J.z - oz), w: 0.3, s0, s1, tag: 'railM-' + q });
-        pts.push(x, z, J.x, J.z);
+      if (!inPath) {
+        // (the rail itself from the tail's start to the step, every STRETCH_DS)
+        const q0 = tail ? R.cum[tail.k] + STRETCH_DS : Math.max(0, R.L - 4.5);
+        for (let q = q0; q < R.L - 0.35; q += STRETCH_DS) {
+          railAt(q, _t); const x = _t.x, z = _t.z, y = railYaw(q, 1.8, yawIn); hy = y;
+          const J = stretchAt(x, z, y, subs, 'rail');
+          pts.push(x, z, J.x, J.z);
+        }
       }
       R.seg = seg;
-      RLEG = { th: NaN, prof: false, ok: true, hy, subs, pts };
+      const mi = Math.floor(pts.length / 8) * 4;
+      RLEG = { th: NaN, prof: false, ok: true, hy, subs, pts, A: pts.length ? aimOf(pts[mi], pts[mi + 1], hy) : null,
+        A0: pts.length && !Acut ? aimOf(pts[0], pts[1], Math.atan2(pts[4] - pts[0], pts[5] - pts[1]) || hy) : null };
       return RLEG;
     };
     for (const side of [cur, -cur]) for (const off of [TUNE.doorOff, 0.95, 0.6, 1.4, 0.35]) for (const dist of [10.5, 8.5, 7, TUNE.doorDist]) for (const el of [TUNE.doorEl, 0.42, 0.6, 0.78]) {
@@ -1530,7 +1794,12 @@ export function createBedtime(ctx, H) {
       // (a lens the tiger walks AWAY from sees its back: him hidden in front
       //  of its chest; one it walks AT, him sitting on its chest)
       for (const q of app) { const dx = P.x - q.x, dz = P.z - q.z, l = Math.hypot(dx, dz) || 1, f = (dx * Math.sin(q.y) + dz * Math.cos(q.y)) / l; if (f < -0.1) pen += 0.9 * (-f - 0.1); }
-      { const dx = P.x - HS.step.x, dz = P.z - HS.step.z, l = Math.hypot(dx, dz) || 1; pen += 1.4 * Math.abs((dx * Math.sin(leg.hy) + dz * Math.cos(leg.hy)) / l); }
+      { const dx = P.x - HS.step.x, dz = P.z - HS.step.z, l = Math.hypot(dx, dz) || 1, f = (dx * Math.sin(leg.hy) + dz * Math.cos(leg.hy)) / l;
+        pen += 1.4 * Math.abs(f);
+        // (and more for one it walks up the leg AWAY from: its back to the
+        //  lens, him on the far side of its chest — from high up, the top of
+        //  its head over his helmet)
+        if (f < -0.1) pen += 0.8 * (-f - 0.1); }
       if (P.y < world.height(P.x, P.z) + 1.7) pen += 1;
       // him going in (and a little either side of him, across the line of
       // sight: he swings, he is turned toward the lens — a ray that clears a
@@ -1541,20 +1810,58 @@ export function createBedtime(ctx, H) {
         own.push({ p: V().set(Q.x + ux, Q.y - 0.75, Q.z + uz), w: 0.5, s0: a0, s1: a1, tag: tg + '+' }, { p: V().set(Q.x - ux, Q.y - 0.75, Q.z - uz), w: 0.5, s0: a0, s1: a1, tag: tg + '-' });
       }
       for (const q of leg.subs) own.push(q);
-      cands.push({ P, az, el, dist, side, off, tag: 'door', pen, own, th: leg.th });
+      cands.push({ P, az, el, dist, side, off, tag: 'door', pen, own, th: leg.th, legA: leg.A, legA0: leg.A0 });
     }
-    const frames = [{ A, w: 0.25 }];
-    const score = (k, cut) => { const s1 = tripodScore(k.P, subj, frames, fov, cut); return s1 >= cut ? s1 : s1 + tripodScore(k.P, k.own, [], fov, cut - s1); };
+    const frames = Acut ? [{ A, w: 0.25 }, { A: Acut, w: 0.25 }] : [{ A, w: 0.25 }];
+    const score = (k, cut) => {
+      let s1 = tripodScore(k.P, subj, frames, fov, cut);
+      if (s1 >= cut) return s1;
+      s1 += tripodScore(k.P, k.own, [], fov, cut - s1);
+      if (s1 >= cut) return s1;
+      if (k.legA0) { s1 += frameRays(k.P, k.legA0, 0.25, fov, OCC.why); if (s1 >= cut) return s1; }
+      if (k.legA) { s1 += frameRays(k.P, k.legA, 0.25, fov, OCC.why); if (s1 >= cut) return s1; }
+      // (nothing drawn a pace off the lens, whichever way it looks as it films)
+      s1 += lensNear(k.P, A, fov, cut - s1); if (s1 >= cut) return s1;
+      if (Acut) { s1 += lensNear(k.P, Acut, fov, cut - s1); if (s1 >= cut) return s1; }
+      if (k.legA0) { s1 += lensNear(k.P, k.legA0, fov, cut - s1); if (s1 >= cut) return s1; }
+      if (k.legA) s1 += lensNear(k.P, k.legA, fov, cut - s1);
+      return s1;
+    };
     B.doorProbe2 = { A: A.toArray().map((v) => +v.toFixed(2)), subj: subj.map((q) => q.tag), n: cands.length };
-    lensJob('door', null, subj, cands, (k) => { B.doorPick = k; }, { fn: score, budget: LENS_RAYS_T + 16, then: (J) => {
-      B.doorJob = false; B.doorDbg = { J, subj, frames, fov };
-      const k = J.best; if (!k) return;
-      // (the shot already on the search's best-so-far: it stays there)
-      if (B.doorCut && B.doorTripod) { const T0 = B.doorTripod; if (Math.hypot(T0.x - k.P.x, T0.y - k.P.y, T0.z - k.P.z) > 1e-3) { pickEscortWaits(new THREE.Vector3(T0.x, T0.y, T0.z), [Js, k.own[1].p, Dw]); pickRoomTripod('T'); return; } }
+    const adopt = (k) => {
+      // (the shot already on the search's best-so-far — or the rail already
+      //  re-laid for its leg: it stays there)
+      if ((B.doorCut || B.legDone) && B.doorTripod) { const T0 = B.doorTripod; if (Math.hypot(T0.x - k.P.x, T0.y - k.P.y, T0.z - k.P.z) > 1e-3) { pickEscortWaits(new THREE.Vector3(T0.x, T0.y, T0.z), [Js, k.own[1].p, Dw]); pickRoomTripod('T'); return; } }
       B.doorSide = k.side; B.doorLens = { off: k.off, el: k.el, dist: k.dist };
       B.doorTripod = { x: k.P.x, y: k.P.y, z: k.P.z }; B.doorTh = k.th;
       pickEscortWaits(k.P, [Js, k.own[1].p, Dw]);
       pickRoomTripod('T');
+    };
+    lensJob('door', null, subj, cands, (k) => { B.doorPick = k; }, { fn: score, budget: LENS_RAYS_T + 16, occ: DOCC, then: (J) => {
+      B.doorJob = false; B.doorDbg = { J, subj, frames, fov };
+      const k = J.best; if (!k) return;
+      if (J.bs - k.pen <= 0.05 || B.doorCut || B.legDone) { adopt(k); return; }
+      // THE REFINEMENT: the grid round the door is coarse, and the whole of
+      // it is cluttered (a lamp post a pace off the best lens, a neighbour's
+      // eaves across its frame): the best one nudged — sideways across its
+      // view, in and out along it, up — each a little dearer the further it
+      // strays, and kept only where no nearer the walk than the grid's own
+      B.doorJob = true;
+      const fx = A.x - k.P.x, fz = A.z - k.P.z, fl = Math.hypot(fx, fz) || 1, ux = fx / fl, uz = fz / fl;
+      const ref = [];
+      for (const [a, b, h] of [[0.8, 0, 0], [-0.8, 0, 0], [1.6, 0, 0], [-1.6, 0, 0], [0, 1.0, 0], [0, -1.0, 0], [0, 0, 0.7], [0, 0, 1.4],
+        [0.8, 0, 0.7], [-0.8, 0, 0.7], [0.8, -1.0, 0], [-0.8, -1.0, 0], [0.8, 1.0, 0], [-0.8, 1.0, 0], [0, -1.0, 0.7], [2.4, 0, 0.5], [-2.4, 0, 0.5]]) {
+        const P = V().set(k.P.x - uz * a + ux * b, k.P.y + h, k.P.z + ux * a + uz * b);
+        let dn = Infinity;
+        for (let i = 0; i < near.length; i += 2) dn = Math.min(dn, Math.hypot(P.x - near[i], P.z - near[i + 1]));
+        if (dn < 4.8 || P.y < world.height(P.x, P.z) + 1.7 || !freeAt(P.x, P.z, 0.3)) continue;
+        ref.push({ ...k, P, pen: k.pen + 0.04 * (Math.abs(a) + Math.abs(b) + Math.abs(h)), tag: 'door2', score: undefined });
+      }
+      ref.push({ ...k, tag: 'door2', score: undefined });                // (the pick itself, as it stood)
+      lensJob('door2', null, subj, ref, (q) => { if (!B.doorTripod) B.doorPick = q; }, { fn: score, budget: LENS_RAYS_T + 16, occ: DOCC, then: (J2) => {
+        B.doorJob = false; B.doorDbg2 = J2;
+        adopt(J2.best && J2.bs < J.bs ? J2.best : k);
+      } });
     } });
   }
   /** Where the escort waits while he is put to bed: on the lawn off the step,
@@ -2014,11 +2321,13 @@ export function createBedtime(ctx, H) {
     B.keepTiger = true; B.t = 0; B.age = 0; B.s = 0; B.cut = null; B.skip = null; B.skipQueued = false; B.lines = 0; B.purred = false;
     B.mode = 'hang'; B.k = 1; B.tuckU = 0; B.black = false; B.routeOK = false; B.routeTries = 0; B.arriveI = 0; B.twist = 0; B.railPrev = false;
     B.maxGripErr = 0; B.gripErr = 0; B.frames = 0; B.lampK = 0; B.lampWant = 0; B.doorOpen = false;
+    B.headD = 0; B.maxHeadD = 0; B.headShift = 0; B.maxHeadShift = 0; B.hsx = 0; B.hsy = 0; B.hsz = 0; B.hsAt = -1;
     B.bodyErr = 0; B.maxBodyErr = 0; B.routeMode = null; B.hopN = 0; B.hops = 0; B.routeMs = 0; B.routeMax = 0; B.routeFrames = 0;
     B.pDown = !!ctx.input?.pointer?.down;
     B.doorLens = null; B.catchLens = null; B.lensPick = null; B.lensJob = null; B.inCut = false; B.tripod = null;
     B.doorTripod = null; B.doorCut = false; B.doorJob = false; B.doorTried = false; B.doorPick = null; B.roomJob = false; B.roomPick = null; B.doorTh = NaN; B.legTh = NaN;
-    B.wait = null; B.wbAz = 0; B.wbEl = 0; B.wbDk = 1; B.elBase = CAM_EL;
+    B.legDone = false; B.cutWait = 0; B.cutAt = null; B.stretchN = 0;
+    B.wait = null; B.wbAz = 0; B.wbEl = 0; B.wbDk = 1; B.elBase = CAM_EL; B.nzAz = 0; B.nzEl = 0; B.nzDk = 1; B.nudges = 0;
     B.tuckTripod = null; B.tuckOn = false; B.escAt = null; B.eyes = false; B.keyOn = false;
     eyesOff();
     WP.n = 0; WP.i = 0; WP.done = true; WP.runs.length = 0;
@@ -2097,7 +2406,11 @@ export function createBedtime(ctx, H) {
     lensJob('catch', A, sub, cands, (b) => { B.catchLens = { az: b.az, el: b.el, dist: b.dist }; });
   }
   /** The raid hands its carrier over at the Cat end of the rainbow (or, with
-   *  dark: true, in the dark it already faded to — a skip, or no bridge). */
+   *  dark: true, in the dark it already faded to — a skip, or no bridge — and
+   *  he goes straight to bed; with black: true, in the black of the raid's
+   *  dip short of the Cat end's gate arch — the walk's own dip is already
+   *  down, and its far side, the last stretch to the guest house, comes up
+   *  as soon as the route is built). */
   function fromRaid(c, o = {}) {
     if (B.on) return false;
     const p = pl(); if (!p) return false;
@@ -2114,7 +2427,12 @@ export function createBedtime(ctx, H) {
     setStage('carry');
     if (B.o) B.o.noTilt = false;                     // (the walk: see update 'catch')
     B.elBase = B.o ? B.o.elevation : CAM_EL;
-    B.cut = { phase: 'wait', t: 0 };                 // the dip comes at once: the rainbow is behind him
+    if (o.black) {
+      // (the screen is black already: the dip's far side — placed, re-cut
+      //  and faded up by update 'carry' — the first frame the route is built)
+      B.fadeReq++; B.fadeDir = 1; B.black = true;
+      B.cut = { phase: 'down', t: CUT_DIP + 0.1 };
+    } else B.cut = { phase: 'wait', t: 0 };          // the dip comes at once: the rainbow is behind him
     pickEscort(c.x, c.z);
     return true;
   }
@@ -2351,6 +2669,13 @@ export function createBedtime(ctx, H) {
     const c = B.cat;
     if (B.raid && c && c.mode !== 'rail' && B.stage !== 'wake' && !(B.stage === 'dark' && B.t >= DARK_SECS)) { abort(); return; }
     if (!B.raid && c && c.scriptPlan !== rail && B.stage !== 'wake') { abort(); return; }
+    // PAUSED: everything holds exactly where it is — the carrier on its rail
+    // (drive/hold with no time would stop its walk: its gait easing to a stand
+    // and its head dipping, him swinging with it; citizens.js and the raid
+    // skip posing it and the escort while frozen()), the lens, the clocks.
+    // (the pointer's state is kept up to date: a click on the pause card is
+    //  not a skip the moment the game resumes)
+    if (paused) { B.pDown = !!ctx.input?.pointer?.down; return; }
     B.t += d; B.age += d; B.clock += d;
     const skipNow = !paused && wantsSkip();
     if (B.lensJob && !paused) stepLens();
@@ -2391,7 +2716,8 @@ export function createBedtime(ctx, H) {
           if (R.L > LONG_L) B.cut = { phase: 'wait', t: 0 };
           B.elBase = B.o ? B.o.elevation : CAM_EL;
           // the walk's sight lines, up to the long walk's dip (then again after it) or the doorstep's tripod
-          planWalk(c, 0, B.cut ? Math.min(R.L - APPROACH_L, (LONG_AT + CUT_DIP) * SPEED + 3) : R.L - APPROACH_L);
+          // (as far as CUT_LATEST: the cut waits until its lens sees him)
+          planWalk(c, 0, B.cut ? Math.min(R.L - CUT_LATEST, (LONG_AT + CUT_DIP) * SPEED + 3) : R.L - CUT_LATEST);
         }
         break;
       }
@@ -2422,7 +2748,7 @@ export function createBedtime(ctx, H) {
             B.camAz = leadAz(c);
             B.elBase = B.o ? B.o.elevation : CAM_EL;
             // (the walk from here, planned now: the cut lands on the steered framing)
-            planWalk(c, B.s, R.L - APPROACH_L);
+            planWalk(c, B.s, R.L - CUT_LATEST);
             for (let k = 0; k < 8 && WP.phase !== 2 && !WP.done; k++) stepWalk();
             walkBias(B.s, _wb); B.wbAz = _wb.az; B.wbEl = _wb.el; B.wbDk = _wb.dk;
             if (B.o) { B.o.azimuth = B.camAz + B.wbAz; B.o.elevation = B.elBase + B.wbEl; }
@@ -2445,10 +2771,15 @@ export function createBedtime(ctx, H) {
         const settled = !C || C.phase === 'done';
         // (searched a few metres ahead of the cut: it is a big search)
         if (settled && !B.doorTried && !B.lensJob && R.L - B.s < APPROACH_L + DOOR_LEAD) pickDoorTripod();
-        // (cutting to it: the rail's last leg re-laid square to its lens)
-        if (settled && B.doorTripod && !B.doorCut && B.o && R.L - B.s < APPROACH_L) { B.doorCut = true; retail(B.doorTh); cutTo(B.doorTripod); }
         // (the search still running as they reach the cut: its best so far)
-        if (settled && !B.doorTripod && B.doorPick && !B.doorCut && B.o && R.L - B.s < APPROACH_L - 1.5) { const k = B.doorPick; B.doorTripod = { x: k.P.x, y: k.P.y, z: k.P.z }; B.doorTh = k.th; B.doorCut = true; retail(k.th); cutTo(B.doorTripod); }
+        if (settled && !B.doorTripod && B.doorPick && !B.doorCut && B.o && R.L - B.s < APPROACH_L - 1.5) { const k = B.doorPick; B.doorTripod = { x: k.P.x, y: k.P.y, z: k.P.z }; B.doorTh = k.th; }
+        // (the rail's last leg re-laid square to its lens, as they come
+        //  within APPROACH_L — whether or not the shot has cut yet)
+        if (settled && B.doorTripod && !B.legDone && R.L - B.s < APPROACH_L) { B.legDone = true; retail(B.doorTh); }
+        // THE CUT, once the lens actually sees him (tripodSees): never onto a
+        // neighbour's wall with him behind it — the walk's lens holds until
+        // then, CUT_LATEST u out at the latest (the leg itself was searched)
+        if (settled && B.doorTripod && B.legDone && !B.doorCut && B.o && (R.L - B.s < CUT_LATEST || tripodSees())) { B.doorCut = true; B.cutAt = +(R.L - B.s).toFixed(2); cutTo(B.doorTripod); }
         if (!paused) stepWalk();
         if (B.o && B.doorCut) tripodAngles(B.doorTripod);
         else if (B.o) {
@@ -2464,6 +2795,12 @@ export function createBedtime(ctx, H) {
           B.o.azimuth = B.camAz + B.wbAz;
           B.o.elevation = B.elBase + B.wbEl;
           B.o.distance = dBase * B.wbDk;
+          // …and eased off a lamp's glow it would stand in (emitterNudge)
+          emitterNudge(aimAt(), B.o.azimuth, B.o.elevation, B.o.distance, _nz);
+          const nw = 1 - Math.exp(-6 * d);
+          B.nzAz += (_nz.az - B.nzAz) * nw; B.nzEl += (_nz.el - B.nzEl) * nw; B.nzDk += (_nz.dk - B.nzDk) * nw;
+          B.o.azimuth += B.nzAz; B.o.elevation += B.nzEl; B.o.distance *= B.nzDk;
+          if (_nz.dk !== 1) B.nudges = (B.nudges || 0) + 1;
         }
         if (B.s >= R.L - 0.02 && !(C && C.phase === 'down')) {
           B.cut = null;
@@ -2518,7 +2855,10 @@ export function createBedtime(ctx, H) {
         // THE CUT, to the warm room: as he goes through the doorway — before
         // he is inside the room, where the house's shell turns to glass round
         // anyone in it (seen from out here, the whole front wall would ghost)
-        if (!B.inCut && (atThreshold() || B.s >= R.L - 0.02 || B.t > 4.5)) cutIn(c);
+        // (…or the moment the doorstep's lens loses him to the jamb, past the
+        //  step: held on, the camera dollied in through the porch after him —
+        //  the tiger's flank filling the frame, him behind the door frame)
+        if (!B.inCut && (atThreshold() || B.s >= R.L - 0.02 || B.t > 4.5 || (B.doorCut && B.doorTripod && B.s > (B.sStep || 0) + 0.3 && !tripodSees(true)))) cutIn(c);
         break;
       }
       case 'tuck': {
@@ -2671,6 +3011,8 @@ export function createBedtime(ctx, H) {
       mouthOf(c, mouthNow);
       B.gripErr = Math.hypot(grip.x - mouthNow.x, grip.y - mouthNow.y, grip.z - mouthNow.z);
       if (B.gripErr > B.maxGripErr) B.maxGripErr = B.gripErr;
+      // (his head to the teeth — holdHead — while he hangs)
+      if (B.mode === 'hang') { if (B.headD > B.maxHeadD) B.maxHeadD = B.headD; if (B.headShift > B.maxHeadShift) B.maxHeadShift = B.headShift; }
     } else B.gripErr = 0;
     // the body against its rail (verifier: settle() should never have to
     // shove a carrier off the route it walks)
@@ -2684,6 +3026,13 @@ export function createBedtime(ctx, H) {
   const _br = { x: 0, z: 0 };
   /** Does the carrier keep its stripes? (a carry that runs past 05:30) */
   function keepsTiger(c) { return B.on && B.keepTiger && B.cat === c; }
+  /** Is cat c held still by a paused carry — the carrier, the escort, the
+   *  cat asleep on his feet? (citizens.js skips its update while so: no gait,
+   *  no breath, no head bob drifting under a paused game) */
+  function frozen(c) {
+    if (!B.on || !ctx.state.paused) return false;
+    return c === B.cat || c === B.sleeper || (B.escort.length > 0 && (c === B.escort[0] || c === B.escort[1]));
+  }
   /** Is the borrowed lamp this system's right now? */
   /** Is NPC lamp i (citizens.js's two PointLights) this system's right now?
    *  The bedside lamp borrows the second while the carrier is still outside
@@ -2817,8 +3166,24 @@ export function createBedtime(ctx, H) {
   }
 
   return {
-    start, fromRaid, update, late, debug, keepsTiger, ownsLamp, litCarrier, reset,
+    start, fromRaid, update, late, debug, keepsTiger, ownsLamp, litCarrier, reset, frozen,
     skip() { if (B.on && !B.skip && B.stage !== 'catch' && B.stage !== 'dark' && B.stage !== 'wake') { B.skip = { t: 0 }; fade(true, SKIP_FADE); return true; } return false; },
+    /** The carry's sight-line test, lent to the raid's rainbow lens (raid.js):
+     *  set() an occluder set of its own · gather(O, x, z, r) the drawn scene
+     *  round (x, z) that can stand in a lens's way · clear(O, L, T, pad):
+     *  nothing drawn (nor the hillside) between L and T, pad short of T. */
+    sight: {
+      // (precise: an instanced prop's box that the ray enters is confirmed on
+      //  that instance's own triangles — the rainbow's edge canes, hooked, stood
+      //  in boxes twice their width across every sight line over the deck)
+      set: (see = null) => ({ list: [], x: NaN, z: NaN, r: 0, ms: 0, inst: new Float32Array(6 * 512), instO: [], instI: new Int32Array(512), instN: 0, precise: true, see }),
+      gather(O, x, z, r) { gatherOcc(x, z, r, null, O); },
+      clear(O, L, T, pad = 0.55) { const keep = occNow; occNow = O; try { return rayHit(L, T, pad) === Infinity; } finally { occNow = keep; } },
+      /** Have the camera's triangle trees been built for every mesh in O? */
+      ready(O) { const acc = cam()?.accel; if (!acc || !acc.ready) return true; for (let i = 0; i < O.list.length; i++) { const o = O.list[i]; if (acc.eligible?.(o) && !acc.ready(o)) { acc.want?.(o); return false; } } return true; },
+      get rays() { return OCC.rays; },
+      get by() { return OCC.by; },
+    },
     /** Debug: the doorstep framing's knobs (see TUNE). */
     tune: TUNE,
     /** Debug: the last framing search — every candidate tried, with its score (allocates). */
@@ -2833,18 +3198,27 @@ export function createBedtime(ctx, H) {
       return { score, why };
     },
     /** Debug: re-score the doorstep tripod's pick now, ray by ray (allocates). */
-    doorWhy() {
+    doorWhy(i = -1) {
       const Dd = B.doorDbg; if (!Dd || !Dd.J.best) return null;
-      gatherOcc(HS.step.x, HS.step.z, TUNE.doorDist + APPROACH_L + 6);
-      const k = Dd.J.best, rows = [];
+      gatherOcc(HS.step.x, HS.step.z, TUNE.doorDist + APPROACH_L + 6, null, DOCC);
+      const keepO = occNow; occNow = DOCC;
+      const k = i < 0 ? Dd.J.best : Dd.J.cands.filter((q) => q.score !== undefined).sort((a, b) => a.score - b.score)[i], rows = [];
+      if (!k) { occNow = keepO; return null; }
       for (const q of [...Dd.subj, ...k.own]) {
         sphA = q.s0 || 0; sphB = q.s1 || 0; OCC.by = '';
         const h = rayHit(k.P, q.p, 0.55); sphA = 0; sphB = 0;
         rows.push([q.tag, q.p.toArray().map((v) => +v.toFixed(2)), h === Infinity ? '-' : OCC.by]);
       }
-      OCC.why = []; const f = frameRays(k.P, Dd.frames[0].A, 0.25, Dd.fov, OCC.why); const fw = OCC.why; OCC.why = null;
-      return { P: k.P.toArray().map((v) => +v.toFixed(2)), score: k.score, pen: k.pen, rows, frames: +f.toFixed(2), fwhy: fw, occ: OCC.list.length, occNames: [...new Set(OCC.list.map((o) => o.name))].slice(0, 40) };
+      OCC.why = []; let f = 0;
+      for (const F of Dd.frames) f += frameRays(k.P, F.A, 0.25, Dd.fov, OCC.why) + lensNear(k.P, F.A, Dd.fov);
+      if (k.legA) f += frameRays(k.P, k.legA, 0.25, Dd.fov, OCC.why) + lensNear(k.P, k.legA, Dd.fov);
+      if (k.legA0) f += frameRays(k.P, k.legA0, 0.25, Dd.fov, OCC.why) + lensNear(k.P, k.legA0, Dd.fov);
+      const fw = OCC.why; OCC.why = null;
+      occNow = keepO;
+      return { P: k.P.toArray().map((v) => +v.toFixed(2)), score: k.score, pen: k.pen, rows, frames: +f.toFixed(2), fwhy: fw, occ: DOCC.list.length, occNames: [...new Set(DOCC.list.map((o) => o.name))].slice(0, 40) };
     },
+    /** Debug: the doorstep search's candidates with their scores (allocates). */
+    get doorCands() { const J = B.doorDbg?.J; return J ? J.cands.filter((k) => k.score !== undefined).map((k) => ({ P: k.P.toArray().map((v) => +v.toFixed(2)), side: k.side, off: k.off, el: k.el, dist: k.dist, th: Number.isFinite(k.th) ? +k.th.toFixed(2) : null, pen: +k.pen.toFixed(2), score: +k.score.toFixed(2) })).sort((a, b) => a.score - b.score) : null; },
     /** Debug: re-score the room tripod's candidates now, ray by ray (allocates). */
     roomWhy(all = false, kind = 'D') {
       const Dd = B.roomDbg?.[kind], r = HS.room; if (!Dd || !r) return null;
@@ -2909,8 +3283,9 @@ export function createBedtime(ctx, H) {
     /** Debug: the route's points [[x, z], …] (allocates). */
     routePoints() { const a = []; for (let i = 0; i < R.n; i++) a.push([+R.x[i].toFixed(2), +R.z[i].toFixed(2)]); return a; },
     get house() { house(); return { bed: { x: HS.bx, z: HS.bz }, step: { ...HS.step }, side: { ...HS.side }, fy: HS.fy, lamp: { ...HS.lamp }, room: !!HS.room, door: !!HS.door }; },
-    stats() { return { stage: B.stage, t: +B.t.toFixed(2), raid: B.raid, s: +B.s.toFixed(1), L: +R.L.toFixed(1), route: B.routeMode, routeMs: +(B.routeMs || 0).toFixed(1), routeFrames: B.routeFrames, routeMax: +(B.routeMax || 0).toFixed(1), hops: B.hops, doorSide: B.doorSide, doorRuns: B.doorRuns, doorLens: B.doorLens, catchLens: B.catchLens, lensPick: B.lensPick, gripErr: +B.gripErr.toFixed(3), maxGripErr: +B.maxGripErr.toFixed(3), bodyErr: +(B.bodyErr || 0).toFixed(3), maxBodyErr: +(B.maxBodyErr || 0).toFixed(3), mode: B.mode, blanket: +B.blanket.toFixed(2), lamp: +B.lampK.toFixed(2), escort: B.escort.map((e) => e.key), black: B.black, frames: B.frames,
+    stats() { return { stage: B.stage, t: +B.t.toFixed(2), raid: B.raid, s: +B.s.toFixed(1), L: +R.L.toFixed(1), route: B.routeMode, routeMs: +(B.routeMs || 0).toFixed(1), routeFrames: B.routeFrames, routeMax: +(B.routeMax || 0).toFixed(1), hops: B.hops, doorSide: B.doorSide, doorRuns: B.doorRuns, doorLens: B.doorLens, catchLens: B.catchLens, lensPick: B.lensPick, gripErr: +B.gripErr.toFixed(3), maxGripErr: +B.maxGripErr.toFixed(3), headD: +B.headD.toFixed(3), maxHeadD: +B.maxHeadD.toFixed(3), headShift: +B.headShift.toFixed(3), maxHeadShift: +B.maxHeadShift.toFixed(3), headShiftV: [B.hsx, B.hsy, B.hsz], bodyErr: +(B.bodyErr || 0).toFixed(3), maxBodyErr: +(B.maxBodyErr || 0).toFixed(3), mode: B.mode, blanket: +B.blanket.toFixed(2), lamp: +B.lampK.toFixed(2), escort: B.escort.map((e) => e.key), black: B.black, frames: B.frames,
       doorTripod: B.doorTripod ? [+B.doorTripod.x.toFixed(2), +B.doorTripod.y.toFixed(2), +B.doorTripod.z.toFixed(2)] : null, doorCut: !!B.doorCut,
+      cutWait: B.cutWait || 0, cutAt: B.cutAt, stretchN: B.stretchN || 0, nudges: B.nudges || 0,
       inCut: !!B.inCut, doorTh: Number.isFinite(B.doorTh) ? +B.doorTh.toFixed(2) : null, legTh: Number.isFinite(B.legTh) ? +B.legTh.toFixed(2) : null,
       tuckTripod: B.tuckTripod ? [+B.tuckTripod.x.toFixed(2), +B.tuckTripod.y.toFixed(2), +B.tuckTripod.z.toFixed(2)] : null, tuckOn: !!B.tuckOn,
       tripod: B.tripod ? [+B.tripod.x.toFixed(2), +B.tripod.y.toFixed(2), +B.tripod.z.toFixed(2)] : null,

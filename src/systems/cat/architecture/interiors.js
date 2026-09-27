@@ -760,12 +760,16 @@ export function guestInterior(T, f, o = {}) {
 
   R.pool(0.4, 0.08, 0.6, 2.8);
   R.pool(hx - 0.6, 1.1, -0.9, 1.1);
-  const p = R.world(-2.4, 1.1);
+  // the wardrobe's prompt stands AT the wardrobe (in front of its doors), with
+  // a reach that stops short of the doorway: at (-2.4, 1.1) and r 3.0 it was
+  // 2.3 u from the wardrobe and 2.9 from the door, so at the shut door after the
+  // dawn wake-up E said "Open the wardrobe"
+  const p = R.world(WX + 1.05, -1.0);
   T.act('guest_in', p[0], p[1], 'Open the wardrobe', [
     'the wardrobe is full of pyjamas. every pair is your size. the tags have been cut out.',
     'on the shelf: a folded towel, a spare toothbrush, and a photograph of this room with you in it.',
     'the photograph is not from today. you have not slept here yet.',
-  ], { r: 3.0, speaker: 'THE GUEST ROOM' });
+  ], { r: 2.4, speaker: 'THE GUEST ROOM' });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -32,17 +32,21 @@ function soup(tris, uvs) {
   return g;
 }
 
-/** Gable roof prism: ridge runs along +Z, slopes fall toward ±X. Bottom at y=0. */
+/** Gable roof prism: ridge runs along +Z, slopes fall toward ±X. Bottom at y=0.
+ *  Every face is wound counter-clockwise seen from OUTSIDE, so its normal points
+ *  out (slopes up and out, gable ends ±Z, underside down). It used to be wound
+ *  the other way round: from outside both slopes were back faces and culled,
+ *  and what showed was the far slope's inside, lit from below. */
 function gable(w, h, d) {
   const x = w / 2, z = d / 2;
   const A = [-x, 0, -z], B = [x, 0, -z], C = [x, 0, z], D = [-x, 0, z], R1 = [0, h, -z], R2 = [0, h, z];
   const t = [];
   const quad = (a, b, c, e) => { t.push(...a, ...b, ...c, ...a, ...c, ...e); };
-  quad(B, C, R2, R1);      // +X slope
-  quad(D, A, R1, R2);      // -X slope
-  t.push(...A, ...B, ...R1);
-  t.push(...C, ...D, ...R2);
-  quad(A, D, C, B);        // underside
+  quad(R1, R2, C, B);      // +X slope   (normal +X +Y)
+  quad(R2, R1, A, D);      // -X slope   (normal −X +Y)
+  t.push(...R1, ...B, ...A);   // −Z gable end
+  t.push(...R2, ...D, ...C);   // +Z gable end
+  quad(B, C, D, A);        // underside  (normal −Y)
   return soup(t);
 }
 

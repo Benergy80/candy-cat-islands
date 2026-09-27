@@ -20,10 +20,12 @@
 // has got no nearer for 6 s (2.5 s within 11 u of him, 2 s from the wrong
 // side of a hedge row) stops circling and presses in, round whatever was in
 // the way.
-// A visitor they catch is carried by the scruff back to the foot of the
-// bridge, then OVER THE RAINBOW (≈ 20 s, the camera side-on, two escorts
-// padding behind), and only once the lights are out does he land in the
-// guest bed on Cat Island. They are due back at the foot of the rainbow by
+// A visitor they catch is carried by the scruff back toward the foot of the
+// bridge — a dip to black as it bounds off, up again on the deck past the
+// gate arch — then OVER THE RAINBOW (≈ 19 s, the camera side-on, two escorts
+// padding behind), a dip short of the Cat end's arch, and the town's bedtime
+// walks him the last stretch (see DIP_IN / DIP_OUT); only once the lights
+// are out does he land in the guest bed on Cat Island. They are due back at the foot of the rainbow by
 // 04:00 (RETREAT_H): the ones hunting far inland yawn and set off early, by
 // as long as the walk back takes (never before 02:24, HOME_LEAD_MAX), and the
 // trot home is timed like the crossing (homeSpeed()), so the whole party is
@@ -73,6 +75,8 @@ const RAIDERS = [
   { key: 'raid_marm', name: 'Big Marmalade', was: 'the Night Bakery', pattern: 'tabby', size: 1.22 },
 ];
 const LANES = [0, -1.15, 1.15, -0.55, 0.55];
+const RAINBOW_SEE = /^rainbow_(deck|fascia|bands|lip)/;   // (the bridge's glowing surfaces: walls to the carry's lens all the same)
+const ESC_LANE = 1.2;           // the carry's escort: this far LEFT of the way (the lens rides on the right)
 
 // The crossing is timed in GAME hours, not paced: at the old fixed 4.4 u/s
 // lope the r4 deck (208 u of arc, up from 170) kept the party on it from 20:00
@@ -83,8 +87,22 @@ const CROSS_MIN = 4.4;          // u/s: a short deck is loped…
 const CROSS_MAX = 9.6;          // u/s: …a long one bounded (the visitor runs at 11)
 const FILE_GAP = 5.2;           // u between noses in the file (muster stagger = FILE_GAP / speed)
 const CARRY_LAND = 6.2;         // u/s: bounding to the foot of the bridge with you in its mouth
-const CARRY_CUT = 10;           // s: longer than that on land and it is a cut, in the dark
+const CARRY_CUT = 10;           // s: longer than that on land and it is a cut, in the dark (no bridge path)
 const CARRY_SECS = 20;          // over the rainbow
+// THE ENDS OF THE RAINBOW ARE EDITS, not shots. Each foot of the deck has a
+// gate arch (two 5.4-u canes, escape/bridge.js GATE_S = 2.6 u in) and Sugar
+// Pier's pylons and bollards round it: the side-on lens looks through the
+// arch and the rail line at the deck's edge at both ends, and no swing of it
+// clears them (the verifier's r1: him 0.2–7% seen for up to 0.35 s at each
+// end). So the carry DIPS: after the grab, to black while it bounds off, and
+// up again with the carrier already DIP_IN u of deck past the Candy
+// Kingdom's foot (the arch behind it); and DIP_OUT u short of the Cat end it
+// dips again, and in the dark it is at the end of the deck and the town's
+// bedtime has him (citizens/carry.js fromRaid, black: the far side of its own
+// dip, the last stretch to the guest house). He never leaves the jaws.
+const DIP_IN = 6.2;             // u of deck past the Candy Kingdom's foot where the carry fades up (arch at 2.6)
+const DIP_OUT = 14;             // u short of the end of the route where it dips (the Cat arch 2.6 u in from it)
+const DIP_SECS = 0.45, DIP_HOLD = 0.07, LIFT_SECS = 0.5;
 const CARRY_CAM_D = 14;         // the lens over the rainbow: side-on, close…
 const CARRY_CAM_EL = 0.2;       // …and low
 const RETREAT_H = 4.0;          // due back at the foot of the rainbow (and on it as the sky goes pink)
@@ -165,7 +183,7 @@ export function createRaid(ctx, H) {
     phase: 'home', n: 0, nights: 0, doneTonight: false, retreat: false, via: 'none',
     carry: null, forced: false, lastH: null, frame: 0, markT: 0, landedAt: -1, announced: false,
     lineAt: -99, lines: 0, wake: 0, deckK: 0, leadT: 0, retreatT: 0,
-    hush: null, hushChk: 0, hushCool: -99, hushN: 0, duckUntil: 0, staging: false,
+    hush: null, hushChk: 0, hushCool: -99, hushN: 0, duckUntil: 0, staging: false, lag: 0,
   };
   // steering among the party (brain.js step calls S.tigerSteer)
   const RS = { solidsNear: S.solidsNear, isLow: S.isLow, tigerSteer: (c, u) => raidSteer(c, u) };
@@ -594,6 +612,7 @@ export function createRaid(ctx, H) {
     pack.x = opts.how === 'hunt' ? opts.x : landX(); pack.z = opts.how === 'hunt' ? opts.z : landZ();
     RT.graceUntil = S.elapsed + (opts.grace ?? 4);
     R.markT = 0;
+    rpPrefetch();                                    // (the rainbow lens's trees, long before any carry)
     ctx.events.emit('raid:start', { n: R.n, via: R.via });
     if (!opts.quiet) {
       const where = ctx.state.island;
@@ -603,9 +622,9 @@ export function createRaid(ctx, H) {
   }
   /** Everyone home, now (dawn, a jumped clock, the carry's lights-out). */
   function end() {
-    // (a carry ended in its dark — a skip's, a cut's — must not leave the
-    //  screen black now that ui.fade really shows: lift it)
-    if (R.carry && (R.carry.stage === 'dark' || R.carry.cut === 1)) { try { ui()?.fade?.(false, 0.4); } catch (e) { /* no ui */ } }
+    // (a carry ended in its dark — a skip's, a cut's, a dip's — must not leave
+    //  the screen black now that ui.fade really shows: lift it)
+    if (R.carry && (R.carry.stage === 'dark' || R.carry.cut === 1 || R.carry.out === 1)) { try { ui()?.fade?.(false, 0.4); } catch (e) { /* no ui */ } }
     endHush(false);
     for (const c of party) { resetBody(c); hide(c); }
     if (R.phase !== 'home') ctx.events.emit('raid:home', {});
@@ -1053,7 +1072,17 @@ export function createRaid(ctx, H) {
       target: () => carryAim(C),
       distance: 12.0, elevation: 0.34, duration: 3600, in: 0.7, hold: 3598, out: 0.9,
     };
+    // THE GRAB from the tiger's SIDE (as the town's catch): from the gameplay
+    // lens, behind him, the tiger springing at him from the far side put its
+    // head in front of him for the whole grab. The side nearer the lens
+    // first, then the other; a side whose sight line to him is shut (the
+    // carry's own test) is passed over; neither clear: as it was.
+    if (!onPath) { const az = grabSide(c); if (az !== null) o.azimuth = az; }
     C.cine = ctx.systems.camera?.cinematic?.(o) || null;
+    C.bAz = 0; C.bEl = 0; C.bDk = 1;
+    // the rainbow's lens, planned from here (the grab and the dip onto the
+    // deck give it a head start): from where the carry fades up on the deck
+    if (route.ok) rpPlan(c, onPath ? Math.max(c.s, sIn()) : sIn());
     // (a scuff of dust and a few glints — the old 24-puff white cloud hid the grab)
     ctx.systems.particles?.dust?.(p.position.x, p.position.y + 0.05, p.position.z, { count: 5, size: 0.3, alpha: 0.3 });
     ctx.systems.particles?.burst?.({ x: p.position.x, y: p.position.y + 1.3, z: p.position.z, count: 7, shape: 'sparkle', blend: 'add', color: [0xffe9a8, 0xfff4e0], speed: 1.4, life: 0.45, size: 0.12, gravity: 0, spread: 0.25 });
@@ -1065,6 +1094,22 @@ export function createRaid(ctx, H) {
     for (let i = 0; i < others.length; i++) { others[i].escort = i < 2 ? i + 1 : 0; others[i].think = 0; }
     if (onPath) enterBridge(C);
   }
+  const _gP = new THREE.Vector3(), _gT = new THREE.Vector3();
+  function grabSide(c) {
+    const sight = H.bedtime?.sight, p = pl(), cm = ctx.camera; if (!sight || !p || !cm) return null;
+    if (!RPL.O) RPL.O = sight.set(RAINBOW_SEE);
+    const P = p.position, az0 = Math.atan2(cm.position.x - P.x, cm.position.z - P.z);
+    const near = Math.abs(wrapPi(c.yaw + Math.PI / 2 - az0)) <= Math.abs(wrapPi(c.yaw - Math.PI / 2 - az0)) ? 1 : -1;
+    sight.gather(RPL.O, P.x, P.z, 18); RPL.gi = -1;
+    for (const sd of [near, -near]) for (const k of [0, -0.3, 0.3]) {
+      const az = c.yaw + sd * (Math.PI / 2 + k), ce = Math.cos(0.34);
+      _gP.set(P.x + Math.sin(az) * ce * 12, P.y + 1.0 + Math.sin(0.34) * 12, P.z + Math.cos(az) * ce * 12);
+      let ok = true;
+      for (const dy of [0.6, 1.1]) { _gT.set(P.x, P.y + dy, P.z); if (!sight.clear(RPL.O, _gP, _gT, 0.55)) { ok = false; break; } }
+      if (ok) return az;
+    }
+    return null;
+  }
   function enterBridge(C) {
     const c = C.cat;
     if (!route.ok) { C.stage = 'dark'; C.t = 0; ui()?.fade?.(true, 1.1); return; }
@@ -1072,6 +1117,7 @@ export function createRaid(ctx, H) {
     if (c.mode !== 'path') { c.mode = 'path'; c.s = 0; c.seg = 0; }
     c.sDir = 1; c.laneWant = 0;
     C.speed = clamp((route.L - c.s) / CARRY_SECS, 3.2, 9.5);
+    if (RPL.n === 0 || Math.abs(RPL.s0 - c.s) > 0.05) rpPlan(c, c.s);
     // side-on from OUTSIDE the arc (left of the way they are going: the U
     // turns right), low, so the bands are under them and both islands behind
     routeAt(c, c.s, 0, _ps);
@@ -1079,12 +1125,308 @@ export function createRaid(ctx, H) {
     // (close and low: the tiger's head and him in its jaws a quarter of the
     //  frame, the bands' edge under them, the far island and the night above —
     //  not a steep look down on 45% empty sea)
-    if (C.o) { C.o.azimuth = C.side; C.o.distance = CARRY_CAM_D; C.o.elevation = CARRY_CAM_EL; }
+    // (the plan's swing where the deck begins, at once: the bridge's framing
+    //  is a cut from the bound to its foot anyway, and eased in from nothing
+    //  it swung through the gate's canes)
+    rpBias(c.s, _rpb); C.bAz = _rpb.az; C.bEl = _rpb.el; C.bDk = _rpb.dk;
+    if (C.o) { C.o.azimuth = wrapPi(C.side + C.bAz); C.o.distance = CARRY_CAM_D * C.bDk; C.o.elevation = CARRY_CAM_EL + C.bEl; }
     for (const o of party) if (o.escort && o.mode === 'land') o.think = 0;
+  }
+  // ── the two edits (see DIP_IN / DIP_OUT) ───────────────────────────────────
+  /** Where the carry fades up on the deck: DIP_IN u of it past the Candy
+   *  Kingdom's foot (route s; the landing leg is route.Lb long). */
+  function sIn() { return route.ok ? Math.min(route.L * 0.3, route.Lb + DIP_IN) : 0; }
+  /** Where it dips to black short of the Cat end (route s). */
+  function sOut() { return route.ok ? Math.max(sIn() + 20, route.L - DIP_OUT) : Infinity; }
+  function dipStart(C) { C.cut = 1; C.cutT = 0; ui()?.fade?.(true, DIP_SECS); }
+  /** Stand a raider on the route at s, lane `lane`, facing along it (the
+   *  frame it is put there: posed at once, no time passing). */
+  function standOnRoute(c, s, lane, el) {
+    c.mode = 'path'; c.sDir = 1; c.seg = 0; c.s = s; c.lane = c.laneWant = lane; c.delay = 0;
+    routeAt(c, s, lane, _ps);
+    c.x = _ps.x; c.y = _ps.y; c.z = _ps.z; c.yaw = c.faceDir = _ps.yaw;
+    c.slope = clamp(-_ps.slope * 0.85, -0.85, 0.85);
+    poseRaider(c, 0, el);
+  }
+  /** In the black of the first dip: the carrier DIP_IN u up the deck (the
+   *  gate arch behind it), the escort in file behind it on the far lane, the
+   *  rainbow's shot cut to (camera.snap() settles the lens — the grab's dolly
+   *  would otherwise ease out over half a second after the cut — and the shot
+   *  is re-issued at once, in: 0.01), and the fade up. */
+  function dipIn(C) {
+    const c = C.cat, el = ctx.state.elapsed - R.lag;
+    const s = Math.max(c.mode === 'path' ? c.s : 0, sIn());
+    C.cut = 2;
+    const ct = c.carryTo;
+    resetBody(c);
+    c.carryTo = ct || { x: landX(), z: landZ() };
+    c.vis = 1;
+    standOnRoute(c, s, 0, el);
+    for (const o of party) {
+      if (o === c || !o.escort) continue;
+      if ((o.mode !== 'land' && o.mode !== 'path') || o.delay > 0 || o.vis < 0.5) { o.escort = 0; o.think = 0; continue; }
+      const e = o.escort;
+      resetBody(o); o.escort = e;
+      standOnRoute(o, Math.max(0, s - 5.6 * e), -ESC_LANE, el);
+    }
+    const cam = ctx.systems.camera;
+    try { cam?.snap?.(); } catch (e) { /* camera gone */ }
+    if (C.o) { const o2 = Object.assign({}, C.o); o2.in = 0.01; C.o = o2; C.cine = cam?.cinematic?.(o2) || C.cine; }
+    enterBridge(C);
+    placeCarried(1);
+    ui()?.fade?.(false, LIFT_SECS);
+  }
+  /** In the black of the last dip: the carrier at the end of the deck, and
+   *  the town's bedtime takes it (and him) from there, still black. */
+  function dipOut(C) {
+    const c = C.cat;
+    C.out = 2;
+    standOnRoute(c, route.L, 0, ctx.state.elapsed - R.lag);
+    c.moving = false;
+    placeCarried(1);
+    if (!handOff(C, false, true)) { C.stage = 'dark'; C.t = 0; }
+  }
+  // ── the rainbow's lens, steered round what stands in its way ──────────────
+  // Side-on from outside the arc, the lens swept past the pylons, canes and
+  // lamp posts at the two ends of the bridge — and the camera's see-through
+  // window dithered them over him (three times, 0.07–0.13 s each). As the
+  // town walk's lens is steered (citizens/carry.js walkBias): the lens the
+  // carry WILL have is predicted along the deck every RP_DS u (its side eased
+  // as updateCarry eases it, its aim, distance and elevation), its rays to him
+  // (his collar, middle and knees) are tested against the drawn scene round
+  // them (the carry's own sight test, bedtime.sight), and each blocked run
+  // gets the least swing (RCAND: azimuth, elevation, distance ×) that clears
+  // the most of it, eased in over RP_RAMP u before the run and out after —
+  // the ramps themselves re-tested at the part-swing they will stand at.
+  // Planned from the grab (the grab and the dip onto the deck buy it a second
+  // and more), RP_RAYS rays a frame, well ahead of him.
+  // (only the two ENDS are planned — RP_ZONE u of deck at each, from where
+  //  the carry fades up and to just past where it dips out (RP_OUT_PAD: the
+  //  fade's own stride): out over the water the arc's own low edge canes lie
+  //  across his waist at worst, and a plan of the whole 200-u arc cost forty
+  //  thousand rays)
+  // DETERMINISTIC: the budget is a count of rays, never the clock, and a
+  // gather ends the frame's work (the camera's tree state never gates it —
+  // camera/bvh.js answers the same with a tree or without; rpPrefetch queues
+  // the trees when the raid starts, hours before any carry, so the rays are
+  // cheap as well as the same). Samples are gathered in groups of up to
+  // eight that never straddle the gap between the two zones.
+  const RP_DS = 0.6, RP_MAX = 120, RP_RAMP = 3.2, RP_RAYS = 24, RP_RUNS = 16, RP_ZONE = 26, RP_OUT_PAD = 4.5, RP_GRP = 8;
+  // swings [azimuth, elevation, distance ×]: the gate's canes stand at the
+  // deck's edge a stride from him, so a side-on lens always looks through the
+  // line of them — the swings that clear it look along the deck (±0.35..1.0
+  // rad round) or over it (+elevation)
+  // (small ones only, and only a swing that clears the WHOLE of a run is
+  //  taken — a run nothing clears is left alone: the big swings a plan found
+  //  "best" there stood the lens under the rainbow's own bands)
+  const RCAND = [[0, 0, 1], [0.2, 0, 1], [-0.2, 0, 1], [0, 0.12, 1], [0.2, 0.12, 1], [-0.2, 0.12, 1], [0, 0.22, 1], [0.3, 0.06, 1], [-0.3, 0.06, 1]];
+  const RPL = { n: 0, i: 0, s0: 0, sp: 1, s: new Float32Array(RP_MAX), side: new Float32Array(RP_MAX), mask: new Uint32Array(RP_MAX),
+    grp: new Int16Array(RP_MAX), gm: new Int16Array(RP_MAX), ng: 0, gathers: 0, Opre: null,
+    runs: [], pool: [], done: true, gi: -1, O: null, a: -1, b: -1, rays: 0, ms: 0, maxMs: 0, blocked: 0, frames: 0, stuck: 0, ext: 0,
+    fw: 0, lt: 0, oy: 0.3, T: 1, dir: 1, ver: { r: null, j: 0, j1: 0, pass: 0, changed: false }, spikes: [] };
+  for (let i = 0; i < RP_RUNS; i++) RPL.pool.push({ sa: 0, sb: 0, sa0: 0, sb0: 0, daz: 0, del: 0, dk: 1, alts: new Int8Array(RCAND.length), an: 0, ai: 0, n: 0, a: 0, b: 0, dead: false });
+  const _rpA = new THREE.Vector3(), _rpJ = new THREE.Vector3(), _rpM = new THREE.Vector3(), _rpL = new THREE.Vector3(), _rpP = new THREE.Vector3();
+  const _rps = { x: 0, y: 0, z: 0, yaw: 0, slope: 0, deck: false }, _rpb = { az: 0, el: 0, dk: 1 };
+  const _rpc = { seg: 0 };
+  /** Lay out the plan from s0 (the carrier's s when the bridge begins). */
+  function rpPlan(c, s0) {
+    RPL.n = 0; RPL.i = 0; RPL.runs.length = 0; RPL.done = true; RPL.gi = -1; RPL.a = -1; RPL.b = -1; RPL.ng = 0; RPL.gathers = 0;
+    RPL.rays = 0; RPL.ms = 0; RPL.maxMs = 0; RPL.blocked = 0; RPL.frames = 0; RPL.stuck = 0; RPL.ext = 0; RPL.ver.r = null; RPL.spikes.length = 0; RPL.k = 0; RPL.m = 0;
+    const sight = H.bedtime?.sight;
+    if (!route.ok || !sight) return;
+    if (!RPL.O) RPL.O = sight.set(RAINBOW_SEE);
+    rpPrefetch();
+    const sp = clamp((route.L - s0) / CARRY_SECS, 3.2, 9.5);    // (as enterBridge)
+    RPL.s0 = s0; RPL.sp = sp; RPL.T = tigerScale(c);
+    // the rig's lift of the jaws over the static mouth, in the carrier's own frame
+    jaws(c, _jawR); mouth(c, _mouth);
+    { const sy = Math.sin(c.yaw), cy = Math.cos(c.yaw), ox = _jawR.x - _mouth.x, oz = _jawR.z - _mouth.z, oy = _jawR.y - _mouth.y;
+      if (Math.hypot(ox, oy, oz) < 1.5) { RPL.fw = ox * sy + oz * cy; RPL.lt = ox * cy - oz * sy; RPL.oy = oy; } }
+    // the lens's side, eased along the deck as updateCarry eases it
+    _rpc.seg = 0;
+    routeAt(_rpc, s0, 0, _rps);
+    let side = wrapPi(_rps.yaw + Math.PI / 2);
+    const kS = 1 - Math.exp(-1.2 * RP_DS / sp);
+    // (the Cat zone ends a fade's stride past the dip: black from there on)
+    const qEnd = Math.min(route.L, sOut() + RP_OUT_PAD);
+    let gn = 0, qPrev = -Infinity;
+    for (let q = s0, t = 0, f = 0; q <= qEnd && RPL.n < RP_MAX; q += RP_DS, t += RP_DS / sp, f++) {
+      if (f > 0) { routeAt(_rpc, Math.min(route.L, q + 6), 0, _rps); side = wrapPi(side + wrapPi(_rps.yaw + Math.PI / 2 + Math.sin(t * 0.16) * 0.26 - side) * kS); }
+      if (q > s0 + RP_ZONE && q < route.L - RP_ZONE) continue;            // (the middle: simulated, not planned)
+      const i = RPL.n++;
+      RPL.s[i] = q; RPL.side[i] = side; RPL.mask[i] = 0;
+      // (a new gather group every RP_GRP samples, and across the gap)
+      if (!RPL.ng || gn >= RP_GRP || q - qPrev > RP_DS * 1.5) { RPL.gm[RPL.ng++] = i; gn = 0; }
+      RPL.grp[i] = RPL.ng - 1; gn++; qPrev = q;
+    }
+    // (each group is gathered round its middle sample)
+    for (let g = 0; g < RPL.ng; g++) { const a = RPL.gm[g], b = g + 1 < RPL.ng ? RPL.gm[g + 1] - 1 : RPL.n - 1; RPL.gm[g] = (a + b) >> 1; }
+    RPL.done = RPL.n === 0;
+  }
+  /** Queue the camera accelerator's trees for everything round both ends of
+   *  the rainbow (a scratch gather: gatherOcc want()s every eligible mesh in
+   *  range), so the plan's rays run on trees whenever they run. Only what a
+   *  ray COSTS depends on it (camera/bvh.js: the same answer, bit for bit). */
+  function rpPrefetch() {
+    const sight = H.bedtime?.sight; if (!sight || !route.ok) return;
+    if (!RPL.Opre) RPL.Opre = sight.set(RAINBOW_SEE);
+    const O = RPL.Opre, r = RP_ZONE * 0.5 + CARRY_CAM_D + 9;
+    routeAt(_rpc, Math.min(route.L, sIn() + RP_ZONE * 0.5), 0, _rps); sight.gather(O, _rps.x, _rps.z, r);
+    routeAt(_rpc, Math.max(0, sOut() - RP_ZONE * 0.4), 0, _rps); sight.gather(O, _rps.x, _rps.z, r);
+    O.list.length = 0; O.instO.length = 0; O.instN = 0;          // (only the want()s were wanted)
+  }
+  /** The drawn scene round group g's middle sample, into the plan's set. */
+  function rpGather(g) {
+    RPL.gi = g; RPL.gathers++;
+    routeAt(_rpc, RPL.s[RPL.gm[g]], 0, _rps);
+    H.bedtime.sight.gather(RPL.O, _rps.x, _rps.z, CARRY_CAM_D + 6 + RP_DS * RP_GRP * 0.5);
+  }
+  /** The sample the plan's next piece of work tests (-1: none). */
+  function rpNext() {
+    const V = RPL.ver;
+    if (V.r) return V.j <= V.j1 ? V.j : -1;
+    return !RPL.done && RPL.i < RPL.n ? RPL.i : -1;
+  }
+  const _jawR = { x: 0, y: 0, z: 0 };
+  /** Is sample i (u of the way on to i + 1) clear with the lens swung by
+   *  (daz, del, dk) — at that distance AND pulled in to RP_DOLLY of it (the
+   *  camera dollies in front of what it half sees, and the dollied lens saw
+   *  him through the gate's cane)? */
+  function rpTest(i, daz, del, dk, u = 0, probe = false) {
+    const sight = H.bedtime.sight, T = RPL.T;
+    const j = Math.min(RPL.n - 1, i + 1), q = RPL.s[i] + RP_DS * u, jn = RPL.s[j] - RPL.s[i] < RP_DS * 1.5 ? j : i;
+    if (RPL.grp[i] !== RPL.gi) rpGather(RPL.grp[i]);         // (rpStep gathers first; the debug hooks here)
+    routeAt(_rpc, q, 0, _rps);
+    const yaw = _rps.yaw, sy = Math.sin(yaw), cy = Math.cos(yaw);
+    const p = clamp(-_rps.slope * 0.85, -0.85, 0.85), cp = Math.cos(p), sn = Math.sin(p);
+    const zm = (TP.spineZ + TP.neckZ + TP.headZ + TP.muzzleZ + 0.20) * T, ym = (TP.spineY + TP.neckY + TP.headY + TP.muzzleY) * T;
+    const yy = ym * cp - zm * sn, zz = ym * sn + zm * cp;
+    const mx = _rps.x + sy * zz, my = _rps.y + yy, mz = _rps.z + cy * zz;
+    // the aim (carryAim on the bridge: back over the tiger, a touch under)
+    _rpA.set(mx - sy * 0.9 * T, my - 0.35, mz - cy * 0.9 * T);
+    // him: the collar in the jaws (the rig's lift)
+    _rpJ.set(mx + sy * RPL.fw + cy * RPL.lt, my + RPL.oy, mz + cy * RPL.fw - sy * RPL.lt);
+    const side = RPL.side[i] + wrapPi(RPL.side[jn] - RPL.side[i]) * u;
+    const a = side + daz * RPL.dir, e = CARRY_CAM_EL + del, ce = Math.cos(e);
+    for (let pass = 0; pass < 1; pass++) {
+      const d = CARRY_CAM_D * dk;
+      _rpP.set(_rpA.x + Math.sin(a) * ce * d, _rpA.y + Math.sin(e) * d, _rpA.z + Math.cos(a) * ce * d);
+      if (probe) return true;
+      // BLOCKED = most of him: of six points over his body (down his middle
+      // from the collar to the knees, and a hand either side of his middle
+      // across the line of sight) three or more behind something — a pylon
+      // or a gate cane across him, never the deck's edge rail laid over his
+      // waist (it lines the whole arc: a sliver of him, all the way over)
+      const lx = -(_rpJ.z - _rpP.z), lz = _rpJ.x - _rpP.x, ll = Math.hypot(lx, lz) || 1, ox = lx / ll * 0.35, oz = lz / ll * 0.35;
+      let bad = 0, good = 0;
+      for (let k = 0; k < 6; k++) {
+        if (k < 4) _rpM.set(_rpJ.x, _rpJ.y - RP_DOWN[k], _rpJ.z);
+        else _rpM.set(_rpJ.x + (k === 4 ? ox : -ox), _rpJ.y - 0.7, _rpJ.z + (k === 4 ? oz : -oz));
+        if (sight.clear(RPL.O, _rpP, _rpM)) { if (++good >= 4) break; } else if (++bad >= 3) return false;
+      }
+    }
+    return true;
+  }
+  const RP_DOWN = [0.7, 0.05, 1.05, 0.38];
+  /** Sample i and the half-way to the next: a cane slips between samples. */
+  const rpClear = (i, daz, del, dk) => rpTest(i, daz, del, dk, 0) && rpTest(i, daz, del, dk, 0.5);
+  /** The swing applied at s (the strongest run's, eased over its ramps). */
+  function rpBias(q, out) {
+    let az = 0, el = 0, dk = 1, w = 0;
+    for (let i = 0; i < RPL.runs.length; i++) {
+      const r = RPL.runs[i];
+      if (r.dead) continue;
+      const k = q < r.sa ? smoothstep(r.sa - RP_RAMP, r.sa, q) : q > r.sb ? 1 - smoothstep(r.sb, r.sb + RP_RAMP, q) : 1;
+      const m = k * (Math.abs(r.daz) + r.del + (1 - r.dk));
+      if (m > w) { w = m; az = r.daz * k; el = r.del * k; dk = 1 - (1 - r.dk) * k; }
+    }
+    out.az = az * RPL.dir; out.el = el; out.dk = dk;
+    return out;
+  }
+  /** A blocked run [a, b] is closed: its swing (the one that clears the most
+   *  of it), and its ramps queued to be re-tested at the part-swing they will
+   *  stand at (rpVerify, under the same ray budget). */
+  const _rpSc = new Int32Array(32);
+  function rpClose(a, b) {
+    if (RPL.runs.length >= RP_RUNS) { RPL.stuck++; return; }
+    const r = RPL.pool[RPL.runs.length];
+    r.an = 0; r.ai = 0; r.n = b - a + 1;
+    let nb = 0;
+    for (let k = 1; k < RCAND.length; k++) {
+      let n = 0; for (let j = a; j <= b; j++) if (RPL.mask[j] & (1 << k)) n++;
+      if (n === b - a + 1) _rpSc[nb++] = k;                              // (clears all of it: RCAND's order)
+    }
+    if (!nb) { RPL.stuck++; return; }
+    for (let q = 0; q < nb && r.an < r.alts.length; q++) r.alts[r.an++] = _rpSc[q];
+    r.dead = false;
+    r.a = a; r.b = b;
+    rpSet(r);
+    RPL.runs.push(r);
+    const V = RPL.ver; V.r = r; V.pass = 0; V.changed = false; rpSpan(V);
+  }
+  function rpSet(r) { const k = r.alts[r.ai]; r.daz = RCAND[k][0]; r.del = RCAND[k][1]; r.dk = RCAND[k][2]; r.sa = RPL.s[r.a] - RP_DS; r.sb = RPL.s[r.b] + RP_DS; r.sa0 = r.sa; r.sb0 = r.sb; }
+  function rpIdx(q) { let i = 0; while (i < RPL.n - 1 && RPL.s[i] < q) i++; return i; }
+  function rpSpan(V) { const r = V.r; V.j = Math.max(0, rpIdx(r.sa - RP_RAMP) - 1); V.j1 = Math.min(RPL.n - 1, rpIdx(r.sb + RP_RAMP)); }
+  /** One sample of the verification: blocked at the part-swing but clear at
+   *  the whole, the run is grown over it; blocked at both, its next swing. */
+  function rpVerify() {
+    const V = RPL.ver, r = V.r;
+    if (V.j > V.j1) {
+      if (V.changed && ++V.pass < 6) { V.changed = false; rpSpan(V); return; }
+      V.r = null; return;
+    }
+    const j = V.j++;
+    rpBias(RPL.s[j], _rpb);
+    if (rpClear(j, _rpb.az * RPL.dir, _rpb.el, _rpb.dk)) return;
+    if (rpClear(j, r.daz, r.del, r.dk)) {
+      if (RPL.s[j] < r.sa) r.sa = RPL.s[j] - RP_DS * 0.5; else if (RPL.s[j] > r.sb) r.sb = RPL.s[j] + RP_DS * 0.5;
+      RPL.ext++; V.changed = true;
+    } else if (r.ai + 1 < r.an) { r.ai++; const sa = r.sa, sb = r.sb; rpSet(r); r.sa = Math.min(r.sa, sa); r.sb = Math.max(r.sb, sb); V.changed = true; }
+    else if (!r.dead) {
+      // (no swing gets it clear through its own ramps: the run is dropped —
+      //  better a cane across him for a stride than a lens swung for nothing)
+      RPL.stuck++; r.dead = true; V.r = null;
+    }
+  }
+  /** RP_RAYS rays' worth of the plan: a pending verification first, else pass
+   *  1 in s order (a run is closed two clear samples after its last blocked one).
+   *  Counted in rays and frames only — the same frames of the same carry
+   *  steer the same way on any machine (the clock is read for the stats). */
+  function rpStep(budget = RP_RAYS) {
+    if ((RPL.done && !RPL.ver.r) || !H.bedtime?.sight) return;
+    const sight = H.bedtime.sight, t0 = performance.now(), r0 = sight.rays;
+    RPL.frames++;
+    while (sight.rays - r0 < budget) {
+      // (a group's gather — a scene walk of a millisecond or two — is a
+      //  frame's whole work: its rays start on the next frame)
+      const nx = rpNext();
+      if (nx >= 0 && RPL.grp[nx] !== RPL.gi) { if (sight.rays === r0) rpGather(RPL.grp[nx]); break; }
+      if (RPL.ver.r) { rpVerify(); continue; }
+      if (RPL.done) break;
+      const i = RPL.i;
+      if (i >= RPL.n) { if (RPL.a >= 0) rpClose(RPL.a, RPL.b); RPL.a = -1; RPL.done = true; continue; }
+      // (one swing at a time, so a blocked sample's seventeen never land on one frame)
+      const k = RPL.k;
+      if (k === 0) RPL.m = 0;
+      if (rpClear(i, RCAND[k][0], RCAND[k][1], RCAND[k][2])) RPL.m |= 1 << k;
+      RPL.k = k === 0 && (RPL.m & 1) ? RCAND.length : k + 1;
+      if (RPL.k < RCAND.length) continue;
+      RPL.k = 0;
+      const m = RPL.mask[i] = RPL.m;
+      if (!(m & 1)) { RPL.blocked++; if (RPL.a < 0) RPL.a = i; RPL.b = i; }
+      else if (RPL.a >= 0 && i - RPL.b >= 2) { rpClose(RPL.a, RPL.b); RPL.a = -1; }
+      if (RPL.a >= 0 && i + 1 < RPL.n && RPL.s[i + 1] - RPL.s[i] > RP_DS * 1.5) { rpClose(RPL.a, RPL.b); RPL.a = -1; }   // (the zone ends)
+      RPL.i++;
+    }
+    const ms = performance.now() - t0;
+    RPL.rays += sight.rays - r0; RPL.ms += ms; if (ms > RPL.maxMs) RPL.maxMs = ms;
+    if (ms > 16 && RPL.spikes.length < 8) RPL.spikes.push([RPL.frames, +ms.toFixed(1), sight.rays - r0, RPL.i]);
   }
   function endCarry() {
     const C = R.carry; if (!C) return;
     C.cat.carryTo = null;
+    // (ended inside a dip — a debug re-stage — the screen comes back up)
+    if (C.cut === 1 || C.out === 1) { try { ui()?.fade?.(false, 0.3); } catch (e) { /* no ui */ } }
     // (a new, instant shot supersedes the carry's; the lens lands on him wherever he now is)
     try {
       const cam = ctx.systems.camera, p = pl();
@@ -1100,24 +1442,27 @@ export function createRaid(ctx, H) {
   }
   /** Give the carrier (and him, in its jaws) to the town's bedtime. The two
    *  escorts peel off at the pier; the rest of the party hunts on. */
-  function handOff(C, dark) {
+  function handOff(C, dark, black = false) {
     const bt = H.bedtime, c = C.cat;
     if (!bt || typeof bt.fromRaid !== 'function' || bt.active) return false;
     for (const o of party) if (o !== c && o.escort) { o.escort = 0; o.think = 0; if (o.mode === 'path' || o.mode === 'land') { o.mode = 'fade'; o.fadeT = 1; } }
     const mode0 = c.mode;
     c.carryTo = null; c.moving = false; c.mode = 'rail';
     R.carry = null;
-    if (!bt.fromRaid(c, { dark })) { c.mode = mode0; R.carry = C; return false; }
+    if (!bt.fromRaid(c, { dark, black })) { c.mode = mode0; R.carry = C; return false; }
     return true;
   }
   function updateCarry(dt) {
     const C = R.carry; if (!C) return;
     const c = C.cat;
     C.t += dt; C.clk = (C.clk || 0) + dt;
+    if (dt > 0 && (C.stage === 'grab' || C.stage === 'land' || C.stage === 'bridge')) rpStep();
     // skip: any key once he is in the jaws → straight to lights-out (still in the jaws)
     C.age = (C.age || 0) + dt;
     const inp = ctx.input;
-    if (C.age > 1.2 && !ctx.state.paused && (C.stage === 'land' || C.stage === 'bridge') && !C.cut && inp && inp.pressed && inp.pressed.size > 0) {
+    // (never inside a dip: the dip is already going to black, and the one off
+    //  the deck ends in the bedtime's hands — whose skip takes it from there)
+    if (C.age > 1.2 && !ctx.state.paused && (C.stage === 'land' || C.stage === 'bridge') && C.cut !== 1 && !C.out && inp && inp.pressed && inp.pressed.size > 0) {
       C.stage = 'dark'; C.t = 0; C.skipped = true; ui()?.fade?.(true, 0.8);
     }
     if (C.stage === 'grab') {
@@ -1125,15 +1470,24 @@ export function createRaid(ctx, H) {
       if (C.t > 0.85) { C.stage = 'land'; C.t = 0; c.think = 0; }
     } else if (C.stage === 'land') {
       placeCarried(1);
-      const d = Math.hypot(c.x - landX(), c.z - landZ());
-      if (d < 2.4) enterBridge(C);
-      else if (C.t > CARRY_CUT && !C.cut) {
-        // (stuck, or a very long way from the pier): a cut, in the dark
-        C.cut = 1; C.cutT = 0; ui()?.fade?.(true, 0.45);
+      if (route.ok) {
+        // THE EDIT ONTO THE RAINBOW: the grab's line said, it bounds off with
+        // him toward the bridge as the screen dips, and it fades up on the
+        // deck past the gate arch (dipIn) — never the side-on lens looking
+        // through the arch and the pier's pylons at the foot of the deck
+        if (!C.cut) dipStart(C);
+      } else {
+        const d = Math.hypot(c.x - landX(), c.z - landZ());
+        if (d < 2.4) enterBridge(C);
+        else if (C.t > CARRY_CUT && !C.cut) {
+          // (stuck, or a very long way from the pier): a cut, in the dark
+          C.cut = 1; C.cutT = 0; ui()?.fade?.(true, 0.45);
+        }
       }
       if (C.cut === 1) {
         C.cutT += dt;
-        if (C.cutT > 0.5) {
+        if (route.ok) { if (C.cutT > DIP_SECS + DIP_HOLD) dipIn(C); }
+        else if (C.cutT > 0.5) {
           C.cut = 2;
           c.x = landX(); c.z = landZ(); c.y = groundH(c.x, c.z); resetBody(c); c.carryTo = { x: c.x, z: c.z };
           // the cut: the carry's shot re-issued with in: 0.01 (camera.snap()
@@ -1147,6 +1501,10 @@ export function createRaid(ctx, H) {
       }
     } else if (C.stage === 'bridge') {
       placeCarried(1);
+      // (caught on the deck short of where the carry fades up: the same
+      //  edit, from where it caught him)
+      if (!C.cut && !C.out && c.s < sIn() - 0.05) dipStart(C);
+      if (C.cut === 1) { C.cutT += dt; if (C.cutT > DIP_SECS + DIP_HOLD) dipIn(C); }
       const f = route.L > 0 ? c.s / route.L : 1;
       if (C.lines === 0 && f > 0.3) { C.lines = 1; say(c, LINES_BRIDGE[0]); }
       if (C.lines === 1 && f > 0.72) { C.lines = 2; say(c, LINES_BRIDGE[1]); }
@@ -1155,12 +1513,21 @@ export function createRaid(ctx, H) {
         routeAt(c, Math.min(route.L, c.s + 6), 0, _ps);
         const want = wrapPi(_ps.yaw + Math.PI / 2 + Math.sin(C.t * 0.16) * 0.26);
         C.side = wrapPi(C.side + wrapPi(want - C.side) * (1 - Math.exp(-1.2 * dt)));
-        C.o.azimuth = C.side;
+        // …steered round what the plan found in its way (rpBias)
+        rpBias(c.s, _rpb);
+        const lw = 1 - Math.exp(-20 * dt);
+        C.bAz += (_rpb.az - C.bAz) * lw; C.bEl += (_rpb.el - C.bEl) * lw; C.bDk += (_rpb.dk - C.bDk) * lw;
+        C.o.azimuth = wrapPi(C.side + C.bAz);
+        C.o.elevation = CARRY_CAM_EL + C.bEl;
+        C.o.distance = CARRY_CAM_D * C.bDk;
       }
-      // the Cat end of the rainbow: the town's bedtime (citizens/carry.js)
-      // takes him from here — a dip to black, the last stretch to the guest
-      // house, the tuck-in; he stays in these jaws all the way
-      if (c.s >= route.L - 0.05) { if (!handOff(C, false)) { C.stage = 'dark'; C.t = 0; ui()?.fade?.(true, 1.1); } }
+      // THE EDIT OFF THE RAINBOW: short of the Cat end's gate arch it dips
+      // to black, and in the dark the town's bedtime (citizens/carry.js)
+      // takes him from the end of the deck — the far side of its own dip, the
+      // last stretch to the guest house, the tuck-in; he stays in these jaws
+      // all the way (dipOut). (A catch on the deck past sOut: at once.)
+      if (!C.out && C.cut !== 1 && (c.s >= sOut() || c.s >= route.L - 0.05)) { C.out = 1; C.outT = 0; ui()?.fade?.(true, DIP_SECS); }
+      if (C.out === 1) { C.outT += dt; if (C.outT > DIP_SECS + DIP_HOLD) { dipOut(C); if (!R.carry) return; } }
     } else if (C.stage === 'dark') {
       placeCarried(1);                              // still in the jaws until the lights are out
       if (C.t > 1.2 && handOff(C, true)) return;
@@ -1380,6 +1747,10 @@ export function createRaid(ctx, H) {
     else if (C && c.escort) {
       // the escort walks behind the carrier, closing up if it falls back
       const want = C.cat.s - 5.6 * c.escort;
+      // (in single file on the FAR lane from the lens, which rides outside
+      //  the arc on the right of the way they go: an escort abreast of the
+      //  carrier on the near lane stood between the lens and him)
+      c.laneWant = -ESC_LANE;
       sp = (C.speed || 6) * (c.s < want - 1 ? 1.3 : c.s > want ? 0.6 : 1);
     } else if (c.sDir > 0) {
       sp = homeSpeed() * c.speedK;
@@ -1446,7 +1817,7 @@ export function createRaid(ctx, H) {
     if (c.delay > 0) { c.delay -= dt; if (c.delay > 0) { c.vis = 0; return; } puff(c, 18); }
     // an escort that has reached the foot of the bridge goes up after the carrier
     if (c.escort && R.carry && R.carry.stage === 'bridge' && route.ok && Math.hypot(c.x - landX(), c.z - landZ()) < 3.2) {
-      c.mode = 'path'; c.s = 0; c.seg = 0; c.sDir = 1; c.lane = c.laneWant = c.escort === 1 ? -1.2 : 1.2; c.delay = 0; return;
+      c.mode = 'path'; c.s = 0; c.seg = 0; c.sDir = 1; c.lane = c.laneWant = -ESC_LANE; c.delay = 0; return;
     }
     // homing: at the foot of the bridge, over it (or, with no bridge, away down the pier)
     if (c.homing && Math.hypot(c.x - landX(), c.z - landZ()) < 2.6) {
@@ -1579,8 +1950,12 @@ export function createRaid(ctx, H) {
   ctx.events.on('story:rainbow_bridge', (v) => { if (v) R.navSoon = 2; });
   function update(dt) {
     // (Contract N: the carry survives a paused game — while he is in these
-    //  jaws a pause stops the raid where it stands, the carrier and him too)
-    if (R.carry && ctx.state.paused) dt = 0;
+    //  jaws, or the town's bedtime has him (a raider it was handed walks him
+    //  in), a pause stops the raid where it stands, the carrier and him too.
+    //  Its pose clock (el) stops with it: applyTiger breathes and bobs on el,
+    //  so a paused carrier's head drifted and him with it; el runs R.lag
+    //  behind the game's elapsed from then on, never jumping on resume)
+    if (ctx.state.paused && (R.carry || H.T.carrying)) { R.lag += dt; dt = 0; }
     R.frame++;
     if (R.navSoon > 0 && --R.navSoon === 0) { try { syncRoute(); candyNav(); } catch (e) { /* retried at the raid */ } }
     if (navDirty && (R.frame & 31) === 0 && navQuiet()) { try { candyNav(); } catch (e) { /* retried */ } }
@@ -1626,7 +2001,7 @@ export function createRaid(ctx, H) {
     if (R.duckUntil > 0 && S.elapsed > R.duckUntil) holdDuck(0);
     if (R.phase === 'home') return;
 
-    const el = ctx.state.elapsed;
+    const el = ctx.state.elapsed - R.lag;
     syncRoute();
     updatePack(dt);
     // rank the land raiders by distance so only the nearest three hunt (one
@@ -1827,7 +2202,7 @@ export function createRaid(ctx, H) {
       if (route.ok) {
         c.mode = 'path'; c.sDir = 1; c.s = route.Lb + clamp(o.t ?? 0.45, 0, 1) * (route.L - route.Lb); c.seg = 0; c.delay = 0; c.vis = 1;
         routeAt(c, c.s, 0, _ps); c.x = _ps.x; c.z = _ps.z; c.y = _ps.y; c.yaw = c.faceDir = _ps.yaw; c.slope = -_ps.slope * 0.85;
-        for (let i = 1; i < R.n; i++) { const e = party[i]; e.mode = 'path'; e.sDir = 1; e.s = Math.max(0, c.s - 5.6 * i); e.delay = 0; e.vis = 1; e.lane = e.laneWant = i % 2 ? -1.2 : 1.2; }
+        for (let i = 1; i < R.n; i++) { const e = party[i]; e.mode = 'path'; e.sDir = 1; e.s = Math.max(0, c.s - 5.6 * i); e.delay = 0; e.vis = 1; e.lane = e.laneWant = -ESC_LANE; }
         const p = pl(); if (p) { p.locked = false; p.onFerry = false; p.invulnerable = false; }
         startCarry(c, true);
         for (let i = 1; i < Math.min(3, R.n); i++) party[i].escort = i;
@@ -1848,6 +2223,26 @@ export function createRaid(ctx, H) {
     get active() { return R.phase !== 'home'; },
     get carrying() { return R.carry ? R.carry.cat : null; },
     get carryStage() { return R.carry ? R.carry.stage : null; },
+    /** Debug: the rainbow lens's plan (rays, runs, what it swung). */
+    get lensPlan() { return { n: RPL.n, i: RPL.i, done: RPL.done, spikes: RPL.spikes.slice(), s0: +RPL.s0.toFixed(1), blocked: RPL.blocked, rays: RPL.rays, ms: +RPL.ms.toFixed(1), maxMs: +RPL.maxMs.toFixed(1), frames: RPL.frames, stuck: RPL.stuck, ext: RPL.ext,
+      groups: RPL.ng, gathers: RPL.gathers, dips: { sIn: +sIn().toFixed(1), sOut: +sOut().toFixed(1), cut: R.carry ? R.carry.cut || 0 : null, out: R.carry ? R.carry.out || 0 : null },
+      runs: RPL.runs.map((r) => ({ sa: +r.sa.toFixed(1), sb: +r.sb.toFixed(1), daz: r.daz, del: r.del, dk: r.dk, n: r.n, alt: r.ai, dead: !!r.dead })), bias: R.carry ? [+(R.carry.bAz || 0).toFixed(3), +(R.carry.bEl || 0).toFixed(3), +(R.carry.bDk ?? 1).toFixed(3)] : null }; },
+    /** Debug: where the plan expects the lens at deck position s (with its swing): [x, y, z]. */
+    lensPred(q) {
+      if (!RPL.n || !H.bedtime?.sight) return null;
+      const i = rpIdx(q); if (Math.abs(RPL.s[i] - q) > RP_DS) return null;
+      rpBias(q, _rpb); rpTest(i, _rpb.az, _rpb.el, _rpb.dk, (q - RPL.s[i]) / RP_DS, true);
+      return [+_rpP.x.toFixed(2), +_rpP.y.toFixed(2), +_rpP.z.toFixed(2)];
+    },
+    /** Debug: what stands in the rainbow lens's way at plan sample i (unswung): [s, blocker per ray]. */
+    lensWhy(i) {
+      const sight = H.bedtime?.sight; if (!sight || !(i < RPL.n)) return null;
+      RPL.gi = -1; rpTest(i, 0, 0, 1);
+      const out = [+RPL.s[i].toFixed(1), [+_rpP.x.toFixed(1), +_rpP.y.toFixed(1), +_rpP.z.toFixed(1)], [+_rpM.x.toFixed(1), +_rpM.y.toFixed(1), +_rpM.z.toFixed(1)]];
+      for (const dy of [0.05, 0.38, 0.7, 1.05]) { _rpL.set(_rpJ.x, _rpJ.y - dy, _rpJ.z); out.push(sight.clear(RPL.O, _rpP, _rpL) ? '-' : sight.by); }
+      RPL.gi = -1;
+      return out;
+    },
     /** The hush shot is up (he is under the planks with a raider near). */
     get hushing() { return !!R.hush; },
     get via() { return R.via; },

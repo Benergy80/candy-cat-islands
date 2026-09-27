@@ -875,5 +875,192 @@
     18.4
    ]
   }
+ },
+ "doors_solid_arrival": {
+  "free": [
+   49.86,
+   28.71
+  ],
+  "time": 11,
+  "frames": 45,
+  "az": 2.031,
+  "el": 0.2,
+  "dist": 7.5,
+  "fov": 50
+ },
+ "doors_solid_harbour": {
+  "free": [
+   100.96,
+   76.58
+  ],
+  "time": 11,
+  "frames": 45,
+  "az": 0.85,
+  "el": 0.2,
+  "dist": 7.5,
+  "fov": 50,
+  "y": 6.4
+ },
+ "doors_solid_keeper": {
+  "free": [
+   221.39,
+   40.18
+  ],
+  "time": 11,
+  "frames": 45,
+  "az": 0.8,
+  "el": 0.2,
+  "dist": 7.5,
+  "fov": 50
+ },
+ "doors_solid_bank": {
+  "free": [
+   113.76,
+   8.69
+  ],
+  "time": 11,
+  "frames": 45,
+  "az": -2.644,
+  "el": 0.42,
+  "dist": 9.0,
+  "fov": 50
+ },
+ "doors_solid_shop": {
+  "free": [
+   115.9,
+   -4.9
+  ],
+  "time": 11,
+  "frames": 45,
+  "az": 0.497,
+  "el": 0.18,
+  "dist": 10,
+  "fov": 50
+ },
+ "doors_cat_watch_front": {
+  "free": [
+   214.0,
+   34.4
+  ],
+  "y": 13.3,
+  "time": 11,
+  "frames": 45,
+  "az": -0.25,
+  "el": 0.45,
+  "dist": 7.5,
+  "fov": 50,
+  "call": {
+   "catArchitecture.openDoor": [
+    "watch",
+    true
+   ],
+   "player.teleport": [
+    216.6,
+    37.2
+   ]
+  }
+ },
+ "doors_cat_watch_front_shut": {
+  "free": [
+   214.0,
+   34.4
+  ],
+  "y": 13.3,
+  "time": 11,
+  "frames": 45,
+  "az": -0.25,
+  "el": 0.45,
+  "dist": 7.5,
+  "fov": 50,
+  "call": {
+   "catArchitecture.openDoor": [
+    "watch",
+    false
+   ],
+   "player.teleport": [
+    216.6,
+    37.2
+   ]
+  }
+ },
+ "doors_guest_night": {
+  "pos": [
+   170.85,
+   56.66
+  ],
+  "time": 22.5,
+  "frames": 50,
+  "az": 0.9,
+  "el": 0.3,
+  "dist": 10
+ },
+ "doors_guest_inside": {
+  "free": [
+   169.16,
+   55.81
+  ],
+  "y": 7.4,
+  "time": 14,
+  "frames": 50,
+  "az": 3.93,
+  "el": 0.3,
+  "dist": 5.5,
+  "fov": 55,
+  "call": {
+   "catArchitecture.openDoor": [
+    "guest",
+    false
+   ],
+   "player.teleport": [
+    167.3,
+    53.2
+   ]
+  }
+ },
+ "doors_cat_watch_inside": {
+  "free": [
+   214.0,
+   33.6
+  ],
+  "y": 12.9,
+  "time": 11,
+  "frames": 50,
+  "az": 0.35,
+  "el": 0.62,
+  "dist": 7.5,
+  "fov": 50,
+  "call": {
+   "catArchitecture.openDoor": [
+    "watch",
+    false
+   ],
+   "player.teleport": [
+    213.2,
+    32.0
+   ]
+  }
+ },
+ "doors_cat_watch_inside_open": {
+  "free": [
+   214.0,
+   33.6
+  ],
+  "y": 12.9,
+  "time": 11,
+  "frames": 50,
+  "az": 0.35,
+  "el": 0.62,
+  "dist": 7.5,
+  "fov": 50,
+  "call": {
+   "catArchitecture.openDoor": [
+    "watch",
+    true
+   ],
+   "player.teleport": [
+    213.2,
+    32.0
+   ]
+  }
  }
 }

@@ -71,6 +71,12 @@ export function buildSquare(T) {
   // to stand here the wrong way round — the highest one furthest out, 0.56 u
   // proud of the square and walked straight through — under a narrow stoop.)
   const pSteps = T.stoop(pf, 0, PD / 2, PW * 0.62, pY, { wall: PT, gap: 3.7, color: 0xd8cbb0, floor: sqFloor });
+  // the doorstep: a mat for the whole house, and the house's prints up the flight
+  T.doorstep(pf, 0, PD / 2, {
+    steps: pSteps, sw: PW * 0.62, matW: 3.0, mat: ['ALL RISE', '(then nap)'], moss: true,
+    trails: [{ from: [-2.2, PD / 2 + 5.6], to: [-0.6, PD / 2 + 1.2], n: 8, s: 0.85 },
+      { from: [2.8, PD / 2 + 5.2], to: [0.7, PD / 2 + 1.3], n: 7, s: 0.8 }],
+  });
   // portico: six columns and a wide central bay that frames the chamber doors
   // and their arch. (Eight at an even 2.6 put the middle pair 1.5 apart right
   // in front of a 3.7-wide doorway: the way in was a slot between two shafts
@@ -157,7 +163,7 @@ export function buildSquare(T) {
   // of the gangway through the front benches (interiors.js)
   T.door({
     id: 'purrliament', room: chamber, y: pf.y, ry: 0, w: 3.7, color: 0x7a5230, field: 0x8a5f38, flap: 0xe8d9b8, double: true,
-    x: pf.px(0, PD / 2 + 0.4), z: pf.pz(0, PD / 2 + 0.4), inset: 0.4 + PT, sill: pY, top: pf.y + 5.1,
+    x: pf.px(0, PD / 2 + 0.4), z: pf.pz(0, PD / 2 + 0.4), inset: 0.4 + PT, wall: PT, sill: pY, top: pf.y + 5.1,
     say: 'the chamber doors are never locked. "the house sits," says a cat, "more or less permanently."', speaker: 'PURRLIAMENT',
   });
   T.roomDetail('purrliament', () => purrliamentInterior(T, frame(pf.x, pY, pf.z, 0), { hw: (PW - PT * 2) / 2, hd: (PD - PT * 2) / 2 }));

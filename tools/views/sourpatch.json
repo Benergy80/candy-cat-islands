@@ -586,7 +586,7 @@
    -26.5
   ],
   "y": 9.3,
-  "time": 18.98,
+  "time": 19.1,
   "frames": 45,
   "az": 3.78,
   "el": 0.22,
@@ -609,7 +609,7 @@
    -47
   ],
   "y": 8.0,
-  "time": 20.7,
+  "time": 19.956,
   "frames": 45,
   "az": -2.3,
   "el": 0.75,
@@ -622,7 +622,7 @@
     -30.0
    ],
    "sourPatch.debug.ritual": [
-    27.5
+    16.7
    ]
   }
  },
@@ -632,7 +632,7 @@
    -33.1
   ],
   "y": 7.1,
-  "time": 21.3,
+  "time": 20.148,
   "frames": 24,
   "az": -0.61,
   "el": 0.08,
@@ -645,7 +645,7 @@
     -30.5
    ],
    "sourPatch.debug.ritual": [
-    35.0
+    19.8
    ],
    "sourPatch.debug.faceVisitor": [
     -218,
@@ -659,7 +659,7 @@
    -33.1
   ],
   "y": 7.1,
-  "time": 21.46,
+  "time": 20.316,
   "frames": 36,
   "az": -0.61,
   "el": 0.08,
@@ -672,7 +672,7 @@
     -30.5
    ],
    "sourPatch.debug.ritual": [
-    37.0
+    21.5
    ],
    "sourPatch.debug.faceVisitor": [
     -218,
@@ -686,7 +686,7 @@
    -36.6
   ],
   "y": 6.9,
-  "time": 20.26,
+  "time": 19.756,
   "frames": 36,
   "az": -0.5,
   "el": 0.5,
@@ -699,7 +699,7 @@
     -34.4
    ],
    "sourPatch.debug.ritual": [
-    22
+    14.5
    ],
    "sourPatch.debug.faceVisitor": [
     -218,

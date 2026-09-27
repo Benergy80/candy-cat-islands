@@ -120,9 +120,39 @@ export function doorLeaf(b, f, lx, lz, W, H, leaf, o = {}) {
   const X = (a, c) => f.px(a, c), Z = (a, c) => f.pz(a, c);
   b.box(X(lx, lz + 0.18), f.y, Z(lx, lz + 0.18), W - 0.12, H - 0.1, 0.12, leaf, { ry, ao: o.ao ?? 0.5, aoBase: f.y });
   for (let i = 0; i < 3; i++) b.box(X(lx, lz + 0.25), f.y + 0.5 + i * (H - 1.1) / 2.6, Z(lx, lz + 0.25), W - 0.55, 0.11, 0.04, 0x000000, { ry, ao: 0, shade: 0.0001 });
-  // cat flap (the part that actually gets used)
+  // cat flap (the part that actually gets used): a dark seal round a smoked
+  // flap in a brass frame, a glint along its top and a worn paw print in the
+  // door's o.flap colour where every cat in the street has pushed it. (It was
+  // one plain cream card, tilted 0.12 rad in the door's plane: a blank white
+  // placeholder that stuck out at an angle when seen from the side.)
   b.box(X(lx, lz + 0.26), f.y + 0.06, Z(lx, lz + 0.26), 1.0, 0.9, 0.08, 0x2a2119, { ry, ao: 0 });
-  b.box(X(lx, lz + 0.3), f.y + 0.12, Z(lx, lz + 0.3), 0.86, 0.76, 0.06, o.flap ?? 0xe8d9b8, { ry, ao: 0, rz: o.flapTilt ?? 0.12 });
+  catFlap(b, (a, c) => X(lx + a, lz + c), (a, c) => Z(lx + a, lz + c), f.y + 0.12, 0.3, 0.86, 0.76, ry, o.flap ?? 0xe8d9b8, o.brass ?? 0xd2a445, 3);
+}
+
+/**
+ * A cat flap's face, authored on a door's outer face: its frame (brass bars
+ * round the opening), the smoked flap inside it, a glint along the flap's top
+ * edge and a paw print (a pad and `toes` toes) worn into it in `paw`.
+ * X(a, c) / Z(a, c) map (along the door, out of it) to world x / z, with c = 0
+ * on the flap's own face; y0 is the flap's foot, w × h its size, ry the yaw.
+ * Every piece stands ≤ 0.035 proud of the face (the leaf colliders allow 0.09).
+ */
+export function catFlap(b, X, Z, y0, zf, w, h, ry, paw, brass, toes = 4) {
+  const SMOKE = 0x3d3129, bw = 0.045;
+  b.box(X(0, zf), y0, Z(0, zf), w - 0.02, h, 0.02, SMOKE, { ry, ao: 0 });                                    // the flap
+  b.box(X(0, zf + 0.011), y0 + h - 0.1, Z(0, zf + 0.011), w - 0.1, 0.035, 0.004, 0x9a8a7c, { ry, ao: 0 });     // its glint
+  for (const s of [-1, 1]) b.box(X(s * (w / 2 - bw / 2), zf + 0.006), y0 - 0.01, Z(s * (w / 2 - bw / 2), zf + 0.006), bw, h + 0.02, 0.03, brass, { ry, ao: 0, shade: 0.9 });
+  b.box(X(0, zf + 0.006), y0 + h - bw + 0.01, Z(0, zf + 0.006), w, bw, 0.03, brass, { ry, ao: 0 });            // top bar: the hinge
+  b.box(X(0, zf + 0.006), y0 - 0.01, Z(0, zf + 0.006), w, bw, 0.03, brass, { ry, ao: 0, shade: 0.8 });          // bottom bar
+  // the paw print: a pad and its toes, flattened against the flap
+  // (each pad a one-ring dome turned to face out of the door: a flat fan of
+  // 6-7 triangles, 31 for the whole print)
+  const pr = Math.min(w, h) * 0.13, py = y0 + h * 0.4, o = { ry, rx: Math.PI / 2, rings: 1, phiLength: Math.PI / 2, ao: 0 };
+  b.sph(X(0, zf + 0.01), py, Z(0, zf + 0.01), pr, paw, { ...o, seg: 7, sx: 1.12, sy: 0.25, sz: 0.9 });
+  for (let i = 0; i < toes; i++) {
+    const a = toes === 1 ? 0 : -0.95 + (1.9 * i) / (toes - 1), tr = pr * 0.42;
+    b.sph(X(Math.sin(a) * pr * 1.65, zf + 0.01), py + Math.cos(a) * pr * 1.55, Z(Math.sin(a) * pr * 1.65, zf + 0.01), tr, paw, { ...o, seg: 6, sy: 0.3, sz: 1.15 });
+  }
 }
 
 /** The Cat Island doorway: a generous cat door with a cat-flap, plus the
@@ -241,8 +271,20 @@ export function doorUnit(b, f, lx, lz, o = {}) {
   } else {
     // surround
     b.box(X(lx, lz + 0.02), f.y, Z(lx, lz + 0.02), W + 0.5, H + 0.45, 0.24, sur, { ry, ao: 0.5, aoBase: f.y });
-    // arch head
-    b.cyl(X(lx, lz + 0.08), f.y + H + 0.2, Z(lx, lz + 0.08), (W + 0.5) / 2, (W + 0.5) / 2, 0.24, sur, { ry, rx: Math.PI / 2, seg: 14, theta: Math.PI, thetaStart: 0, ao: 0 });
+    // arch head: the UPPER half of the disc (thetaStart PI/2 once rx has turned
+    // it into the wall plane — see the enterable branch above). thetaStart 0 was
+    // the half BESIDE the centre: a half-moon standing on its side, hung across
+    // the top of every solid door on the island like a paper fin.
+    // o.headRise < (W + 0.5) / 2 makes it a SEGMENTAL head (a flatter arc of a
+    // bigger circle, its sector's point sunk into the surround behind its face)
+    // where a full half-round would climb into a sign board or the eaves.
+    // (o.headRise 0: no head at all — a flat-topped surround under a sign board)
+    const c = (W + 0.5) / 2, rise = Math.min(c, o.headRise ?? c);
+    if (rise < 0.05) { /* flat head */ } else if (rise >= c - 1e-6) b.cyl(X(lx, lz + 0.08), f.y + H + 0.2, Z(lx, lz + 0.08), c, c, 0.24, sur, { ry, rx: Math.PI / 2, seg: 14, theta: Math.PI, thetaStart: Math.PI / 2, ao: 0 });
+    else {
+      const R = (c * c + rise * rise) / (2 * rise), al = Math.asin(c / R), ys = f.y + H + 0.45;
+      b.cyl(X(lx, lz - 0.1), ys + rise - R, Z(lx, lz - 0.1), R, R, 0.21, sur, { ry, rx: Math.PI / 2, seg: 10, theta: al * 2, thetaStart: Math.PI - al, ao: 0 });
+    }
   }
   // dark recess then the leaf (an ENTERABLE door leaves the leaf to door.js,
   // which hangs it on a hinge and swings it)
@@ -335,10 +377,15 @@ export function hungLeaf(p, o) {
       panel(x0 + fw / 2 + i * (fw + gap), y0 + k * (fh + gap), fw, fh);
     }
   }
-  // the cat flap, low and centred, a hood over it on the outside
+  // the cat flap, low and centred, a hood over it on the outside: a dark seal,
+  // then (catFlap) a smoked flap in a brass frame with a glint and a worn paw
+  // print in o.flap on the street side; the room side gets the frame and the
+  // smoke without the print (it was a plain cream card: a blank placeholder)
   const fx = W / 2, fwid = Math.min(0.62, W * 0.34);
   for (const zf of FACES) box(fx, 0.12, on(zf, 0.01), fwid + 0.1, 0.58, 0.02, 0x2a2119);
-  box(fx, 0.17, on(th, 0.024), fwid, 0.48, 0.02, o.flap ?? 0xe8d9b8, { rz: 0.0 });
+  const fX = (zSign) => (a, c) => X(fx + a * zSign), fZ = (zSign) => (a, c) => Z0 + zSign * c;
+  catFlap(p, fX(1), fZ(1), 0.17, th + 0.02, fwid, 0.48, 0, o.flap ?? 0xe8d9b8, brass, 4);
+  catFlap(p, fX(-1), fZ(-1), 0.17, 0.014, fwid, 0.48, Math.PI, 0x3d3129, brass, 0);
   box(fx, 0.69, on(th, 0.04), fwid + 0.16, 0.05, 0.08, o.trim ?? col, { shade: 0.8 });
   // brass: a rose and a knob on each face at the latch edge, hand height
   const kx = W - 0.17, ky = 1.02;
@@ -349,6 +396,13 @@ export function hungLeaf(p, o) {
   }
   // two hinge knuckles on the hinge edge, on the side it swings to
   for (const ky2 of [0.32, H - 0.62]) p.cyl(X(0), ky2, Z0 - 0.02, 0.055, 0.055, 0.3, brass, { seg: 8, ao: 0 });
+  // o.straps (a colour): iron strap hinges across the outer face from those
+  // knuckles, proud of the raised panels, three rivets each — a door that
+  // swings OUT from a curved wall has to show what it hangs on
+  if (o.straps) for (const ky2 of [0.32, H - 0.62]) {
+    box(W * 0.31, ky2 + 0.1, on(th, 0.04), W * 0.62, 0.1, 0.016, o.straps);
+    for (const rx of [0.1, W * 0.33, W * 0.58]) p.sph(X(rx), ky2 + 0.15, Z0 + on(th, 0.05), 0.024, o.straps, { seg: 5, rings: 3, ao: 0 });
+  }
 }
 
 // ── masses ───────────────────────────────────────────────────────────────────
@@ -457,8 +511,18 @@ export function block(b, f, w, h, d, color, o = {}) {
       });
     } else b.box(f.x, py, f.z, w + 0.3, ph, d + 0.3, pc, { ry, ...pAO });
   }
-  if (o.quoins) for (const sx of [-1, 1]) for (let i = 0; i < Math.floor(h / 1.55); i++) {
-    const qw = i % 2 ? 0.55 : 0.85;
+  // A corner whose wide quoins would come within 0.55 of a front doorway's
+  // edge — i.e. into its casing (the Guest House: its wide stones stopped 5 cm
+  // short of the archivolt, a cream box with a dark slot beside the door
+  // jamb) — gets stones half as wide.
+  // (sx·(xi − ge): how far the wide stone's inner edge xi stands beyond the
+  // gap's edge ge on that side, toward the corner)
+  const qk = (sx) => {
+    const xi = sx * (w / 2 - 0.85 + 0.06);
+    return (o.hollow?.gaps || []).some((g) => (g.face ?? 0) === 0 && !g.y0 && sx * (xi - (g.lx + sx * g.w / 2)) < 0.55) ? 0.5 : 1;
+  };
+  if (o.quoins) for (const sx of [-1, 1]) for (let i = 0, k = qk(sx); i < Math.floor(h / 1.55); i++) {
+    const qw = (i % 2 ? 0.55 : 0.85) * k;
     b.box(X(sx * (w / 2 - qw / 2 + 0.06), 0), f.y + 0.6 + i * 1.55, Z(sx * (w / 2 - qw / 2 + 0.06), 0), qw, 0.72, d + 0.12, o.quoinColor ?? PAL.stoneLight, { ry, ao: 0.3, aoBase: f.y });
   }
   if (o.band !== false) b.box(f.x, f.y + h - 0.32, f.z, w + 0.36, 0.34, d + 0.36, o.bandColor ?? PAL.stoneLight, { ry, ao: 0 });
@@ -965,6 +1029,23 @@ function discSurface(cx, cz, r, top, R, rimY, tube, n, ts) {
   };
 }
 
+/** A kit box whose TOP is the plane y = top + ga·v + gb·u through (x, top, z),
+ *  v along the yaw ry (kit local Z) and u across it (kit local X); `h` deep
+ *  below that plane, its footprint w × d measured on the ground. The top
+ *  face's normals are set straight up (the plane is a few degrees off level:
+ *  the paving keeps the shading a level slab always had). */
+function tiltBox(b, x, top, z, w, h, d, ry, ga, gb, color) {
+  const tx = -Math.atan(ga), tz = Math.atan(gb * Math.cos(tx));
+  const c = Math.cos(ry), s = Math.sin(ry);
+  // the top face's unit normal: Rz(tz) then Rx(tx) of +Y, then the yaw
+  const nlx = -Math.sin(tz), nly = Math.cos(tz) * Math.cos(tx), nlz = Math.cos(tz) * Math.sin(tx);
+  const nwx = nlx * c + nlz * s, nwz = -nlx * s + nlz * c;
+  const g = b.box(x - nwx * h, top - nly * h, z - nwz * h, w / Math.cos(tz), h, d / Math.cos(tx), color, { ry, rx: tx, rz: tz, ao: 0 });
+  const nr = g?.attributes?.normal;
+  if (nr) for (let i = 0; i < nr.count; i++) if (Math.abs(nr.getX(i) - nwx) < 1e-3 && Math.abs(nr.getY(i) - nly) < 1e-3 && Math.abs(nr.getZ(i) - nwz) < 1e-3) nr.setXYZ(i, 0, 1, 0);
+  return g;
+}
+
 /**
  * A raised paved ribbon following a polyline (street / quay / path).
  *  o.cuts  [{ f, x0, x1, z }]: a building face the paving STOPS at. Where a
@@ -973,24 +1054,92 @@ function discSurface(cx, cz, r, top, R, rimY, tube, n, ts) {
  *          (Main Street's sidewalk ran 1.4 u under every shop: inside a hollow
  *          shop it stood through the threshold and 0.23 over the boards.)
  *  o.out   an array: every paved piece and kerb is pushed as
- *          { x, z, c, s, hw, hd, top } (centre, kit-yaw cos/sin, half extents
- *          across / along, top y), so the caller can make it WALKABLE (T.paved).
+ *          { x, z, c, s, hw, hd, top, ga, gb } (centre, kit-yaw cos/sin, half
+ *          extents across / along, top y at the centre, and its slope along /
+ *          across), so the caller can make it WALKABLE (T.paved).
+ *  o.surf  (x, z) → the top the paving should have there. Without it every piece
+ *          is laid FLAT at the highest of yAt along its run + o.lift (a stair of
+ *          0.1–0.8 u risers on a hillside). With it every piece is TILTED to the
+ *          plane through o.surf at its four corners, so the paving follows the
+ *          ground and meets its neighbours at the joint (within a centimetre or
+ *          two across): no riser, no step, nothing for a walker to hop.
+ *          Kerbs then stand o.kerbH (0.15) over the piece's own plane at its
+ *          edge, tilted with it: a kerb is exactly kerbH over the paving it lines.
+ *  o.kerbSides [u0, u1]: which edges get a kerb (default both when o.kerb).
  */
 export function ribbon(b, pts, width, yAt, color, o = {}) {
   const th = o.th ?? 0.32, lift = o.lift ?? 0.1, out = o.out, cuts = o.cuts, KW = 0.34;
   const kerbColor = o.kerbColor ?? CAT.cobbleDark;
+  const surf = o.surf, KH = o.kerbH ?? 0.15;
+  const kSides = o.kerbSides ?? [!!o.kerb, !!o.kerb];
+  // BENDS (o.surf). Where the polyline turns, the square-ended pieces either
+  // side of the vertex leave a wedge of bare ground on the OUTSIDE (0.56 u wide
+  // at a 7.4 u road's kerb for a 14° turn) and cross each other on the INSIDE.
+  // reach(i) → { e, o, t } for vertex i: the outer half of the width (o: −1 |
+  // +1, a turn d > 0 bends toward +u so −u is outside) runs on e past the
+  // vertex, with its kerb; on the inside a kerb stops t short of its run's end,
+  // at the bisector where it meets the next run's kerb (run on, it stood a 0.15
+  // lip across the other run's paving). The plane fit's mitre corners below
+  // make the two runs' surfaces agree along the bisector.
+  const yaw = (i) => Math.atan2(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+  const reach = (i) => {
+    if (!surf || i <= 0 || i >= pts.length - 1) return { e: 0, o: 1, t: 0 };
+    let d = yaw(i) - yaw(i - 1); while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
+    const tn = Math.tan(Math.abs(d) / 2);
+    return { e: Math.max(0, (width / 2 + KW) * tn - 0.1), o: d > 0 ? -1 : 1, t: tn > 1e-4 ? (width / 2 - KW / 2) * tn + 0.155 : 0 };
+  };
+  // the mitre at interior vertex i: the across vector (+u) of the bisector,
+  // scaled so a point u along it is |u| off both runs' centre lines
+  const mitre = (i) => {
+    if (i <= 0 || i >= pts.length - 1) return null;
+    const y1 = yaw(i - 1), y2 = yaw(i), ax1 = Math.cos(y1), az1 = -Math.sin(y1);
+    let bx = ax1 + Math.cos(y2), bz = az1 - Math.sin(y2); const l = Math.hypot(bx, bz) || 1; bx /= l; bz /= l;
+    const kk = 1 / Math.max(0.3, bx * ax1 + bz * az1);
+    return [bx * kk, bz * kk];
+  };
+  const runOn = (v0, v1, o) => [v0, v1, o < 0 ? -width / 2 : 0, o < 0 ? 0 : width / 2, o < 0 ? kSides[0] : false, o < 0 ? false : kSides[1]];
   for (let i = 0; i < pts.length - 1; i++) {
     const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
     const len = Math.hypot(bx - ax, bz - az), ry = Math.atan2(bx - ax, bz - az);
     const c = Math.cos(ry), s = Math.sin(ry);            // across = (c, -s), along = (s, c)
     const segs = Math.max(1, Math.round(len / (o.seg ?? 5)));
+    const eA = reach(i), eB = reach(i + 1);
     for (let k = 0; k < segs; k++) {
       const t0 = k / segs, t1 = (k + 1) / segs, tm = (t0 + t1) / 2;
       const mx = ax + (bx - ax) * tm, mz = az + (bz - az) * tm;
-      const y = Math.max(yAt(mx, mz), yAt(ax + (bx - ax) * t0, az + (bz - az) * t0), yAt(ax + (bx - ax) * t1, az + (bz - az) * t1)) + lift;
-      const L = len / segs + 0.35;
+      const y = surf ? 0 : Math.max(yAt(mx, mz), yAt(ax + (bx - ax) * t0, az + (bz - az) * t0), yAt(ax + (bx - ax) * t1, az + (bz - az) * t1)) + lift;
+      const L = len / segs + 0.35, Lt = len / segs;
       // pieces along the run: [v0, v1] along, [u0, u1] across, kerb flags
-      let pcs = [[-L / 2, L / 2, -width / 2, width / 2, !!o.kerb, !!o.kerb]];
+      let pcs = [[-L / 2, L / 2, -width / 2, width / 2, kSides[0], kSides[1]]];
+      if (k === 0 && eA.e > 0.02) pcs.push(runOn(-L / 2 - eA.e, -L / 2 + 0.02, eA.o));
+      if (k === segs - 1 && eB.e > 0.02) pcs.push(runOn(L / 2 - 0.02, L / 2 + eB.e, eB.o));
+      // (surf) ONE plane per piece, the least-squares fit through o.surf at its
+      // four corners (the run's own extent, not the overlap), and every
+      // sub-piece — a cut's trims and fillers, a run-on — lies in it, so they
+      // meet without a seam. At a bend the end corners are taken on the MITRE
+      // line through the vertex, which the next run's first piece shares, so
+      // the two planes agree along it (to the ground's twist); square-cut ends
+      // read the ground up to |u|·sin(turn) apart and stood 0.05–0.1 apart.
+      let P0 = 0, GA = 0, GB = 0;
+      if (surf) {
+        const Q = [];
+        for (const [end, vv] of [[0, -Lt / 2], [1, Lt / 2]]) {
+          const vi = i + end, mt = (end === 0 ? k === 0 : k === segs - 1) ? mitre(vi) : null;
+          for (const u of [-width / 2, width / 2]) {
+            const x = mt ? pts[vi][0] + mt[0] * u : mx + s * vv + c * u, z = mt ? pts[vi][1] + mt[1] * u : mz + c * vv - s * u;
+            Q.push([(x - mx) * s + (z - mz) * c, (x - mx) * c - (z - mz) * s, surf(x, z)]);
+          }
+        }
+        // least squares h = P0 + GA·v + GB·u over the four corners
+        let n = 0, sv = 0, su = 0, svv = 0, suu = 0, suv = 0, sh = 0, svh = 0, suh = 0;
+        for (const [v, u, h] of Q) { n++; sv += v; su += u; svv += v * v; suu += u * u; suv += u * v; sh += h; svh += v * h; suh += u * h; }
+        const det = n * (svv * suu - suv * suv) - sv * (sv * suu - suv * su) + su * (sv * suv - svv * su);
+        if (Math.abs(det) > 1e-9) {
+          P0 = (sh * (svv * suu - suv * suv) - sv * (svh * suu - suv * suh) + su * (svh * suv - svv * suh)) / det;
+          GA = (n * (svh * suu - suv * suh) - sh * (sv * suu - suv * su) + su * (sv * suh - svh * su)) / det;
+          GB = (n * (svv * suh - svh * suv) - sv * (sv * suh - svh * su) + sh * (sv * suv - svv * su)) / det;
+        } else P0 = sh / n;
+      }
       if (cuts) for (const q of cuts) {
         const e0x = q.f.px(q.x0, q.z), e0z = q.f.pz(q.x0, q.z), e1x = q.f.px(q.x1, q.z), e1z = q.f.pz(q.x1, q.z);
         const v0q = (e0x - mx) * s + (e0z - mz) * c, v1q = (e1x - mx) * s + (e1z - mz) * c;
@@ -1023,6 +1172,33 @@ export function ribbon(b, pts, width, yAt, color, o = {}) {
       for (const [v0, v1, u0, u1, k0, k1, cut] of pcs) {
         const cv = (v0 + v1) / 2, cu = (u0 + u1) / 2, pl = v1 - v0;
         const px = mx + s * cv + c * cu, pz = mz + c * cv - s * cu;
+        if (surf) {
+          const ga = GA, gb = GB, top = P0 + GA * cv + GB * cu;
+          tiltBox(b, px, top, pz, u1 - u0, th, pl, ry, ga, gb, color);
+          if (out) out.push({ x: px, z: pz, c, s, hw: (u1 - u0) / 2, hd: pl / 2, top, ga, gb });
+          if (cut) {
+            const { q, xL, xH, dep } = cut, fw = Math.abs(xH - xL);
+            if (fw > 0.02 && dep > 0.02) {
+              const xm = (xL + xH) / 2, zm = q.z + dep / 2, fx = q.f.px(xm, zm), fz = q.f.pz(xm, zm);
+              // the filler laid square to the face sits in the piece's plane
+              const du = (fx - px) * c - (fz - pz) * s, dv = (fx - px) * s + (fz - pz) * c, ft = top + ga * dv + gb * du;
+              b.box(fx, ft - th, fz, fw, th, dep, color, { ry: q.f.ry, ao: 0 });
+              if (out) out.push({ x: fx, z: fz, c: Math.cos(q.f.ry), s: Math.sin(q.f.ry), hw: fw / 2, hd: dep / 2, top: ft });
+            }
+          }
+          for (const [on, u, sd] of [[k0, u0, -1], [k1, u1, 1]]) {
+            if (!on) continue;
+            // (an inside kerb stops at the bisector: sd is its side, o the outside)
+            const kv0 = Math.max(v0, k === 0 && eA.o !== sd ? -L / 2 + eA.t : -Infinity);
+            const kv1 = Math.min(v1, k === segs - 1 && eB.o !== sd ? L / 2 - eB.t : Infinity);
+            if (kv1 - kv0 < 0.05) continue;
+            const kc = (kv0 + kv1) / 2, kl = kv1 - kv0;
+            const kx = mx + s * kc + c * u, kz = mz + c * kc - s * u, kt = top + ga * (kc - cv) + gb * (u - cu) + KH;
+            tiltBox(b, kx, kt, kz, KW, th + KH + 0.06, kl, ry, ga, 0, kerbColor);
+            if (out) out.push({ x: kx, z: kz, c, s, hw: KW / 2, hd: kl / 2, top: kt, ga, gb: 0 });
+          }
+          continue;
+        }
         b.box(px, y - th, pz, u1 - u0, th, pl, color, { ry, ao: 0 });
         if (out) out.push({ x: px, z: pz, c, s, hw: (u1 - u0) / 2, hd: pl / 2, top: y });
         if (cut) {
